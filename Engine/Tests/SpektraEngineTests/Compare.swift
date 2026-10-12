@@ -22,7 +22,8 @@ func golden(_ caseName: String, _ tap: String) throws -> NPYArray {
 
 /// The golden cases `tools/golden.py` writes: every film pair on the chart and on the photo.
 let goldenCases = ["chart", "photo"].flatMap { input in
-    ["kodak_portra_400-kodak_portra_endura", "kodak_vision3_500t-kodak_2383", "fujifilm_velvia_100-scan"]
+    ["kodak_portra_400-kodak_portra_endura", "kodak_vision3_500t-kodak_2383", "fujifilm_velvia_100-scan",
+     "kodak_portra_400-scan"]
         .map { "\(input)-\($0)" }
 }
 
