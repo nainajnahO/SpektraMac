@@ -33,6 +33,6 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
     let rendered = try await Engine().render(image)
     #expect(rendered.width == 2 && rendered.height == 1)
 
-    let display = try #require(rendered.displayImage(in: RGBImage.workingColorSpace))
+    let display = try #require(rendered.displayImage(in: Engine.outputColorSpace))
     #expect(display.width == 2 && display.height == 1)
 }

@@ -9,7 +9,7 @@ Writes Engine/Sources/SpektraEngine/Resources/ (committed, it ships with the eng
   on Spektrafilm's 380-780 nm / 5 nm grid exactly as the Python code computes them:
   CIE 1931 2-degree CMFs, the normalised illuminants used by profiles and the enlarger, the KG3
   heat filter and lens transmission (Akima-resampled), the analytic dichroic CMY filters, RGB
-  colour spaces (RGB->XYZ matrix, whitepoint, transfer function), chromatic-adaptation matrices,
+  colour spaces (RGB<->XYZ matrices, whitepoint, transfer function), chromatic-adaptation matrices,
   and the closed spectral-locus polygon the input gamut compression uses.
 """
 
@@ -70,6 +70,7 @@ def main():
         space = colour.RGB_COLOURSPACES[name]
         colour_spaces[name] = {
             "rgbToXYZ": space.matrix_RGB_to_XYZ.tolist(),
+            "xyzToRGB": space.matrix_XYZ_to_RGB.tolist(),
             "whitepoint": space.whitepoint.tolist(),
             **transfer,
         }

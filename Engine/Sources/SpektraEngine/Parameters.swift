@@ -30,6 +30,11 @@ public struct Parameters: Codable, Sendable {
         public var inputColorSpace = "ProPhoto RGB"
         public var inputCctfDecoding = false
         public var inputGamutCompress = InputGamutCompressSpec()
+        /// A key of ``Tables/colourSpaces``.
+        public var outputColorSpace = "sRGB"
+        public var outputCctfEncoding = true
+        /// Scan the developed film itself (slides, or viewing the negative) instead of a print.
+        public var scanFilm = false
     }
 
     /// Spektrafilm's `InputGamutCompressSpec`.
