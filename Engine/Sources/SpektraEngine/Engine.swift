@@ -1,3 +1,4 @@
+import CoreGraphics
 import Dispatch
 
 /// Runs the simulation for the app. A render waits on the GPU, so the actor runs on its own serial
@@ -8,6 +9,9 @@ public actor Engine {
 
     private let gpu: GPU
     private let simulation: Simulation
+
+    /// The colour space ``render(_:)`` returns pixels in (linear sRGB, Spektrafilm's default output).
+    public static let outputColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
 
     public init() throws {
         gpu = try GPU()
@@ -20,17 +24,10 @@ public actor Engine {
         simulation = try Simulation(parameters: parameters, film: film, print: print, gpu: gpu, tables: Tables.load())
     }
 
-    /// The simulation of `image`, as far as it is ported (PLAN.md): today the developed negative,
-    /// shown as each dye layer's transmittance 10^−density in the working space. A rough view —
-    /// the spectral scan of the negative comes with the scanning stage.
+    /// The simulation of `image`, as far as it is ported (PLAN.md): today the scanned print as
+    /// linear RGB in ``outputColorSpace``, before output gamut compression, sharpening and encoding.
     public func render(_ image: RGBImage) throws -> RGBImage {
-        let output = try gpu.run { encoder in
-            let density = simulation.encodeDevelop(
-                simulation.encodeExpose(simulation.encodePreprocess(image, on: encoder), on: encoder), on: encoder)
-            gpu.encodeScale(on: encoder, input: density, output: density, by: -1)
-            gpu.encodeExp10(on: encoder, input: density, output: density)
-            return density
-        }
+        let output = try gpu.run { simulation.encode(image, on: $0) }
         return RGBImage(width: image.width, height: image.height, pixels: gpu.download(output))
     }
 }

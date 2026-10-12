@@ -25,6 +25,8 @@ public struct Tables: Decodable, Sendable {
     public struct ColourSpace: Decodable, Sendable {
         /// Normalised primary matrix, rows.
         public let rgbToXYZ: [SIMD3<Double>]
+        /// Its inverse as colour-science stores it, rows.
+        public let xyzToRGB: [SIMD3<Double>]
         /// CIE 1931 xy.
         public let whitepoint: SIMD2<Double>
         /// Transfer function: `sRGB`, `gamma`, `BT.2020`, `ROMM RGB` or `linear`.

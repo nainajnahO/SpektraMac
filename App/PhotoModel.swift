@@ -92,7 +92,7 @@ final class PhotoModel {
             do {
                 let output = try await engine.render(source)
                 let image = await Task.detached(priority: .userInitiated) {
-                    output.displayImage(in: RGBImage.workingColorSpace)
+                    output.displayImage(in: Engine.outputColorSpace)
                 }.value
                 guard !Task.isCancelled else { return }
                 displayImage = image

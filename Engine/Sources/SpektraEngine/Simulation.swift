@@ -35,6 +35,12 @@ public struct Simulation {
     let preflashRaw: SIMD3<Double>
     /// The paper's density curves the print develops on (`apply_print_curves_morph`).
     let printDevelopCurves: [SIMD3<Double>]
+    /// Per band, the scanned profile's dye and base densities (the print, or the film when
+    /// scanning film), and the scan illuminant × CMFs normalised to Y = 1 for the illuminant.
+    let scanDyeBands: [SIMD4<Float>]
+    let scanCMFBands: [SIMD4<Float>]
+    /// Scan XYZ → output RGB: CAT02 from the scan illuminant's white, then the space's matrix.
+    let scanToOutput: simd_double3x3
 
     public struct UnknownColourSpace: Error, CustomStringConvertible {
         public let name: String
@@ -77,10 +83,14 @@ public struct Simulation {
         }
         let lamp = tables.illuminants[parameters.enlarger.illuminant]!
         let light = enlargerLight(lamp, filters: parameters.enlarger.printFilters, dichroics: tables.dichroicFilters)
-        let valid = (0..<lamp.count).filter { band in
-            let density = film.data.channelDensity[band]
-            return !(density.x.isNaN || density.y.isNaN || density.z.isNaN || film.data.baseDensity[band].isNaN)
+        // Bands where a profile's density data is missing transmit nothing (density_to_light).
+        func validBands(_ profile: Profile) -> [Int] {
+            profile.data.channelDensity.indices.filter { band in
+                let density = profile.data.channelDensity[band]
+                return !(density.x.isNaN || density.y.isNaN || density.z.isNaN || profile.data.baseDensity[band].isNaN)
+            }
         }
+        let valid = validBands(film)
         printFilmBands = valid.map { band in
             let density = SIMD3<Float>(film.data.channelDensity[band])
             return SIMD4(density, Float(film.data.baseDensity[band]))
@@ -128,6 +138,21 @@ public struct Simulation {
         printDevelopCurves = printCurves(print.data.densityCurvesModel, logExposure: print.data.logExposure,
                                          morph: parameters.printRender.densityCurvesMorph,
                                          positive: print.info.type == .positive)
+
+        // Scanning constants (ScanningStage._return_callable_cmy_to_log_xyz, _density_to_rgb).
+        let scanned = parameters.io.scanFilm ? film : print
+        guard let outputSpace = tables.colourSpaces[parameters.io.outputColorSpace] else {
+            throw UnknownColourSpace(name: parameters.io.outputColorSpace)
+        }
+        let scanLight = tables.illuminants[scanned.info.viewingIlluminant]!
+        let normalization = zip(scanLight, tables.cmfs).reduce(0) { $0 + $1.0 * $1.1.y }
+        let scanBands = validBands(scanned)
+        scanDyeBands = scanBands.map { SIMD4(SIMD3<Float>(scanned.data.channelDensity[$0]), Float(scanned.data.baseDensity[$0])) }
+        scanCMFBands = scanBands.map { SIMD4(SIMD3<Float>(scanLight[$0] * tables.cmfs[$0] / normalization), 0) }
+        let scanWhite = zip(scanLight, tables.cmfs).reduce(SIMD3<Double>.zero) { $0 + $1.0 * $1.1 } / normalization
+        scanToOutput = simd_double3x3(rows: outputSpace.xyzToRGB)
+            * vonKries(from: SIMD2(scanWhite.x, scanWhite.y) / scanWhite.sum(), to: outputSpace.whitepoint,
+                       transform: tables.chromaticAdaptation["CAT02"]!)
 
         if enlarger.preflashExposure > 0 {
             let preflashLight = enlargerLight(lamp, filters: enlarger.preflashFilters, dichroics: tables.dichroicFilters)
@@ -275,6 +300,36 @@ extension Simulation {
         gpu.encodeInterpolate(on: encoder, input: logExposure, output: density,
                               axis: print.data.logExposure.map { SIMD3(repeating: $0) }, values: printDevelopCurves)
         return density
+    }
+}
+
+extension Simulation {
+    /// Every ported stage from `rgb_in`: filming, printing (skipped when scanning the film
+    /// itself), scanning.
+    public func encode(_ image: RGBImage, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        let cmyFilm = encodeDevelop(encodeExpose(encodePreprocess(image, on: encoder), on: encoder), on: encoder)
+        guard !parameters.io.scanFilm else { return encodeScan(cmyFilm, on: encoder) }
+        return encodeScan(encodePrintDevelop(encodePrintExpose(cmyFilm, on: encoder), on: encoder), on: encoder)
+    }
+
+    /// `cmy_print` (or `cmy_film` when scanning film) → linear RGB in the output colour space
+    /// (ScanningStage._density_to_rgb before output gamut compression): the dyes viewed under the
+    /// profile's viewing illuminant, integrated to XYZ, adapted (CAT02) and converted to RGB.
+    ///
+    /// Not ported yet: glare (stochastic; off in the golden runs), the scanner's black/white
+    /// correction (off by default), output gamut compression (Days 21–23).
+    public func encodeScan(_ cmy: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        let output = gpu.makeTexture(width: cmy.width, height: cmy.height)
+        var bandCount = UInt32(scanDyeBands.count)
+        let m = scanToOutput
+        var matrix = simd_float3x3(SIMD3<Float>(m.columns.0), SIMD3<Float>(m.columns.1), SIMD3<Float>(m.columns.2))
+        gpu.encode("scan_rgb", on: encoder, textures: [cmy, output], grid: output.size) {
+            $0.setBytes(scanDyeBands, length: scanDyeBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 0)
+            $0.setBytes(scanCMFBands, length: scanCMFBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 1)
+            $0.setBytes(&bandCount, length: 4, index: 2)
+            $0.setBytes(&matrix, length: MemoryLayout<simd_float3x3>.size, index: 3)
+        }
+        return output
     }
 }
 

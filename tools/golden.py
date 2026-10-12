@@ -44,12 +44,15 @@ morph control moved, developer exhaustion 0.4 included (`print_curves_morphed_<p
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
 (tc_lut.npy, 192x192x3), the film density from the run's log_e_film without DIR couplers
-(cmy_film_no_couplers.npy, develop_simple on the normalised curves), and params.json: the digested parameters (profiles by stock name only),
+(cmy_film_no_couplers.npy, develop_simple on the normalised curves), the scanned RGB before output
+gamut compression, blur, unsharp mask and encoding (rgb_uncompressed.npy, the scanning stage's
+_density_to_rgb with compression off), and params.json: the digested parameters (profiles by stock name only),
 pixel_size_um, the measured auto-exposure EV and the tap list.
 """
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import hashlib
 import json
@@ -70,6 +73,7 @@ from spektrafilm.model.diffusion import apply_halation_um
 from spektrafilm.utils.numba_boost_hightlights import boost_highlights
 from spektrafilm.utils.fast_gaussian_filter import fast_exponential_filter, fast_gaussian_filter
 from spektrafilm.utils.fast_interp import fast_interp
+from spektrafilm.utils.gamut_compression import OutputGamutCompressSpec
 from spektrafilm.utils.morph_curves import PrintCurvesMorphParams, apply_print_curves_morph
 from matplotlib.path import Path as MplPath
 from spektrafilm.utils.gamut_compression import _ray_polygon_distance, spectral_locus_xy
@@ -286,8 +290,12 @@ def main():
             no_couplers = develop_simple(taps["log_e_film"], params.film.data.log_exposure,
                                          curves - np.nanmin(curves, axis=0),
                                          gamma_factor=params.film_render.density_curve_gamma)
+            uncompressed_params = copy.deepcopy(params)
+            uncompressed_params.io.output_gamut_compress = OutputGamutCompressSpec(algorithm="off")
+            scanner = SimulationPipeline(uncompressed_params)._scanning_stage
+            uncompressed = scanner._density_to_rgb(taps["cmy_film" if scan_film else "cmy_print"], use_lut=False)
             arrays = dict(taps, tc_lut=pipeline._lut_service.filming_tc_lut_memory,
-                          cmy_film_no_couplers=no_couplers)
+                          cmy_film_no_couplers=no_couplers, rgb_uncompressed=uncompressed)
             for name, array in arrays.items():
                 np.save(case_dir / f"{name}.npy", np.asarray(array, dtype=np.float32))
 
