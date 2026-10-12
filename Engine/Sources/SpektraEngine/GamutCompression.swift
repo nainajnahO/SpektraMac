@@ -1,4 +1,5 @@
 import Foundation
+import Metal
 import simd
 
 /// Spektrafilm's input gamut compression, default `"xy"` algorithm (`compress_xy_radial`): radial
@@ -80,7 +81,8 @@ func quadToTri(_ tc: SIMD2<Double>) -> SIMD2<Double> {
 /// Spektrafilm's output gamut compression, default `"cam16ucs"` algorithm
 /// (`compress_rgb_cam16ucs_chroma`): in CAM16-UCS around the output space's white, lightness above
 /// white rolls off toward it, then chroma is knee-compressed against the largest chroma the output
-/// RGB cube holds at that lightness and hue, C_max(J', h'), a table built once per space.
+/// RGB cube holds at that lightness and hue, C_max(J', h'), a table built once per space. The
+/// per-pixel part runs on the GPU (``GPU/encodeOutputCompression(_:maxChroma:on:input:)``).
 struct OutputGamutCompression {
     /// The table's J' grid, `np.linspace(1, 110, 64)`: J' ≈ 100 at white, a little headroom above.
     static let lightnessGrid = (0..<64).map { $0 == 63 ? 110 : Double($0) * (109.0 / 63) + 1 }
@@ -129,37 +131,53 @@ struct OutputGamutCompression {
         maxChroma = table
     }
 
-    /// `compress_rgb_cam16ucs_chroma` on one linear RGB value of the output space.
-    func compress(_ rgb: SIMD3<Double>) -> SIMD3<Double> {
-        let jab = model.jab(fromXYZ: rgbToXYZ * rgb)
-        var lightness = jab.x
-        if let knee = spec.lightnessCompression {
-            lightness = reinhardKnee(lightness / whiteLightness, knee) * whiteLightness
-        }
-        let (chroma, hue) = (hypot(jab.y, jab.z), atan2(jab.z, jab.y))
-        // fmax: a NaN lookup gives the floor, as in Python.
-        let limit = Double.maximum(maxChroma(lightness: lightness, hue: hue), 1e-9)
-        let compressed = reinhardKnee(chroma / limit, spec.knee) * limit
-        return xyzToRGB * model.xyz(fromJab: SIMD3(lightness, compressed * cos(hue), compressed * sin(hue)))
+    /// The `compress_cam16ucs` kernel's constants, folded from the f64 model into float.
+    var kernelConstants: OutputCompressionConstants {
+        let knee = spec.lightnessCompression ?? [0, 1, 1]
+        return OutputCompressionConstants(
+            toCone: simd_float3x3(simd_double3x3(diagonal: model.dRGB) * model.m16 * (100 * rgbToXYZ)),
+            fromCone: simd_float3x3(xyzToRGB * model.m16Inverse * simd_double3x3(diagonal: 1 / (100 * model.dRGB))),
+            lightnessKnee: SIMD4(SIMD3<Float>(SIMD3(knee[0], knee[1], knee[2])), spec.lightnessCompression == nil ? 0 : 1),
+            chromaKnee: SIMD4(SIMD3<Float>(SIMD3(spec.knee[0], spec.knee[1], spec.knee[2])), 0),
+            fL: Float(model.fL), nBB: Float(model.nBB), whiteA: Float(model.whiteA), cz: Float(CAM16UCS.c * model.z),
+            k: Float(50000 / 13 * CAM16UCS.nC * model.nBB), kN: Float(spow(1.64 - pow(0.29, model.n), 0.73)),
+            fLQuarter: Float(spow(model.fL, 0.25)), whiteLightness: Float(whiteLightness),
+            hueStart: Float(Self.hueGrid[0]), hueStep: Float(Self.hueGrid[1] - Self.hueGrid[0]))
     }
+}
 
-    /// `_c_max_lookup`: bilinear in the table, J' clamped to the grid, h' wrapping around.
-    func maxChroma(lightness: Double, hue: Double) -> Double {
-        guard !lightness.isNaN, !hue.isNaN else { return .nan }
-        let (lightnessGrid, hueGrid) = (Self.lightnessGrid, Self.hueGrid)
-        let clamped = min(max(lightness, lightnessGrid[0]), lightnessGrid[63])
-        let hueIndex = (hue - hueGrid[0]) / (hueGrid[1] - hueGrid[0])
-        let hueLow = (Int(hueIndex.rounded(.down)) % 720 + 720) % 720
-        let hueHigh = (hueLow + 1) % 720
-        let hueFraction = hueIndex - hueIndex.rounded(.down)
-        let lightnessIndex = (clamped - lightnessGrid[0]) / (lightnessGrid[63] - lightnessGrid[0]) * 63
-        let lightnessLow = min(max(Int(lightnessIndex.rounded(.down)), 0), 62)
-        let lightnessFraction = lightnessIndex - Double(lightnessLow)
-        func value(_ i: Int, _ j: Int) -> Double { maxChroma[i * 720 + j] }
-        return value(lightnessLow, hueLow) * (1 - lightnessFraction) * (1 - hueFraction)
-            + value(lightnessLow, hueHigh) * (1 - lightnessFraction) * hueFraction
-            + value(lightnessLow + 1, hueLow) * lightnessFraction * (1 - hueFraction)
-            + value(lightnessLow + 1, hueHigh) * lightnessFraction * hueFraction
+/// `OutputCompression` in GamutCompression.metal (same field order and layout).
+struct OutputCompressionConstants {
+    var toCone: simd_float3x3
+    var fromCone: simd_float3x3
+    /// Threshold, limit, power, and 1 when lightness compression is on.
+    var lightnessKnee: SIMD4<Float>
+    /// Threshold, limit, power.
+    var chromaKnee: SIMD4<Float>
+    var fL, nBB, whiteA, cz: Float
+    var k, kN, fLQuarter, whiteLightness: Float
+    var hueStart, hueStep: Float
+}
+
+extension GPU {
+    /// The output gamut compression per pixel (kernel `compress_cam16ucs`); `maxChroma` holds
+    /// the compression's C_max table as floats.
+    func encodeOutputCompression(_ compression: OutputGamutCompression, maxChroma: any MTLBuffer,
+                                 on encoder: any MTLComputeCommandEncoder, input: any MTLTexture) -> any MTLTexture {
+        let output = makeTexture(width: input.width, height: input.height)
+        var constants = compression.kernelConstants
+        encode("compress_cam16ucs", on: encoder, textures: [input, output], grid: output.size) {
+            $0.setBytes(&constants, length: MemoryLayout<OutputCompressionConstants>.stride, index: 0)
+            $0.setBuffer(maxChroma, offset: 0, index: 1)
+        }
+        return output
+    }
+}
+
+extension simd_float3x3 {
+    /// Rounds each entry to float.
+    init(_ matrix: simd_double3x3) {
+        self.init(SIMD3<Float>(matrix.columns.0), SIMD3<Float>(matrix.columns.1), SIMD3<Float>(matrix.columns.2))
     }
 }
 
@@ -180,21 +198,22 @@ func reinhardKnee(_ d: Double, _ knee: [Double]) -> Double {
 /// has colour appearance models). XYZ has Y = 1 at white; J'a'b' is on colour's 0–100 scale.
 struct CAM16UCS {
     // Average surround (F, c, N_c) and the CAM02-UCS coefficients (c1, c2) of Luo et al. 2006.
-    private static let surroundF = 1.0, c = 0.69, nC = 1.0
-    private static let c1 = 0.007, c2 = 0.0228
-    private static let adaptingLuminance = 64.0, background = 20.0
+    static let surroundF = 1.0, c = 0.69, nC = 1.0
+    static let c1 = 0.007, c2 = 0.0228
+    static let adaptingLuminance = 64.0, background = 20.0
 
     /// The adapting white's XYZ at Y = 1 (`_output_cs_whitepoint_xyz`).
     let white: SIMD3<Double>
-    private let m16: simd_double3x3
-    private let m16Inverse: simd_double3x3
-    private let dRGB: SIMD3<Double>
-    private let fL: Double
-    private let n: Double
+    let m16: simd_double3x3
+    let m16Inverse: simd_double3x3
+    let dRGB: SIMD3<Double>
+    let fL: Double
+    let n: Double
     /// N_bb, which equals N_cb.
-    private let nBB: Double
-    private let z: Double
-    private let whiteA: Double
+    let nBB: Double
+    let z: Double
+    /// The white's achromatic response A_w.
+    let whiteA: Double
 
     /// `white` is the output colour space's xy whitepoint; `cat16` the CAT16 matrix rows.
     init(white: SIMD2<Double>, cat16: [SIMD3<Double>]) {

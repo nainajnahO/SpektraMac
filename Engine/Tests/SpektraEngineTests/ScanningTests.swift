@@ -16,17 +16,17 @@ func scanMatchesPythonBeforeGamutCompression(caseName: String) throws {
     #expect(difference.maxAbsolute < 1e-5)
 }
 
-/// The whole deterministic chain from `rgb_in`, up to output gamut compression.
+/// The whole deterministic chain from `rgb_in` through output gamut compression.
 @Test(arguments: goldenCases)
-func chainMatchesPythonBeforeGamutCompression(caseName: String) throws {
+func chainMatchesPythonThroughGamutCompression(caseName: String) throws {
     let golden = try GoldenCase(caseName)
     let gpu = try GPU()
     let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film),
                                     print: golden.printProfile(), gpu: gpu, tables: Tables.load())
     let rgbIn = try SpektraEngineTests.golden(caseName, "rgb_in").image
     let output = try gpu.run { simulation.encode(rgbIn, on: $0) }
-    let difference = Difference(gpu.download(output), try SpektraEngineTests.golden(caseName, "rgb_uncompressed").values,
+    let difference = Difference(gpu.download(output), try SpektraEngineTests.golden(caseName, "rgb_compressed").values,
                                 floor: 1)
-    print("\(caseName) chain to scanned RGB: \(difference)")
+    print("\(caseName) chain to compressed RGB: \(difference)")
     #expect(difference.maxAbsolute < 1e-4)
 }

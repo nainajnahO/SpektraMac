@@ -41,6 +41,8 @@ public struct Simulation {
     let scanCMFBands: [SIMD4<Float>]
     /// Scan XYZ → output RGB: CAT02 from the scan illuminant's white, then the space's matrix.
     let scanToOutput: simd_double3x3
+    /// The output gamut compression and its C_max table on the GPU; nil when it's off.
+    let outputCompression: (model: OutputGamutCompression, maxChroma: any MTLBuffer)?
 
     public struct UnknownColourSpace: Error, CustomStringConvertible {
         public let name: String
@@ -153,6 +155,16 @@ public struct Simulation {
         scanToOutput = simd_double3x3(rows: outputSpace.xyzToRGB)
             * vonKries(from: SIMD2(scanWhite.x, scanWhite.y) / scanWhite.sum(), to: outputSpace.whitepoint,
                        transform: tables.chromaticAdaptation["CAT02"]!)
+        if parameters.io.outputGamutCompress.algorithm == "off" {
+            outputCompression = nil
+        } else {
+            let compression = OutputGamutCompression(spec: parameters.io.outputGamutCompress, space: outputSpace,
+                                                     cat16: tables.chromaticAdaptation["CAT16"]!)
+            let table = compression.maxChroma.map(Float.init)
+            let buffer = gpu.device.makeBuffer(bytes: table, length: table.count * MemoryLayout<Float>.stride,
+                                               options: .storageModeShared)!
+            outputCompression = (compression, buffer)
+        }
 
         if enlarger.preflashExposure > 0 {
             let preflashLight = enlargerLight(lamp, filters: enlarger.preflashFilters, dichroics: tables.dichroicFilters)
@@ -305,11 +317,12 @@ extension Simulation {
 
 extension Simulation {
     /// Every ported stage from `rgb_in`: filming, printing (skipped when scanning the film
-    /// itself), scanning.
+    /// itself), scanning and output gamut compression.
     public func encode(_ image: RGBImage, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
         let cmyFilm = encodeDevelop(encodeExpose(encodePreprocess(image, on: encoder), on: encoder), on: encoder)
-        guard !parameters.io.scanFilm else { return encodeScan(cmyFilm, on: encoder) }
-        return encodeScan(encodePrintDevelop(encodePrintExpose(cmyFilm, on: encoder), on: encoder), on: encoder)
+        let cmy = parameters.io.scanFilm
+            ? cmyFilm : encodePrintDevelop(encodePrintExpose(cmyFilm, on: encoder), on: encoder)
+        return encodeOutputCompression(encodeScan(cmy, on: encoder), on: encoder)
     }
 
     /// `cmy_print` (or `cmy_film` when scanning film) → linear RGB in the output colour space
@@ -317,12 +330,11 @@ extension Simulation {
     /// profile's viewing illuminant, integrated to XYZ, adapted (CAT02) and converted to RGB.
     ///
     /// Not ported yet: glare (stochastic; off in the golden runs), the scanner's black/white
-    /// correction (off by default), output gamut compression (Days 21–23).
+    /// correction (off by default).
     public func encodeScan(_ cmy: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
         let output = gpu.makeTexture(width: cmy.width, height: cmy.height)
         var bandCount = UInt32(scanDyeBands.count)
-        let m = scanToOutput
-        var matrix = simd_float3x3(SIMD3<Float>(m.columns.0), SIMD3<Float>(m.columns.1), SIMD3<Float>(m.columns.2))
+        var matrix = simd_float3x3(scanToOutput)
         gpu.encode("scan_rgb", on: encoder, textures: [cmy, output], grid: output.size) {
             $0.setBytes(scanDyeBands, length: scanDyeBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 0)
             $0.setBytes(scanCMFBands, length: scanCMFBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 1)
@@ -330,6 +342,14 @@ extension Simulation {
             $0.setBytes(&matrix, length: MemoryLayout<simd_float3x3>.size, index: 3)
         }
         return output
+    }
+
+    /// Linear output RGB → the same, compressed into the output RGB cube
+    /// (ScanningStage._density_to_rgb's `compress_rgb`). Returns `rgb` itself when it's off.
+    public func encodeOutputCompression(_ rgb: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        guard let outputCompression else { return rgb }
+        return gpu.encodeOutputCompression(outputCompression.model, maxChroma: outputCompression.maxChroma,
+                                           on: encoder, input: rgb)
     }
 }
 
