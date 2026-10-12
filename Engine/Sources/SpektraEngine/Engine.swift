@@ -11,10 +11,11 @@ public actor Engine {
 
     public init() throws {
         gpu = try GPU()
+        let film = try Profile.load("kodak_portra_400")
         var parameters = Parameters()
         parameters.io.inputColorSpace = "ITU-R BT.2020"  // RGBImage's working space, linear
-        simulation = try Simulation(parameters: parameters, film: Profile.load("kodak_portra_400"), gpu: gpu,
-                                    tables: Tables.load())
+        parameters.applyFilmSpecifics(film)
+        simulation = try Simulation(parameters: parameters, film: film, gpu: gpu, tables: Tables.load())
     }
 
     /// The simulation of `image`, as far as it is ported (PLAN.md): today the auto-exposed input.

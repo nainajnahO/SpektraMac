@@ -31,7 +31,9 @@ and blurs (fast_gaussian_filter, fast_exponential_filter) with per-channel sigma
 path, the IIR path, a mix, and an image smaller than the kernel, with `<name>_sigma` alongside; and each film's
 hanatos2025 tc LUT before input gamut compression (`tc_lut_raw_<film>`, 192x192x3); and on that LUT's
 own cell grid, the input gamut compression's normalised distance to the spectral locus around D55
-and T (`locus_dnorm_<illuminant>`) and matplotlib's inside/outside test (`locus_inside`).
+and T (`locus_dnorm_<illuminant>`) and matplotlib's inside/outside test (`locus_inside`); highlight
+boost (`boost`: boost_ev 2, range 0.3, protect 1) and Portra 400's digested halation + scatter at a
+5 um pixel (`halation`, 24 MP scale, so the blurs take the IIR path too).
 
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
@@ -54,6 +56,8 @@ import skimage.data
 from spektrafilm import digest_params, init_params
 from spektrafilm.profiles.io import load_profile
 from spektrafilm.runtime.pipeline import SimulationPipeline
+from spektrafilm.model.diffusion import apply_halation_um
+from spektrafilm.utils.numba_boost_hightlights import boost_highlights
 from spektrafilm.utils.fast_gaussian_filter import fast_exponential_filter, fast_gaussian_filter
 from spektrafilm.utils.fast_interp import fast_interp
 from matplotlib.path import Path as MplPath
@@ -198,6 +202,12 @@ def primitives() -> dict[str, np.ndarray]:
         boundary = _ray_polygon_distance(white, direction, locus)
         arrays[f"locus_dnorm_{illuminant}"] = dist / np.fmax(boundary, 1e-12)
     arrays["locus_inside"] = MplPath(locus).contains_points(xy.reshape(-1, 2)).reshape(192, 192)
+
+    x = image(0.0, 3.0)
+    arrays.update(boost_x=x, boost_out=boost_highlights(x, boost_ev=2.0, boost_range=0.3, protect_ev=1.0))
+    halation = digest_params(init_params("kodak_portra_400", "kodak_portra_endura")).film_render.halation
+    x = rng.uniform(0, 2, (96, 128, 3)).astype(np.float32).astype(np.float64)
+    arrays.update(halation_x=x, halation_out=apply_halation_um(x, halation, 5.0))
     return arrays
 
 

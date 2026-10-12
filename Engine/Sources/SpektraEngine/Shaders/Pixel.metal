@@ -36,10 +36,10 @@ kernel void interpolate_curves(texture2d<float, access::read> input [[texture(0)
     output.write(float4(y, 1.0), gid);
 }
 
-// Multiplies RGB by a constant (exposure: `image * 2 ** ev`).
+// Multiplies RGB by per-channel constants (exposure: `image * 2 ** ev`, mixture weights).
 kernel void scale_rgb(texture2d<float, access::read> input [[texture(0)]],
                       texture2d<float, access::write> output [[texture(1)]],
-                      constant float &factor [[buffer(0)]],
+                      constant float3 &factor [[buffer(0)]],
                       uint2 gid [[thread_position_in_grid]]) {
     output.write(float4(input.read(gid).rgb * factor, 1.0), gid);
 }
