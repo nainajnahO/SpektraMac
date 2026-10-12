@@ -21,7 +21,8 @@ Regimes (stochastic effects are always off: no grain, no glare)
 - photo runs with the default settings: spatial effects (halation, DIR diffusion, unsharp mask) and
   centre-weighted auto-exposure on. Target for the spatial stages and the end-to-end check.
 
-Pairs: Portra 400 -> Portra Endura, Vision3 500T -> 2383, Velvia 100 scanned directly (scan_film).
+Pairs: Portra 400 -> Portra Endura, Vision3 500T -> 2383, and scanned directly (scan_film): Velvia 100
+(a slide) and Portra 400 (the negative itself).
 
 primitives/ holds per-pixel kernel cases on 64x64x3 float32 inputs, with references computed in
 float64 by the Python functions themselves from those same float32 inputs (so only the kernel's
@@ -126,8 +127,10 @@ def space_file_name(space: str) -> str:
 PAIRS = [
     ("kodak_portra_400", "kodak_portra_endura", False),
     ("kodak_vision3_500t", "kodak_2383", False),
-    # Slides are viewed directly; the print profile is required by the API but unused.
+    # Scanned directly (a slide, and a negative viewed as such); the print profile is required by
+    # the API but unused.
     ("fujifilm_velvia_100", "kodak_portra_endura", True),
+    ("kodak_portra_400", "kodak_portra_endura", True),
 ]
 
 
@@ -246,7 +249,7 @@ def primitives() -> dict[str, np.ndarray]:
                   blur_exponential_out=fast_exponential_filter(x, decay))
 
     # As FilmingStage builds it with the default settings (window on, surface off, no blur).
-    for film, _, _ in PAIRS:
+    for film in dict.fromkeys(film for film, _, _ in PAIRS):
         profile = load_profile(film)
         adaptation = profile.hanatos2025_adaptation()
         adaptation.apply_window, adaptation.apply_surface = True, False
