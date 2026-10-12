@@ -28,10 +28,16 @@ struct ContentView: View {
                     }
                     ToolbarItemGroup(placement: .primaryAction) {
                         Button("Open…", systemImage: "folder") { model.isImporting = true }
-                        Button("Preview", systemImage: "eye") { model.renderPreview() }
-                            .disabled(!model.canRender)
-                        Button("Render", systemImage: "camera.aperture") { model.renderFullResolution() }
-                            .disabled(!model.canRender)
+                        if model.canCancel {
+                            Button("Cancel", systemImage: "xmark.circle") { model.cancel() }
+                        } else {
+                            Button("Preview", systemImage: "eye") { model.renderPreview() }
+                                .disabled(!model.canRender)
+                            Button("Render", systemImage: "camera.aperture") { model.renderFullResolution() }
+                                .disabled(!model.canRender)
+                        }
+                        Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
+                            .disabled(!model.canSave)
                         Toggle("Log", systemImage: "list.bullet.rectangle", isOn: $showLog)
                     }
                 }
@@ -192,9 +198,12 @@ private struct StatusBar: View {
             if model.isLoading {
                 ProgressView().controlSize(.small)
                 Text("Opening…")
+            } else if let phase = model.savePhase {
+                ProgressView().controlSize(.small)
+                Text(phase)
             } else if model.isRendering {
                 ProgressView().controlSize(.small)
-                Text("Rendering…")
+                Text(model.isRenderingFullResolution ? "Rendering full resolution…" : "Rendering…")
             } else if let source = model.source, let preview = model.preview {
                 if model.showsFullResolution {
                     Label("Full resolution, \(source.width) × \(source.height)", systemImage: "photo")
