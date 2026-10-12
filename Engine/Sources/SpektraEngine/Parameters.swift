@@ -23,6 +23,16 @@ public struct Parameters: Codable, Sendable {
         /// A key of ``Tables/colourSpaces``.
         public var inputColorSpace = "ProPhoto RGB"
         public var inputCctfDecoding = false
+        public var inputGamutCompress = InputGamutCompressSpec()
+    }
+
+    /// Spektrafilm's `InputGamutCompressSpec`.
+    public struct InputGamutCompressSpec: Codable, Sendable, Equatable {
+        public var active = true
+        /// Only `xy` is ported.
+        public var algorithm = "xy"
+        /// Reinhard knee (threshold, limit, power).
+        public var knee = [0.0, 1.0, 6.0]
     }
 }
 
