@@ -150,3 +150,15 @@ kernel void grain_layer(texture2d<float, access::read> density [[texture(0)]],
     }
     output.write(float4(grain, 1.0f), gid);
 }
+
+// add_micro_structure's clumping: per pixel and channel an independent lognormal factor.
+kernel void lognormal_rgb(texture2d<float, access::write> output [[texture(0)]],
+                          constant uint &seed [[buffer(0)]],
+                          constant float2 &mu_sigma [[buffer(1)]],
+                          uint2 gid [[thread_position_in_grid]]) {
+    Random random(seed, 20, gid);
+    float r = random.lognormal(mu_sigma.x, mu_sigma.y);
+    float g = random.lognormal(mu_sigma.x, mu_sigma.y);
+    float b = random.lognormal(mu_sigma.x, mu_sigma.y);
+    output.write(float4(r, g, b, 1.0f), gid);
+}

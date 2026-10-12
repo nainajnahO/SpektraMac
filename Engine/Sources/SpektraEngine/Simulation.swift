@@ -295,9 +295,9 @@ extension Simulation {
     /// sensitivity sub-layers through their density curves, and each sub-layer develops as a random
     /// count of particles (`layer_particle_model`, kernel `grain_layer`), the counts per pixel set
     /// by the pixel's area and the particles' (`particle_area_um2` × scales, each sub-layer's share
-    /// of the channel's maximum density). The sub-layers add up, less the fog (`density_min`).
-    ///
-    /// Not yet ported: the dye-cloud blur, micro-structure and final blur (Day 28).
+    /// of the channel's maximum density), its dye clouds blurred by `blur_dye_clouds_um` · √(density
+    /// per particle) pixels. The sub-layers add up, × the micro-structure's clumping (only below
+    /// ~0.6 µm pixels), less the fog (`density_min`), then the final blur.
     func encodeGrain(_ density: any MTLTexture, pixelSizeUm: Double,
                      on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
         let grain = parameters.filmRender.grain
@@ -322,14 +322,14 @@ extension Simulation {
             let share = layerMaxima[layer] / total
             var layerFog = SIMD3<Float>(share * fog)
             var layerMax = SIMD3<Float>(layerMaxima[layer] + share * fog)
-            var particles = SIMD3<Float>(pixelSizeUm * pixelSizeUm * share
-                                         / (particleArea * grain.particleScaleLayers[layer]))
+            let particleCount = pixelSizeUm * pixelSizeUm * share / (particleArea * grain.particleScaleLayers[layer])
+            var particles = SIMD3<Float>(particleCount)
             var uniformity = SIMD3<Float>(SIMD3(grain.uniformity))
             var (seed, index) = (Self.seed, UInt32(layer))
             let layerDensity = gpu.makeTexture(width: width, height: height)
             gpu.encodeInterpolate(on: encoder, input: source, output: layerDensity, axis: axis,
                                   values: layers.map { $0[layer] })
-            let layerGrain = gpu.makeTexture(width: width, height: height)
+            var layerGrain = gpu.makeTexture(width: width, height: height)
             gpu.encode("grain_layer", on: encoder, textures: [layerDensity, layerGrain], grid: layerGrain.size) {
                 $0.setBytes(&layerFog, length: MemoryLayout<SIMD3<Float>>.size, index: 0)
                 $0.setBytes(&layerMax, length: MemoryLayout<SIMD3<Float>>.size, index: 1)
@@ -338,6 +338,14 @@ extension Simulation {
                 $0.setBytes(&seed, length: 4, index: 4)
                 $0.setBytes(&index, length: 4, index: 5)
             }
+            if grain.blurDyeCloudsUm > 0 {
+                // In pixels, as Python passes it: blur_dye_clouds_um · √(d_max / n).
+                let densityPerParticle = (layerMaxima[layer] + share * fog) / particleCount
+                let clouds = gpu.makeTexture(width: width, height: height)
+                gpu.encodeGaussianBlur(on: encoder, input: layerGrain, output: clouds,
+                                       sigma: grain.blurDyeCloudsUm * densityPerParticle.squareRoot())
+                layerGrain = clouds
+            }
             if let previous = sum {
                 gpu.encodeAddScaled(on: encoder, accumulator: previous, input: layerGrain, output: previous,
                                     weight: SIMD3(repeating: 1))
@@ -345,10 +353,35 @@ extension Simulation {
                 sum = layerGrain
             }
         }
+        let developed = sum!
+        // add_micro_structure: clumping, an independent lognormal factor of mean 1 per pixel and
+        // channel with σ = micro_structure[1] nm in pixels, blurred by micro_structure[0] µm.
+        let clumpingBlur = grain.microStructure[0] / pixelSizeUm
+        let clumpingDeviation = grain.microStructure[1] * 0.001 / pixelSizeUm
+        if clumpingDeviation > 0.05 {
+            let sigma2 = log(1 + clumpingDeviation * clumpingDeviation)
+            var muSigma = SIMD2<Float>(Float(-sigma2 / 2), Float(sigma2.squareRoot()))
+            var seed = Self.seed
+            var clumping = gpu.makeTexture(width: width, height: height)
+            gpu.encode("lognormal_rgb", on: encoder, textures: [clumping], grid: clumping.size) {
+                $0.setBytes(&seed, length: 4, index: 0)
+                $0.setBytes(&muSigma, length: MemoryLayout<SIMD2<Float>>.size, index: 1)
+            }
+            if clumpingBlur > 0.4 {
+                let blurred = gpu.makeTexture(width: width, height: height)
+                gpu.encodeGaussianBlur(on: encoder, input: clumping, output: blurred,
+                                       sigma: SIMD3(repeating: clumpingBlur))
+                clumping = blurred
+            }
+            gpu.encodeMultiply(on: encoder, a: developed, b: clumping, output: developed)
+        }
         let output = gpu.makeTexture(width: width, height: height)
-        gpu.encodeMatrix(on: encoder, input: sum!, output: output,
+        gpu.encodeMatrix(on: encoder, input: developed, output: output,
                          rows: [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)], offset: -fog)
-        return output
+        guard grain.blur > 0 else { return output }
+        let blurred = gpu.makeTexture(width: width, height: height)
+        gpu.encodeGaussianBlur(on: encoder, input: output, output: blurred, sigma: SIMD3(repeating: grain.blur))
+        return blurred
     }
 
     /// ResizingService.pixel_size_um (no crop or upscale): the film format's long side over the

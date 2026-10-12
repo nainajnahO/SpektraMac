@@ -1,3 +1,4 @@
+import Accelerate
 import Metal
 import Testing
 @testable import SpektraEngine
@@ -217,4 +218,91 @@ func grainParticlesMatchPythonStatistics(film: String) throws {
     }
     print("\(film) grain particles, worst over 24 patches: mean \(worst.mean * 100) %, std \(worst.deviation * 100) %")
     #expect(worst.mean < 0.05 && worst.deviation < 0.05)
+}
+
+/// Grain complete (default parameters) on a golden field `grain_<name>_x_<film>`: ours and Python's.
+private func grainField(_ name: String, film: String, pixelSizeUm: Double) throws
+-> (ours: [Float], python: [Float], width: Int, height: Int) {
+    let gpu = try GPU()
+    let simulation = try Simulation(parameters: Parameters(), film: Profile.load(film),
+                                    print: Profile.load("kodak_portra_endura"), gpu: gpu, tables: Tables.load())
+    let x = try golden("primitives", "grain_\(name)_x_\(film)")
+    let input = gpu.upload(rgb: x.values, width: x.shape[1], height: x.shape[0])
+    let ours = gpu.download(try gpu.run { simulation.encodeGrain(input, pixelSizeUm: pixelSizeUm, on: $0) })
+    return (ours, try golden("primitives", "grain_\(name)_out_\(film)").values, x.shape[1], x.shape[0])
+}
+
+/// Mean and standard deviation of one channel over columns `columns` of an RGB field.
+private func statistics(_ values: [Float], width: Int, columns: Range<Int>, channel: Int) -> (mean: Double, deviation: Double) {
+    let height = values.count / 3 / width
+    let patch = (0..<height).flatMap { row in columns.map { Double(values[(row * width + $0) * 3 + channel]) } }
+    let mean = patch.reduce(0, +) / Double(patch.count)
+    return (mean, (patch.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(patch.count - 1)).squareRoot())
+}
+
+/// Grain complete with the default parameters (dye clouds, final blur) against Python's: mean and
+/// RMS granularity (the density's standard deviation) per patch and channel, on 4 uniform
+/// patches (10 % to 90 % of each channel's maximum) at 5 µm pixels.
+@Test(arguments: ["kodak_portra_400", "fujifilm_velvia_100"])
+func grainMatchesPythonStatistics(film: String) throws {
+    let (ours, python, width, _) = try grainField("full", film: film, pixelSizeUm: 5)
+    var worst = (mean: 0.0, deviation: 0.0)
+    for patch in 0..<4 {
+        for channel in 0..<3 {
+            let columns = (patch * 256)..<((patch + 1) * 256)
+            let a = statistics(ours, width: width, columns: columns, channel: channel)
+            let b = statistics(python, width: width, columns: columns, channel: channel)
+            worst.mean = max(worst.mean, abs(a.mean / b.mean - 1))
+            worst.deviation = max(worst.deviation, abs(a.deviation / b.deviation - 1))
+            print(String(format: "%@ patch %d channel %d: mean %.5f vs %.5f, RMS granularity %.5f vs %.5f",
+                         film, patch, channel, a.mean, b.mean, a.deviation, b.deviation))
+        }
+    }
+    print("\(film) grain, worst over 12 patches: mean \(worst.mean * 100) %, RMS granularity \(worst.deviation * 100) %")
+    #expect(worst.mean < 0.05 && worst.deviation < 0.05)
+}
+
+/// Grain's power spectrum against Python's on a 512 × 512 uniform field (Portra, 50 %, 5 µm): the
+/// periodograms of every row and column (the grain is isotropic) summed in 8 bands of 32
+/// frequencies up to Nyquist.
+@Test func grainPowerSpectrumMatchesPython() throws {
+    let (ours, python, width, _) = try grainField("field", film: "kodak_portra_400", pixelSizeUm: 5)
+    let dft = try vDSP.DiscreteFourierTransform(count: width, direction: .forward, transformType: .complexComplex,
+                                                ofType: Double.self)
+    func bands(_ values: [Float], channel: Int) -> [Double] {
+        var power = [Double](repeating: 0, count: width / 2 + 1)
+        var (real, imaginary) = ([Double](repeating: 0, count: width), [Double](repeating: 0, count: width))
+        let rows = (0..<width).map { row in (0..<width).map { Double(values[(row * width + $0) * 3 + channel]) } }
+        let columns = (0..<width).map { column in rows.map { $0[column] } }
+        for line in rows + columns {
+            let mean = line.reduce(0, +) / Double(width)
+            dft.transform(inputReal: line.map { $0 - mean }, inputImaginary: [Double](repeating: 0, count: width),
+                          outputReal: &real, outputImaginary: &imaginary)
+            for k in 0...(width / 2) {
+                power[k] += real[k] * real[k] + imaginary[k] * imaginary[k]
+            }
+        }
+        return (0..<8).map { band in power[(band * 32 + 1)...(band * 32 + 32)].reduce(0, +) }
+    }
+    var worst = 0.0
+    for channel in 0..<3 {
+        let ratios = zip(bands(ours, channel: channel), bands(python, channel: channel)).map { $0 / $1 }
+        worst = max(worst, ratios.map { abs($0 - 1) }.max()!)
+        print("grain power spectrum channel \(channel), ours / Python per band: \(ratios.map { String(format: "%.3f", $0) })")
+    }
+    print("grain power spectrum, worst band: \(worst * 100) %")
+    #expect(worst < 0.05)
+}
+
+/// Grain with the micro-structure on (0.4 µm pixels: clumping σ 0.075, blurred 0.5 px) against
+/// Python's: mean and RMS granularity per channel over a 256 × 256 uniform field.
+@Test func grainMicroStructureMatchesPython() throws {
+    let (ours, python, width, _) = try grainField("micro", film: "kodak_portra_400", pixelSizeUm: 0.4)
+    for channel in 0..<3 {
+        let a = statistics(ours, width: width, columns: 0..<width, channel: channel)
+        let b = statistics(python, width: width, columns: 0..<width, channel: channel)
+        print(String(format: "micro-structure channel %d: mean %.5f vs %.5f, RMS granularity %.5f vs %.5f",
+                     channel, a.mean, b.mean, a.deviation, b.deviation))
+        #expect(abs(a.mean / b.mean - 1) < 0.05 && abs(a.deviation / b.deviation - 1) < 0.05)
+    }
 }

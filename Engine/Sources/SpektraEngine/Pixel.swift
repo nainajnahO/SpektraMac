@@ -24,6 +24,12 @@ extension GPU {
         }
     }
 
+    /// `a * b`, per channel.
+    public func encodeMultiply(on encoder: any MTLComputeCommandEncoder, a: any MTLTexture, b: any MTLTexture,
+                               output: any MTLTexture) {
+        encode("multiply_rgb", on: encoder, textures: [a, b, output], grid: output.size)
+    }
+
     /// `input * factor`.
     public func encodeScale(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
                             output: any MTLTexture, by factor: Double) {
