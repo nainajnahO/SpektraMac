@@ -80,3 +80,48 @@ kernel void hanatos2025_raw(texture2d<float, access::read> input [[texture(0)]],
     float3 raw = cubic_lookup(lut, tc * float(lut.get_width() - 1)) * b;
     output.write(float4(raw * exposure, 1.0), gid);
 }
+
+// Highlight boost (numba_boost_hightlights.boost_highlights): a whole-image max reduction, then
+// a per-pixel curve that steepens exposures above midgray·2^protect_ev so the brightest raw
+// value ends up 2^boost_ev brighter. maxima[0] is the overall max, maxima[1 + row] per row.
+kernel void row_max(texture2d<float, access::read> input [[texture(0)]],
+                    device float *maxima [[buffer(0)]],
+                    uint row [[thread_position_in_grid]]) {
+    float m = -INFINITY;
+    for (uint x = 0; x < input.get_width(); x++) {
+        float3 v = input.read(uint2(x, row)).rgb;
+        m = fmax(m, fmax(v.r, fmax(v.g, v.b)));
+    }
+    maxima[1 + row] = m;
+}
+
+kernel void total_max(device float *maxima [[buffer(0)]],
+                      constant uint &rows [[buffer(1)]],
+                      uint id [[thread_position_in_grid]]) {
+    float m = -INFINITY;
+    for (uint row = 0; row < rows; row++) m = fmax(m, maxima[1 + row]);
+    maxima[0] = m;
+}
+
+kernel void boost_highlights(texture2d<float, access::read> input [[texture(0)]],
+                             texture2d<float, access::write> output [[texture(1)]],
+                             device const float *maxima [[buffer(0)]],
+                             constant float3 &settings [[buffer(1)]],  // boost_ev, boost_range, protect_ev
+                             uint2 gid [[thread_position_in_grid]]) {
+    const float midgray = 0.184f;
+    float3 x = input.read(gid).rgb;
+    float max_raw = maxima[0];
+    if (max_raw == 0.0f) { output.write(float4(0.0f, 0.0f, 0.0f, 1.0f), gid); return; }
+    float raw_x0 = clamp(midgray * exp2(settings.z), 0.0f, max_raw);
+    if (raw_x0 == max_raw) { output.write(float4(x, 1.0f), gid); return; }
+    float a = pow(28.0f, 1.0f - settings.y);
+    float x0 = raw_x0 / max_raw;
+    float k = (exp2(settings.x) - 1.0f) / (exp(a * (1.0f - x0)) - a * (1.0f - x0) - 1.0f);
+    float inverse_max = 1.0f / max_raw, boost_scale = k * max_raw;
+    float3 y;
+    for (int c = 0; c < 3; c++) {
+        float dx = (x[c] - raw_x0) * inverse_max;
+        y[c] = x[c] <= raw_x0 ? x[c] : x[c] + boost_scale * (exp(a * dx) - a * dx - 1.0f);
+    }
+    output.write(float4(y, 1.0f), gid);
+}

@@ -56,11 +56,12 @@ public struct Simulation {
     }
 
     /// `rgb_pre → log_e_film` (FilmingStage.expose): the film's raw exposure through the
-    /// hanatos2025 tc LUT, × 2^exposure compensation, as log10.
+    /// hanatos2025 tc LUT, × 2^exposure compensation, highlight boost, lens blur, scatter and
+    /// halation, as log10.
     ///
-    /// Not yet ported (Day 13): highlight boost, lens blur, halation and scatter, which Python
-    /// applies between the raw exposure and the log. The scanner's black/white correction factor
-    /// is 1 unless those corrections are on (not ported; off by default).
+    /// Not ported: the camera diffusion filter (off by default, backlog). The scanner's
+    /// black/white correction factor is 1 unless those corrections are on (not ported yet; off by
+    /// default).
     public func encodeExpose(_ rgb: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
         let raw = gpu.makeTexture(width: rgb.width, height: rgb.height)
         let m = inputToXYZ
@@ -75,8 +76,26 @@ public struct Simulation {
             $0.setBytes(&gamma, length: 4, index: 2)
             $0.setBytes(&exposure, length: 4, index: 3)
         }
-        gpu.encodeLogExposure(on: encoder, input: raw, output: raw)
-        return raw
+        var light = raw
+        let halation = parameters.filmRender.halation
+        // ResizingService.pixel_size_um (no crop or upscale).
+        let pixelSizeUm = parameters.camera.filmFormatMm * 1000 / Double(max(rgb.width, rgb.height))
+        if halation.boostEv > 0 {
+            light = gpu.encodeBoostHighlights(on: encoder, input: light, boostEv: halation.boostEv,
+                                              boostRange: halation.boostRange, protectEv: halation.protectEv)
+        }
+        if parameters.camera.lensBlurUm > 0 {
+            let blurred = gpu.makeTexture(width: rgb.width, height: rgb.height)
+            gpu.encodeGaussianBlur(on: encoder, input: light, output: blurred,
+                                   sigma: SIMD3(repeating: parameters.camera.lensBlurUm / pixelSizeUm))
+            light = blurred
+        }
+        if halation.active {
+            light = gpu.encodeHalation(on: encoder, input: light, halation: halation, pixelSizeUm: pixelSizeUm)
+        }
+        let logExposure = gpu.makeTexture(width: rgb.width, height: rgb.height)
+        gpu.encodeLogExposure(on: encoder, input: light, output: logExposure)
+        return logExposure
     }
 }
 

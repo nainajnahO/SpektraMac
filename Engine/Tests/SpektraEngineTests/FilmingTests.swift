@@ -68,8 +68,8 @@ func filmingLUTMatchesPython(caseName: String) throws {
     #expect(difference.maxRelative < 1e-6)
 }
 
-/// Per-pixel cases only: the photo's log_e_film also has halation and scatter (Day 13).
-@Test(arguments: goldenCases.filter { $0.hasPrefix("chart") })
+/// Chart: per-pixel (lut_mode). Photo: sRGB decoding, auto-exposed input, scatter and halation.
+@Test(arguments: goldenCases)
 func exposeMatchesLogEFilm(caseName: String) throws {
     let golden = try GoldenCase(caseName)
     let gpu = try GPU()
@@ -83,4 +83,37 @@ func exposeMatchesLogEFilm(caseName: String) throws {
     let difference = Difference(gpu.download(output), reference.values, floor: 1)
     print("\(caseName) log_e_film: \(difference)")
     #expect(difference.maxAbsolute < 1e-4)
+}
+
+@Test func boostHighlightsMatchesPython() throws {
+    let gpu = try GPU()
+    let x = try golden("primitives", "boost_x")
+    let input = gpu.upload(rgb: x.values, width: x.shape[1], height: x.shape[0])
+    let output = try gpu.run {
+        gpu.encodeBoostHighlights(on: $0, input: input, boostEv: 2, boostRange: 0.3, protectEv: 1)
+    }
+    let difference = Difference(gpu.download(output), try golden("primitives", "boost_out").values, floor: 1)
+    print("boost: \(difference)")
+    #expect(difference.maxRelative < 1e-6)
+}
+
+@Test func halationMatchesPythonAtFullResolutionScale() throws {
+    // Portra 400's digested halation at a 5 µm pixel: σ_h = 13 px, so the IIR path runs too.
+    let halation = try GoldenCase("photo-kodak_portra_400-kodak_portra_endura").params.filmRender.halation
+    let gpu = try GPU()
+    let x = try golden("primitives", "halation_x")
+    let input = gpu.upload(rgb: x.values, width: x.shape[1], height: x.shape[0])
+    let output = try gpu.run { gpu.encodeHalation(on: $0, input: input, halation: halation, pixelSizeUm: 5) }
+    let difference = Difference(gpu.download(output), try golden("primitives", "halation_out").values, floor: 1)
+    print("halation at 5 µm: \(difference)")
+    #expect(difference.maxAbsolute < 1e-6)
+}
+
+@Test(arguments: goldenCases.filter { $0.hasPrefix("photo") })
+func halationPresetMatchesDigest(caseName: String) throws {
+    let golden = try GoldenCase(caseName)
+    var parameters = Parameters()
+    parameters.applyFilmSpecifics(try Profile.load(golden.film))
+    #expect(parameters.filmRender.halation.halationStrength == golden.params.filmRender.halation.halationStrength)
+    #expect(parameters.filmRender.halation.halationFirstSigmaUm == golden.params.filmRender.halation.halationFirstSigmaUm)
 }

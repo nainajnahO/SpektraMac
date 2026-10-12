@@ -27,9 +27,15 @@ extension GPU {
     /// `input * factor`.
     public func encodeScale(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
                             output: any MTLTexture, by factor: Double) {
-        var factor = Float(factor)
+        encodeScale(on: encoder, input: input, output: output, by: SIMD3(repeating: factor))
+    }
+
+    /// `input * factor`, per channel.
+    public func encodeScale(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
+                            output: any MTLTexture, by factor: SIMD3<Double>) {
+        var factor = SIMD3<Float>(factor)
         encode("scale_rgb", on: encoder, textures: [input, output], grid: output.size) {
-            $0.setBytes(&factor, length: 4, index: 0)
+            $0.setBytes(&factor, length: MemoryLayout<SIMD3<Float>>.size, index: 0)
         }
     }
 
