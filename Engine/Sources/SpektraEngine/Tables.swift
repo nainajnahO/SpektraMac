@@ -59,8 +59,6 @@ public struct Tables: Decodable, Sendable {
 extension Tables.ColourSpace {
     /// colour-science's `cctf_decoding` for this space: encoded value → linear, in f64.
     public func decode(_ value: Double) -> Double {
-        // colour's spow: the power applied to |x| with the sign kept.
-        func spow(_ x: Double, _ p: Double) -> Double { x < 0 ? -pow(-x, p) : pow(x, p) }
         switch cctf {
         case "sRGB":
             return 0.0031308 * 12.92 >= value ? value / 12.92 : spow((value + 0.055) / 1.055, 2.4)
