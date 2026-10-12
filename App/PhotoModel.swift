@@ -89,14 +89,19 @@ final class PhotoModel {
         isRendering = true
         renderTask = Task {
             let start = ContinuousClock.now
-            let output = await engine.render(source)
-            let image = await Task.detached(priority: .userInitiated) {
-                output.displayImage(in: RGBImage.workingColorSpace)
-            }.value
-            guard !Task.isCancelled else { return }
-            displayImage = image
+            do {
+                let output = try await engine.render(source)
+                let image = await Task.detached(priority: .userInitiated) {
+                    output.displayImage(in: RGBImage.workingColorSpace)
+                }.value
+                guard !Task.isCancelled else { return }
+                displayImage = image
+                note("Rendered in \((ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds])))")
+            } catch {
+                guard !Task.isCancelled else { return }
+                fail("Could not render", error)
+            }
             isRendering = false
-            note("Rendered in \((ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds])))")
         }
     }
 
