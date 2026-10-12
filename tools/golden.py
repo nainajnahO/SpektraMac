@@ -26,7 +26,9 @@ Pairs: Portra 400 -> Portra Endura, Vision3 500T -> 2383, Velvia 100 scanned dir
 primitives/ holds per-pixel kernel cases on 64x64x3 float32 inputs, with references computed in
 float64 by the Python functions themselves from those same float32 inputs (so only the kernel's
 own error shows): curve interpolation (numba fast_interp) on a negative film's exposure axis and on
-a positive film's non-monotonic -density axis, log10(max(x, 0) + 1e-10), 10**x and a 3x3 matrix.
+a positive film's non-monotonic -density axis, log10(max(x, 0) + 1e-10), 10**x and a 3x3 matrix;
+and blurs (fast_gaussian_filter, fast_exponential_filter) with per-channel sigmas covering the FIR
+path, the IIR path, a mix, and an image smaller than the kernel, with `<name>_sigma` alongside.
 
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
@@ -49,6 +51,7 @@ import skimage.data
 from spektrafilm import digest_params, init_params
 from spektrafilm.profiles.io import load_profile
 from spektrafilm.runtime.pipeline import SimulationPipeline
+from spektrafilm.utils.fast_gaussian_filter import fast_exponential_filter, fast_gaussian_filter
 from spektrafilm.utils.fast_interp import fast_interp
 from spektrafilm.utils.autoexposure import measure_autoexposure_ev
 
@@ -151,6 +154,23 @@ def primitives() -> dict[str, np.ndarray]:
     matrix = colour.RGB_COLOURSPACES["ProPhoto RGB"].matrix_RGB_to_XYZ.astype(np.float32).astype(np.float64)
     x = image(-0.2, 2.0)
     arrays.update(matmul_x=x, matmul_matrix=matrix, matmul_out=np.einsum("ijk,lk->ijl", x, matrix))
+
+    # Blurs: random pixels (worst case for edges and rounding) on a non-square image.
+    blur_cases = {
+        "blur_fir": ((96, 128), (0.6, 1.3, 2.9)),
+        "blur_iir": ((96, 128), (3.0, 11.0, 40.0)),
+        "blur_mixed": ((96, 128), (0.0, 2.0, 7.5)),
+        "blur_wide": ((96, 128), (100.0, 100.0, 100.0)),
+        "blur_tiny": ((6, 8), (2.9, 1.0, 0.4)),
+    }
+    for name, (shape, sigma) in blur_cases.items():
+        x = rng.uniform(0, 1, (*shape, 3)).astype(np.float32).astype(np.float64)
+        arrays.update({f"{name}_x": x, f"{name}_sigma": np.array(sigma),
+                       f"{name}_out": fast_gaussian_filter(x, np.array(sigma))})
+    x = rng.uniform(0, 1, (96, 128, 3)).astype(np.float32).astype(np.float64)
+    decay = np.array([2.0, 9.7, 34.0])
+    arrays.update(blur_exponential_x=x, blur_exponential_sigma=decay,
+                  blur_exponential_out=fast_exponential_filter(x, decay))
     return arrays
 
 
