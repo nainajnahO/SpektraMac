@@ -33,7 +33,9 @@ hanatos2025 tc LUT before input gamut compression (`tc_lut_raw_<film>`, 192x192x
 own cell grid, the input gamut compression's normalised distance to the spectral locus around D55
 and T (`locus_dnorm_<illuminant>`) and matplotlib's inside/outside test (`locus_inside`); highlight
 boost (`boost`: boost_ev 2, range 0.3, protect 1) and Portra 400's digested halation + scatter at a
-5 um pixel (`halation`, 24 MP scale, so the blurs take the IIR path too).
+5 um pixel (`halation`, 24 MP scale, so the blurs take the IIR path too); and per printed film the
+enlarger light at the digested neutral filters (`enlarger_<film>`), with M +12 / Y -7 shifts
+(`enlarger_shifted_<film>`) and the preflash light with M +5 / Y -3 (`preflash_<film>`).
 
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
@@ -57,7 +59,9 @@ import skimage.data
 from spektrafilm import digest_params, init_params
 from spektrafilm.model.develop import develop_simple
 from spektrafilm.profiles.io import load_profile
+from spektrafilm.model.illuminants import standard_illuminant
 from spektrafilm.runtime.pipeline import SimulationPipeline
+from spektrafilm.runtime.services import EnlargerService
 from spektrafilm.model.diffusion import apply_halation_um
 from spektrafilm.utils.numba_boost_hightlights import boost_highlights
 from spektrafilm.utils.fast_gaussian_filter import fast_exponential_filter, fast_gaussian_filter
@@ -210,6 +214,17 @@ def primitives() -> dict[str, np.ndarray]:
     halation = digest_params(init_params("kodak_portra_400", "kodak_portra_endura")).film_render.halation
     x = rng.uniform(0, 2, (96, 128, 3)).astype(np.float32).astype(np.float64)
     arrays.update(halation_x=x, halation_out=apply_halation_um(x, halation, 5.0))
+
+    for film, paper, scan_film in PAIRS:
+        if scan_film:
+            continue
+        enlarger = digest_params(init_params(film, paper)).enlarger
+        light = standard_illuminant(enlarger.illuminant)
+        arrays[f"enlarger_{film}"] = EnlargerService(enlarger).enlarger_filtered_illuminant(light)
+        enlarger.m_filter_shift, enlarger.y_filter_shift = 12.0, -7.0
+        enlarger.preflash_m_filter_shift, enlarger.preflash_y_filter_shift = 5.0, -3.0
+        arrays[f"enlarger_shifted_{film}"] = EnlargerService(enlarger).enlarger_filtered_illuminant(light)
+        arrays[f"preflash_{film}"] = EnlargerService(enlarger).preflash_filtered_illuminant(light)
     return arrays
 
 
