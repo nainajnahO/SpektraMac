@@ -19,8 +19,19 @@ struct ContentView: View {
                 .safeAreaInset(edge: .bottom) { StatusBar() }
                 .navigationTitle(model.sourceName.isEmpty ? "SpektraMac" : model.sourceName)
                 .toolbar {
+                    ToolbarItemGroup(placement: .principal) {
+                        Picker("Show", selection: $model.scanFilm) {
+                            Text("Film").tag(false)
+                            Text("Negative").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                    }
                     ToolbarItemGroup(placement: .primaryAction) {
                         Button("Open…", systemImage: "folder") { model.isImporting = true }
+                        Button("Preview", systemImage: "eye") { model.renderPreview() }
+                            .disabled(!model.canRender)
+                        Button("Render", systemImage: "camera.aperture") { model.renderFullResolution() }
+                            .disabled(!model.canRender)
                         Toggle("Log", systemImage: "list.bullet.rectangle", isOn: $showLog)
                     }
                 }
@@ -121,8 +132,12 @@ private struct StatusBar: View {
             } else if model.isRendering {
                 ProgressView().controlSize(.small)
                 Text("Rendering…")
-            } else if let source = model.source {
-                Label("\(source.width) × \(source.height)", systemImage: "photo")
+            } else if let source = model.source, let preview = model.preview {
+                if model.showsFullResolution {
+                    Label("Full resolution, \(source.width) × \(source.height)", systemImage: "photo")
+                } else {
+                    Label("Preview, \(preview.width) × \(preview.height)", systemImage: "eye")
+                }
             } else {
                 Label("No photo", systemImage: "photo")
             }

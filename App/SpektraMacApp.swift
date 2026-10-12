@@ -11,11 +11,18 @@ struct SpektraMacApp: App {
         }
         .defaultSize(width: 1100, height: 760)
         .commands {
-            // Nothing here prints.
+            // Nothing here prints, and Preview takes ⌘P.
             CommandGroup(replacing: .printItem) {}
             CommandGroup(after: .newItem) {
                 Button("Open…", systemImage: "folder") { model.isImporting = true }
                     .keyboardShortcut("o", modifiers: .command)
+                Divider()
+                Button("Preview", systemImage: "eye") { model.renderPreview() }
+                    .keyboardShortcut("p", modifiers: .command)
+                    .disabled(!model.canRender)
+                Button("Render", systemImage: "camera.aperture") { model.renderFullResolution() }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(!model.canRender)
             }
         }
     }

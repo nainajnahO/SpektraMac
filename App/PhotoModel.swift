@@ -13,13 +13,21 @@ final class PhotoModel {
         let message: String
     }
 
-    /// The opened photo in the engine's working space; every change re-renders.
-    private(set) var source: RGBImage? {
+    /// The opened photo at full resolution, in the engine's working space.
+    private(set) var source: RGBImage?
+    /// `source` down-sized: every change re-renders it.
+    private(set) var preview: RGBImage? {
         didSet { scheduleRender() }
     }
     private(set) var sourceName = ""
+    /// Show a scan of the developed film (the negative) instead of the print.
+    var scanFilm = false {
+        didSet { scheduleRender() }
+    }
     /// Display-sized rendering of the last simulation.
     private(set) var displayImage: CGImage?
+    /// Whether `displayImage` comes from the full-resolution render rather than the preview.
+    private(set) var showsFullResolution = false
     private(set) var isLoading = false
     private(set) var isRendering = false
     private(set) var errorMessage: String?
@@ -51,9 +59,14 @@ final class PhotoModel {
         Task {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
-                let image = try await Task.detached(priority: .userInitiated) { try RGBImage(contentsOf: url) }.value
+                let engine = engine
+                let (image, preview) = try await Task.detached(priority: .userInitiated) {
+                    let image = try RGBImage(contentsOf: url)
+                    return (image, engine?.preview(of: image))
+                }.value
                 sourceName = url.lastPathComponent
                 source = image
+                self.preview = preview
                 note("Opened \(sourceName) (\(image.width) × \(image.height))")
             } catch {
                 fail("Could not open \(url.lastPathComponent)", error)
@@ -68,35 +81,50 @@ final class PhotoModel {
 
     // MARK: Rendering
 
-    /// Renders once per main-actor turn, however many settings changed in it, and cancels a
-    /// render that a newer change has made stale.
+    var canRender: Bool { source != nil && engine != nil }
+
+    /// Renders the preview again, in place of a full-resolution render on screen.
+    func renderPreview() {
+        render(fullResolution: false)
+    }
+
+    /// Renders the whole photo at full resolution, with the blurs and grain the preview leaves out.
+    func renderFullResolution() {
+        render(fullResolution: true)
+    }
+
+    /// Renders the preview once per main-actor turn, however many settings changed in it, and
+    /// cancels a render that a newer change has made stale.
     private func scheduleRender() {
         guard !renderScheduled else { return }
         renderScheduled = true
         Task { @MainActor in
             renderScheduled = false
-            render()
+            renderPreview()
         }
     }
 
-    private func render() {
+    private func render(fullResolution: Bool) {
         renderTask?.cancel()
-        guard let source, let engine else {
+        guard let image = fullResolution ? source : preview, let engine else {
             displayImage = nil
             isRendering = false
             return
         }
         isRendering = true
+        let scanFilm = scanFilm
         renderTask = Task {
             let start = ContinuousClock.now
             do {
-                let output = try await engine.render(source)
-                let image = await Task.detached(priority: .userInitiated) {
+                let output = try await engine.render(image, scanFilm: scanFilm, preview: !fullResolution)
+                let display = await Task.detached(priority: .userInitiated) {
                     output.displayImage(in: Engine.outputColorSpace)
                 }.value
                 guard !Task.isCancelled else { return }
-                displayImage = image
-                note("Rendered in \((ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds])))")
+                displayImage = display
+                showsFullResolution = fullResolution
+                let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
+                note("Rendered \(fullResolution ? "full resolution" : "preview") (\(image.width) × \(image.height)) in \(elapsed)")
             } catch {
                 guard !Task.isCancelled else { return }
                 fail("Could not render", error)

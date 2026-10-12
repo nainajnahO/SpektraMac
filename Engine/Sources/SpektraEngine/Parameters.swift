@@ -3,7 +3,7 @@ import simd
 /// Spektrafilm's `RuntimePhotoParams` after `digest_params`, field for field. Property names are
 /// the Python names in camelCase, so the JSON the golden data records decodes directly
 /// (`JSONDecoder.KeyDecodingStrategy.convertFromSnakeCase`). Grows as stages are ported.
-public struct Parameters: Codable, Sendable {
+public struct Parameters: Codable, Sendable, Equatable {
     public var camera = Camera()
     public var filmRender = FilmRender()
     public var enlarger = Enlarger()
@@ -15,14 +15,14 @@ public struct Parameters: Codable, Sendable {
     public init() {}
 
     /// Spektrafilm's `ScannerParams`. Black/white correction is not ported (off by default).
-    public struct Scanner: Codable, Sendable {
+    public struct Scanner: Codable, Sendable, Equatable {
         /// Gaussian σ of the scanner lens, in pixels.
         public var lensBlur = 0.0
         /// σ in pixels, amount; either 0 is off.
         public var unsharpMask = [0.7, 0.7]
     }
 
-    public struct Camera: Codable, Sendable {
+    public struct Camera: Codable, Sendable, Equatable {
         public var exposureCompensationEv = 0.0
         public var autoExposure = true
         /// Only `center_weighted` is ported.
@@ -34,7 +34,7 @@ public struct Parameters: Codable, Sendable {
         public var filterIr = [0.0, 675, 15]
     }
 
-    public struct IO: Codable, Sendable {
+    public struct IO: Codable, Sendable, Equatable {
         /// A key of ``Tables/colourSpaces``.
         public var inputColorSpace = "ProPhoto RGB"
         public var inputCctfDecoding = false
@@ -68,7 +68,7 @@ public struct Parameters: Codable, Sendable {
 }
 
 extension Parameters {
-    public struct Settings: Codable, Sendable {
+    public struct Settings: Codable, Sendable, Equatable {
         /// Only `hanatos2025` is ported.
         public var rgbToRawMethod = "hanatos2025"
         public var applyHanatos2025AdaptationWindow = true
@@ -77,16 +77,32 @@ extension Parameters {
         /// Not ported (0 by default).
         public var spectralGaussianBlur = 0.0
         public var neutralPrintFiltersFromDatabase = true
+        /// Long side, in pixels, of the image the GUI previews on.
+        public var previewMaxSize = 640
     }
 
-    public struct PrintRender: Codable, Sendable {
+    /// `digest_params` with `settings.preview_mode`: the preview leaves out the blurs and grain
+    /// (scatter and halation stay).
+    public mutating func applyPreviewMode() {
+        enlarger.lensBlur = 0
+        filmRender.dirCouplers.diffusionSizeUm = 0
+        filmRender.grain.active = false
+        filmRender.grain.particleAreaUm2 = 0
+        filmRender.grain.blur = 0
+        printRender.glare.blur = 0
+        camera.lensBlurUm = 0
+        scanner.lensBlur = 0
+        scanner.unsharpMask = [0, 0]
+    }
+
+    public struct PrintRender: Codable, Sendable, Equatable {
         public var densityCurvesMorph = PrintCurvesMorph()
         public var glare = Glare()
     }
 
     /// Spektrafilm's `GlareParams`: flare in the print viewing, as a random field of the viewing
     /// illuminant added to the scanned XYZ.
-    public struct Glare: Codable, Sendable {
+    public struct Glare: Codable, Sendable, Equatable {
         public var active = true
         /// Mean, in percent of the illuminant.
         public var percent = 0.03
@@ -98,7 +114,7 @@ extension Parameters {
 
     /// Spektrafilm's `PrintCurvesMorphParams`: coupled-gamma reshaping of the paper's fitted
     /// sub-layer curves (fast = lowest-threshold layer) plus developer exhaustion. Off by default.
-    public struct PrintCurvesMorph: Codable, Sendable {
+    public struct PrintCurvesMorph: Codable, Sendable, Equatable {
         public var active = false
         public var gammaFactor = 1.0
         public var gammaFactorFast = 1.0
@@ -111,7 +127,7 @@ extension Parameters {
     }
 
     /// Spektrafilm's `EnlargerParams`. Filter values are Kodak CC units (100 = density 1.0).
-    public struct Enlarger: Codable, Sendable {
+    public struct Enlarger: Codable, Sendable, Equatable {
         /// A key of ``Tables/illuminants``.
         public var illuminant = "TH-KG3"
         public var printExposure = 1.0
@@ -152,7 +168,7 @@ extension Parameters {
 }
 
 extension Parameters {
-    public struct FilmRender: Codable, Sendable {
+    public struct FilmRender: Codable, Sendable, Equatable {
         /// Scales the film's contrast: the exposure axis of its density curves is divided by it.
         public var densityCurveGamma = 1.0
         public var halation = Halation()
@@ -162,7 +178,7 @@ extension Parameters {
 
     /// Spektrafilm's `GrainParams`. Only the sub-layer model is ported (`sublayers_active`, the
     /// default).
-    public struct Grain: Codable, Sendable {
+    public struct Grain: Codable, Sendable, Equatable {
         public var active = true
         public var sublayersActive = true
         /// Area of one silver halide particle in µm², before the scales.
@@ -183,7 +199,7 @@ extension Parameters {
 
     /// Spektrafilm's `DirCouplersParams`: development inhibitor release, within a layer
     /// (contrast, local sharpening) and between layers (saturation).
-    public struct DirCouplers: Codable, Sendable {
+    public struct DirCouplers: Codable, Sendable, Equatable {
         public var active = true
         public var amount = 1.0
         public var inhibitionSamelayer = 1.0
@@ -212,7 +228,7 @@ extension Parameters {
 
     /// Spektrafilm's `HalationParams`: highlight boost, in-emulsion scatter and back-reflection
     /// halation. Per-channel values are R, G, B.
-    public struct Halation: Codable, Sendable {
+    public struct Halation: Codable, Sendable, Equatable {
         public var active = true
         public var scatterAmount = 1.0
         public var scatterSpatialScale = 1.0
