@@ -51,12 +51,32 @@ extension GPU {
         encode("exp10_rgb", on: encoder, textures: [input, output], grid: output.size)
     }
 
-    /// `matrix · rgb` per pixel; `rows` is the matrix as NumPy writes it.
+    /// `matrix · rgb + offset` per pixel; `rows` is the matrix as NumPy writes it.
     public func encodeMatrix(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
-                             output: any MTLTexture, rows: [SIMD3<Double>]) {
+                             output: any MTLTexture, rows: [SIMD3<Double>], offset: SIMD3<Double> = .zero) {
         var matrix = simd_float3x3(rows: rows.map { SIMD3<Float>($0) })
+        var offset = SIMD3<Float>(offset)
         encode("matrix_rgb", on: encoder, textures: [input, output], grid: output.size) {
             $0.setBytes(&matrix, length: MemoryLayout<simd_float3x3>.size, index: 0)
+            $0.setBytes(&offset, length: MemoryLayout<SIMD3<Float>>.size, index: 1)
         }
     }
+}
+
+/// `numpy.interp` for an increasing `xp`, in f64: end values outside, exact at the nodes.
+func interp(_ x: Double, _ xp: [Double], _ fp: [Double]) -> Double {
+    if x < xp[0] { return fp[0] }
+    if x >= xp[xp.count - 1] { return fp[fp.count - 1] }
+    var low = 0, high = xp.count - 1
+    while high - low > 1 {
+        let mid = (low + high) / 2
+        if xp[mid] <= x { low = mid } else { high = mid }
+    }
+    if x == xp[low] { return fp[low] }
+    let slope = (fp[low + 1] - fp[low]) / (xp[low + 1] - xp[low])
+    let value = slope * (x - xp[low]) + fp[low]
+    // numpy's fallbacks for non-finite slopes.
+    guard value.isNaN else { return value }
+    let fromRight = slope * (x - xp[low + 1]) + fp[low + 1]
+    return fromRight.isNaN && fp[low] == fp[low + 1] ? fp[low] : fromRight
 }

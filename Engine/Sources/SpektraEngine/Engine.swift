@@ -18,9 +18,17 @@ public actor Engine {
         simulation = try Simulation(parameters: parameters, film: film, gpu: gpu, tables: Tables.load())
     }
 
-    /// The simulation of `image`, as far as it is ported (PLAN.md): today the auto-exposed input.
+    /// The simulation of `image`, as far as it is ported (PLAN.md): today the developed negative,
+    /// shown as each dye layer's transmittance 10^−density in the working space. A rough view —
+    /// the spectral scan of the negative comes with the scanning stage.
     public func render(_ image: RGBImage) throws -> RGBImage {
-        let output = try gpu.run { simulation.encodePreprocess(image, on: $0) }
+        let output = try gpu.run { encoder in
+            let density = simulation.encodeDevelop(
+                simulation.encodeExpose(simulation.encodePreprocess(image, on: encoder), on: encoder), on: encoder)
+            gpu.encodeScale(on: encoder, input: density, output: density, by: -1)
+            gpu.encodeExp10(on: encoder, input: density, output: density)
+            return density
+        }
         return RGBImage(width: image.width, height: image.height, pixels: gpu.download(output))
     }
 }
