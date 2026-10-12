@@ -3,7 +3,8 @@ import Foundation
 import simd
 
 /// The tc LUT a film is exposed through (`SpectralLUTService.get_filming_tc_lut`): its raw
-/// response to the hanatos2025 spectra with the input gamut compression baked in.
+/// response to the hanatos2025 spectra with the input gamut compression baked in. Of the
+/// parameters it reads only those in ``SimulationCache/FilmingLUTKey``, which caches it.
 func filmingTCLUT(film: Profile, parameters: Parameters, tables: Tables, spectra: NPYArray) -> [SIMD3<Double>] {
     let sensitivity = film.data.logSensitivity.map { log in
         let linear = SIMD3(pow(10, log.x), pow(10, log.y), pow(10, log.z))

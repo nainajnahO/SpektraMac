@@ -20,10 +20,25 @@ final class PhotoModel {
         didSet { scheduleRender() }
     }
     private(set) var sourceName = ""
-    /// Show a scan of the developed film (the negative) instead of the print.
-    var scanFilm = false {
+    /// What the sidebar and the Film | Negative switch set; every change re-renders the preview.
+    var controls = Controls() {
         didSet { scheduleRender() }
     }
+    /// The film. Choosing one also picks the paper it's meant to be printed on and, as
+    /// Spektrafilm's GUI does, views slides directly instead of printing them.
+    var film: String {
+        get { controls.film }
+        set {
+            controls.film = newValue
+            guard let info = films.first(where: { $0.stock == newValue }) else { return }
+            if let paper = info.targetPrint {
+                controls.paper = paper
+            }
+            controls.scanFilm = info.type == .positive
+        }
+    }
+    var films: [ProfileInfo] { engine?.films ?? [] }
+    var papers: [ProfileInfo] { engine?.papers ?? [] }
     /// Display-sized rendering of the last simulation.
     private(set) var displayImage: CGImage?
     /// Whether `displayImage` comes from the full-resolution render rather than the preview.
@@ -112,11 +127,11 @@ final class PhotoModel {
             return
         }
         isRendering = true
-        let scanFilm = scanFilm
+        let controls = controls
         renderTask = Task {
             let start = ContinuousClock.now
             do {
-                let output = try await engine.render(image, scanFilm: scanFilm, preview: !fullResolution)
+                let output = try await engine.render(image, controls: controls, preview: !fullResolution)
                 let display = await Task.detached(priority: .userInitiated) {
                     output.displayImage(in: Engine.outputColorSpace)
                 }.value

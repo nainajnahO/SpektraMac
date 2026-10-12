@@ -20,7 +20,7 @@ struct ContentView: View {
                 .navigationTitle(model.sourceName.isEmpty ? "SpektraMac" : model.sourceName)
                 .toolbar {
                     ToolbarItemGroup(placement: .principal) {
-                        Picker("Show", selection: $model.scanFilm) {
+                        Picker("Show", selection: $model.controls.scanFilm) {
                             Text("Film").tag(false)
                             Text("Negative").tag(true)
                         }
@@ -63,6 +63,7 @@ private struct SettingsSidebar: View {
     @Environment(PhotoModel.self) private var model
 
     var body: some View {
+        @Bindable var model = model
         Form {
             Section("Photo") {
                 if let source = model.source {
@@ -72,8 +73,70 @@ private struct SettingsSidebar: View {
                     LabeledContent("File") { Text("None").foregroundStyle(.secondary) }
                 }
             }
+            Section("Simulation") {
+                Picker("Film", selection: $model.film) {
+                    ForEach(model.films, id: \.stock) { Text($0.name).tag($0.stock) }
+                }
+                Picker("Paper", selection: $model.controls.paper) {
+                    ForEach(model.papers, id: \.stock) { Text($0.name).tag($0.stock) }
+                }
+                .disabled(model.controls.scanFilm)
+            }
+            Section("Exposure") {
+                Toggle("Auto exposure", isOn: $model.controls.autoExposure)
+                ValueSlider("Compensation", value: $model.controls.exposureCompensationEV, in: -5...5, step: 0.25,
+                            format: .number.precision(.fractionLength(2)).sign(strategy: .always(includingZero: false)),
+                            unit: "EV")
+            }
+            Section("Enlarger") {
+                ValueSlider("Print exposure", value: $model.controls.printExposure, in: 0...2, step: 0.02,
+                            format: .number.precision(.fractionLength(2)))
+                ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: -100...100, step: 1,
+                            format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
+                            unit: "CC")
+                ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: -100...100, step: 1,
+                            format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
+                            unit: "CC")
+            }
+            .disabled(model.controls.scanFilm)
+            Section("Effects") {
+                Toggle("Grain", isOn: $model.controls.grain)
+                Toggle("Halation", isOn: $model.controls.halation)
+            }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// A slider with its value written out beside it (SwiftUI's `Slider` doesn't show its value).
+private struct ValueSlider: View {
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let format: FloatingPointFormatStyle<Double>
+    let unit: String
+
+    init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double,
+         format: FloatingPointFormatStyle<Double>, unit: String = "") {
+        self.title = title
+        _value = value
+        self.range = range
+        self.step = step
+        self.format = format
+        self.unit = unit
+    }
+
+    var body: some View {
+        LabeledContent(title) {
+            HStack {
+                Slider(value: $value, in: range, step: step)
+                    .labelsHidden()
+                Text(unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)")
+                    .monospacedDigit()
+                    .frame(minWidth: 64, alignment: .trailing)
+            }
+        }
     }
 }
 

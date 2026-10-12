@@ -55,7 +55,9 @@ public struct Simulation {
         public var description: String { "Unknown colour space \(name)" }
     }
 
-    public init(parameters: Parameters, film: Profile, print: Profile, gpu: GPU, tables: Tables) throws {
+    /// `cache` keeps the costliest tables for the next simulation built with it.
+    public init(parameters: Parameters, film: Profile, print: Profile, gpu: GPU, tables: Tables,
+                cache: SimulationCache = SimulationCache()) throws {
         guard let inputColourSpace = tables.colourSpaces[parameters.io.inputColorSpace] else {
             throw UnknownColourSpace(name: parameters.io.inputColorSpace)
         }
@@ -66,10 +68,20 @@ public struct Simulation {
         self.tables = tables
         self.inputColourSpace = inputColourSpace
 
-        let spectra = try Tables.loadSpectraLUT()
-        let lut = filmingTCLUT(film: film, parameters: parameters, tables: tables, spectra: spectra)
-        let size = spectra.shape[0]
-        filmingLUT = gpu.upload(rgb: lut.flatMap { [Float($0.x), Float($0.y), Float($0.z)] }, width: size, height: size)
+        let lutKey = SimulationCache.FilmingLUTKey(
+            film: film.info.stock, adaptationWindow: parameters.settings.applyHanatos2025AdaptationWindow,
+            inputGamutCompress: parameters.io.inputGamutCompress)
+        let (lut, size): ([SIMD3<Double>], Int)
+        if let cached = cache.filmingLUTs[lutKey] {
+            (lut, size, filmingLUT) = (cached.values, cached.texture.width, cached.texture)
+        } else {
+            let spectra = try cache.spectra ?? Tables.loadSpectraLUT()
+            cache.spectra = spectra
+            lut = filmingTCLUT(film: film, parameters: parameters, tables: tables, spectra: spectra)
+            size = spectra.shape[0]
+            filmingLUT = gpu.upload(rgb: lut.flatMap { [Float($0.x), Float($0.y), Float($0.z)] }, width: size, height: size)
+            cache.filmingLUTs[lutKey] = (lut, filmingLUT)
+        }
 
         let minimum = film.data.densityCurves.reduce(SIMD3(repeating: Double.infinity)) { pointwiseMin($0, $1) }
         filmCurves = film.data.densityCurves.map { $0 - minimum }
@@ -162,8 +174,12 @@ public struct Simulation {
         scanToOutput = simd_double3x3(rows: outputSpace.xyzToRGB)
             * vonKries(from: SIMD2(scanWhite.x, scanWhite.y) / scanWhite.sum(), to: outputSpace.whitepoint,
                        transform: tables.chromaticAdaptation["CAT02"]!)
+        let compressionKey = SimulationCache.OutputCompressionKey(
+            space: parameters.io.outputColorSpace, spec: parameters.io.outputGamutCompress)
         if parameters.io.outputGamutCompress.algorithm == "off" {
             outputCompression = nil
+        } else if let cached = cache.outputCompressions[compressionKey] {
+            outputCompression = cached
         } else {
             let compression = OutputGamutCompression(spec: parameters.io.outputGamutCompress, space: outputSpace,
                                                      cat16: tables.chromaticAdaptation["CAT16"]!)
@@ -171,6 +187,7 @@ public struct Simulation {
             let buffer = gpu.device.makeBuffer(bytes: table, length: table.count * MemoryLayout<Float>.stride,
                                                options: .storageModeShared)!
             outputCompression = (compression, buffer)
+            cache.outputCompressions[compressionKey] = (compression, buffer)
         }
 
         if enlarger.preflashExposure > 0 {
@@ -552,4 +569,27 @@ extension GPU {
         encodeGaussianBlur(on: encoder, input: amount, output: blurred, sigma: SIMD3(repeating: glare.blur))
         return blurred
     }
+}
+
+/// What building a ``Simulation`` costs most — the hanatos2025 spectra, each film's tc LUT and
+/// each output space's C_max table — kept for the next simulation built with the same inputs:
+/// the app builds one per change of a control. The GPU copies are only ever read, so simulations
+/// share them.
+public final class SimulationCache {
+    struct FilmingLUTKey: Hashable {
+        let film: String
+        let adaptationWindow: Bool
+        let inputGamutCompress: Parameters.InputGamutCompressSpec
+    }
+
+    struct OutputCompressionKey: Hashable {
+        let space: String
+        let spec: Parameters.OutputGamutCompressSpec
+    }
+
+    var spectra: NPYArray?
+    var filmingLUTs: [FilmingLUTKey: (values: [SIMD3<Double>], texture: any MTLTexture)] = [:]
+    var outputCompressions: [OutputCompressionKey: (model: OutputGamutCompression, maxChroma: any MTLBuffer)] = [:]
+
+    public init() {}
 }
