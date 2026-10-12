@@ -157,6 +157,28 @@ extension Parameters {
         public var densityCurveGamma = 1.0
         public var halation = Halation()
         public var dirCouplers = DirCouplers()
+        public var grain = Grain()
+    }
+
+    /// Spektrafilm's `GrainParams`. Only the sub-layer model is ported (`sublayers_active`, the
+    /// default).
+    public struct Grain: Codable, Sendable {
+        public var active = true
+        public var sublayersActive = true
+        /// Area of one silver halide particle in µm², before the scales.
+        public var particleAreaUm2 = 0.2
+        /// Particle area scale per channel (C, M, Y layers) and per sub-layer (fast to slow).
+        public var particleScale = [1.6, 1.6, 3.2]
+        public var particleScaleLayers = [2.0, 1.0, 0.5]
+        /// Density of fog, per channel.
+        public var densityMin = [0.03, 0.03, 0.03]
+        /// How evenly particles are spread, per channel: 1 is a perfect grid.
+        public var uniformity = [0.97, 0.99, 0.97]
+        /// Final Gaussian σ in pixels.
+        public var blur = 0.65
+        public var blurDyeCloudsUm = 1.0
+        /// Clumping: blur in µm, lognormal spread in nm.
+        public var microStructure = [0.2, 30]
     }
 
     /// Spektrafilm's `DirCouplersParams`: development inhibitor release, within a layer

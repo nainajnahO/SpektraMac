@@ -179,3 +179,42 @@ func filmingChainMatchesCMYFilm(caseName: String) throws {
     print("\(caseName) chain to cmy_film: \(difference)")
     #expect(difference.maxAbsolute < 1e-4)
 }
+
+/// Grain's particle model against Python's on uniform density patches (both random, so per patch
+/// and channel the mean and standard deviation compare): 8 levels from 2 % to 98 % of each
+/// channel's maximum density, at 5 µm pixels, without the blurs and micro-structure.
+@Test(arguments: ["kodak_portra_400", "fujifilm_velvia_100"])
+func grainParticlesMatchPythonStatistics(film: String) throws {
+    var parameters = Parameters()
+    parameters.filmRender.grain.blur = 0
+    parameters.filmRender.grain.blurDyeCloudsUm = 0
+    parameters.filmRender.grain.microStructure = [0, 0]
+    let gpu = try GPU()
+    let simulation = try Simulation(parameters: parameters, film: Profile.load(film),
+                                    print: Profile.load("kodak_portra_endura"), gpu: gpu, tables: Tables.load())
+    let x = try golden("primitives", "grain_x_\(film)")
+    let input = gpu.upload(rgb: x.values, width: x.shape[1], height: x.shape[0])
+    let ours = gpu.download(try gpu.run { simulation.encodeGrain(input, pixelSizeUm: 5, on: $0) })
+    let python = try golden("primitives", "grain_out_\(film)").values
+    func statistics(_ values: [Float], level: Int, channel: Int) -> (mean: Double, deviation: Double) {
+        let patch = (0..<128).flatMap { row in
+            (0..<128).map { column in Double(values[(row * 1024 + level * 128 + column) * 3 + channel]) }
+        }
+        let mean = patch.reduce(0, +) / Double(patch.count)
+        return (mean, (patch.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(patch.count - 1)).squareRoot())
+    }
+    var worst = (mean: 0.0, deviation: 0.0)
+    for level in 0..<8 {
+        for channel in 0..<3 {
+            let (a, b) = (statistics(ours, level: level, channel: channel), statistics(python, level: level, channel: channel))
+            worst.mean = max(worst.mean, abs(a.mean / b.mean - 1))
+            worst.deviation = max(worst.deviation, abs(a.deviation / b.deviation - 1))
+            if level == 0 || level == 4 || level == 7 {
+                print(String(format: "%@ level %d channel %d: mean %.5f vs %.5f, std %.5f vs %.5f",
+                             film, level, channel, a.mean, b.mean, a.deviation, b.deviation))
+            }
+        }
+    }
+    print("\(film) grain particles, worst over 24 patches: mean \(worst.mean * 100) %, std \(worst.deviation * 100) %")
+    #expect(worst.mean < 0.05 && worst.deviation < 0.05)
+}
