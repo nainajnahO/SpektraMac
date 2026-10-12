@@ -202,3 +202,23 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     render.cancel()
     await #expect(throws: CancellationError.self) { try await render.value }
 }
+
+/// A preset written and read back is the same controls; its JSON names them plainly.
+@Test func presetRoundTrip() throws {
+    var controls = Controls()
+    controls.film = "kodak_vision3_500t"
+    controls.paper = "kodak_2383"
+    controls.scanFilm = true
+    controls.autoExposure = false
+    controls.exposureCompensationEV = -0.75
+    controls.printExposure = 1.24
+    controls.yFilterShift = -7
+    controls.mFilterShift = 12
+    controls.grain = false
+    controls.halation = false
+    let preset = try controls.preset()
+    #expect(try Controls(preset: preset) == controls)
+    let text = try #require(String(data: preset, encoding: .utf8))
+    #expect(text.contains("\"film\" : \"kodak_vision3_500t\""))
+    #expect(throws: DecodingError.self) { try Controls(preset: Data("{\"film\": 1}".utf8)) }
+}
