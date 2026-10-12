@@ -125,3 +125,28 @@ kernel void boost_highlights(texture2d<float, access::read> input [[texture(0)]]
     }
     output.write(float4(y, 1.0f), gid);
 }
+
+// layer_particle_model for one sub-layer of all three channels. The layer's density (plus its
+// share of fog) sets the development probability p = d / d_max; seeds ~ Poisson(n / saturation)
+// with saturation = 1 − p·uniformity; developed ~ Binomial(seeds, p); each developed particle
+// adds d_max / n of density, × saturation.
+kernel void grain_layer(texture2d<float, access::read> density [[texture(0)]],
+                        texture2d<float, access::write> output [[texture(1)]],
+                        constant float3 &density_min [[buffer(0)]],
+                        constant float3 &density_max [[buffer(1)]],
+                        constant float3 &particles [[buffer(2)]],
+                        constant float3 &uniformity [[buffer(3)]],
+                        constant uint &seed [[buffer(4)]],
+                        constant uint &layer [[buffer(5)]],
+                        uint2 gid [[thread_position_in_grid]]) {
+    Random random(seed, 10 + layer, gid);
+    float3 p = clamp((density.read(gid).rgb + density_min) / density_max, 1e-6f, 1.0f - 1e-6f);
+    float3 saturation = 1.0f - p * uniformity * (1.0f - 1e-6f);
+    float3 grain;
+    for (int channel = 0; channel < 3; channel++) {
+        uint seeds = random.poisson(particles[channel] / saturation[channel]);
+        grain[channel] = float(random.binomial(seeds, p[channel])) * (density_max[channel] / particles[channel])
+                       * saturation[channel];
+    }
+    output.write(float4(grain, 1.0f), gid);
+}

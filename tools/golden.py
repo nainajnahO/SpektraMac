@@ -52,7 +52,10 @@ the cam16ucs output gamut compression for the same two spaces: its C_max(J', h')
 the default spec (`output_compress_out_<space>`) and with knee (0.2, 1.1, 4) and no lightness
 compression (`output_compress_variant_out_<space>`); and print glare with the default parameters
 on a 512x512 frame, blurred (`glare_amount`) and not (`glare_amount_unblurred`), drawn with NumPy's
-generator seeded 20260515 in place of numba's.
+generator seeded 20260515 in place of numba's; and grain's particle model (`apply_grain` with the
+dye-cloud blur, micro-structure and final blur off) at 5 um pixels on 8 uniform density patches of
+128x128 (2 % to 98 % of each channel's maximum) for Portra 400 and Velvia 100 (`grain_x_<film>`,
+`grain_out_<film>`), drawn with Python's own fixed seeds.
 
 qa-<film>-<paper>/ holds the LUT creator's QA oracle (spektrafilm_lut_creator.qa.reference, the 50k
 random sRGB samples of seed 20260515 through the pipeline in lut_mode, linear in and out) for each
@@ -96,7 +99,8 @@ from spektrafilm.runtime.pipeline import SimulationPipeline
 from spektrafilm.runtime.services import EnlargerService
 from spektrafilm.model import glare as glare_module
 from spektrafilm.model.diffusion import apply_halation_um
-from spektrafilm.runtime.params_schema import GlareParams
+from spektrafilm.model.grain import apply_grain
+from spektrafilm.runtime.params_schema import GlareParams, GrainParams
 from spektrafilm.utils import fast_stats
 from spektrafilm.utils.numba_boost_hightlights import boost_highlights
 from spektrafilm.utils.fast_gaussian_filter import fast_exponential_filter, fast_gaussian_filter
@@ -335,6 +339,20 @@ def primitives() -> dict[str, np.ndarray]:
             glare.percent, glare.roughness, 0.0, (512, 512))
     finally:
         glare_module.fast_lognormal_from_mean_std, fast_stats.fast_lognormal = saved
+
+    # Grain's particle model (apply_grain, sub-layer model, with Python's own fixed seeds) on uniform
+    # patches: 8 density levels from 2 % to 98 % of each channel's maximum, 128 x 128 each, at
+    # 5 um pixels; the dye-cloud blur, micro-structure and final blur off.
+    particles_only = GrainParams(blur=0.0, blur_dye_clouds_um=0.0, micro_structure=(0.0, 0.0))
+    for film in ("kodak_portra_400", "fujifilm_velvia_100"):
+        profile = load_profile(film)
+        curves = profile.data.density_curves - np.nanmin(profile.data.density_curves, axis=0)
+        fractions = np.repeat(np.linspace(0.02, 0.98, 8), 128)
+        x = np.tile((fractions[:, None] * np.nanmax(curves, axis=0))[None], (128, 1, 1))
+        x = x.astype(np.float32).astype(np.float64)
+        arrays[f"grain_x_{film}"] = x
+        arrays[f"grain_out_{film}"] = apply_grain(x.copy(), 5.0, particles_only, curves,
+                                                  profile.data.density_curves_layers, profile.info.type)
 
     # Output gamut compression (cam16ucs): the C_max(J', h') table and compressed samples.
     for space in ("sRGB", "ProPhoto RGB"):

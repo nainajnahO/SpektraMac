@@ -213,8 +213,7 @@ public struct Simulation {
         }
         var light = raw
         let halation = parameters.filmRender.halation
-        // ResizingService.pixel_size_um (no crop or upscale).
-        let pixelSizeUm = parameters.camera.filmFormatMm * 1000 / Double(max(rgb.width, rgb.height))
+        let pixelSizeUm = pixelSizeUm(of: rgb)
         if halation.boostEv > 0 {
             light = gpu.encodeBoostHighlights(on: encoder, input: light, boostEv: halation.boostEv,
                                               boostRange: halation.boostRange, protectEv: halation.protectEv)
@@ -238,9 +237,15 @@ public struct Simulation {
     /// with DIR couplers: the silver formed releases inhibitors (matrix: donor layer → receiving
     /// layer) that diffuse (Gaussian + exponential tail) and lower each layer's effective exposure,
     /// which is then developed again on the pre-coupler curves.
-    ///
-    /// Not yet ported: grain (Days 26–28; off without stochastic effects).
+    /// Then grain (``encodeGrain(_:pixelSizeUm:on:)``) when it's on.
     public func encodeDevelop(_ logExposure: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        let density = encodeDevelopDensity(logExposure, on: encoder)
+        guard parameters.filmRender.grain.active else { return density }
+        return encodeGrain(density, pixelSizeUm: pixelSizeUm(of: logExposure), on: encoder)
+    }
+
+    private func encodeDevelopDensity(_ logExposure: any MTLTexture,
+                                      on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
         let (width, height) = (logExposure.width, logExposure.height)
         let gamma = parameters.filmRender.densityCurveGamma
         let axis = film.data.logExposure.map { SIMD3(repeating: $0 / gamma) }
@@ -265,7 +270,7 @@ public struct Simulation {
 
         var diffused = correction
         if couplers.diffusionSizeUm > 0 {
-            let pixelSizeUm = parameters.camera.filmFormatMm * 1000 / Double(max(width, height))
+            let pixelSizeUm = pixelSizeUm(of: logExposure)
             let (core, tail) = (gpu.makeTexture(width: width, height: height), gpu.makeTexture(width: width, height: height))
             gpu.encodeGaussianBlur(on: encoder, input: correction, output: core,
                                    sigma: SIMD3(repeating: couplers.diffusionSizeUm / pixelSizeUm))
@@ -282,6 +287,74 @@ public struct Simulation {
         let developed = gpu.makeTexture(width: width, height: height)
         gpu.encodeInterpolate(on: encoder, input: corrected, output: developed, axis: axis, values: filmCurvesBeforeCouplers)
         return developed
+    }
+}
+
+extension Simulation {
+    /// `apply_grain`, sub-layer model: each channel's density is split over the film's three
+    /// sensitivity sub-layers through their density curves, and each sub-layer develops as a random
+    /// count of particles (`layer_particle_model`, kernel `grain_layer`), the counts per pixel set
+    /// by the pixel's area and the particles' (`particle_area_um2` × scales, each sub-layer's share
+    /// of the channel's maximum density). The sub-layers add up, less the fog (`density_min`).
+    ///
+    /// Not yet ported: the dye-cloud blur, micro-structure and final blur (Day 28).
+    func encodeGrain(_ density: any MTLTexture, pixelSizeUm: Double,
+                     on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        let grain = parameters.filmRender.grain
+        let (width, height) = (density.width, density.height)
+        let layers = film.data.densityCurvesLayers
+        let layerMaxima = (0..<3).map { layer in
+            layers.reduce(SIMD3(repeating: -Double.infinity)) { pointwiseMax($0, $1[layer]) }
+        }
+        let total = layerMaxima.reduce(SIMD3<Double>.zero, +)
+        let fog = SIMD3(grain.densityMin)
+        let particleArea = grain.particleAreaUm2 * SIMD3(grain.particleScale)
+        // interp_density_cmy_layers: positives interpolate on −density.
+        var source = density
+        var axis = filmCurves
+        if film.info.type == .positive {
+            source = gpu.makeTexture(width: width, height: height)
+            gpu.encodeScale(on: encoder, input: density, output: source, by: -1)
+            axis = filmCurves.map { -$0 }
+        }
+        var sum: (any MTLTexture)?
+        for layer in 0..<3 {
+            let share = layerMaxima[layer] / total
+            var layerFog = SIMD3<Float>(share * fog)
+            var layerMax = SIMD3<Float>(layerMaxima[layer] + share * fog)
+            var particles = SIMD3<Float>(pixelSizeUm * pixelSizeUm * share
+                                         / (particleArea * grain.particleScaleLayers[layer]))
+            var uniformity = SIMD3<Float>(SIMD3(grain.uniformity))
+            var (seed, index) = (Self.seed, UInt32(layer))
+            let layerDensity = gpu.makeTexture(width: width, height: height)
+            gpu.encodeInterpolate(on: encoder, input: source, output: layerDensity, axis: axis,
+                                  values: layers.map { $0[layer] })
+            let layerGrain = gpu.makeTexture(width: width, height: height)
+            gpu.encode("grain_layer", on: encoder, textures: [layerDensity, layerGrain], grid: layerGrain.size) {
+                $0.setBytes(&layerFog, length: MemoryLayout<SIMD3<Float>>.size, index: 0)
+                $0.setBytes(&layerMax, length: MemoryLayout<SIMD3<Float>>.size, index: 1)
+                $0.setBytes(&particles, length: MemoryLayout<SIMD3<Float>>.size, index: 2)
+                $0.setBytes(&uniformity, length: MemoryLayout<SIMD3<Float>>.size, index: 3)
+                $0.setBytes(&seed, length: 4, index: 4)
+                $0.setBytes(&index, length: 4, index: 5)
+            }
+            if let previous = sum {
+                gpu.encodeAddScaled(on: encoder, accumulator: previous, input: layerGrain, output: previous,
+                                    weight: SIMD3(repeating: 1))
+            } else {
+                sum = layerGrain
+            }
+        }
+        let output = gpu.makeTexture(width: width, height: height)
+        gpu.encodeMatrix(on: encoder, input: sum!, output: output,
+                         rows: [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)], offset: -fog)
+        return output
+    }
+
+    /// ResizingService.pixel_size_um (no crop or upscale): the film format's long side over the
+    /// image's.
+    func pixelSizeUm(of texture: any MTLTexture) -> Double {
+        parameters.camera.filmFormatMm * 1000 / Double(max(texture.width, texture.height))
     }
 }
 
