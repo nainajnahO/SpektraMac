@@ -48,7 +48,7 @@ public struct Parameters: Codable, Sendable, Equatable {
     }
 
     /// Spektrafilm's `InputGamutCompressSpec`.
-    public struct InputGamutCompressSpec: Codable, Sendable, Equatable {
+    public struct InputGamutCompressSpec: Codable, Sendable, Hashable {
         public var active = true
         /// Only `xy` is ported.
         public var algorithm = "xy"
@@ -57,7 +57,7 @@ public struct Parameters: Codable, Sendable, Equatable {
     }
 
     /// Spektrafilm's `OutputGamutCompressSpec`.
-    public struct OutputGamutCompressSpec: Codable, Sendable, Equatable {
+    public struct OutputGamutCompressSpec: Codable, Sendable, Hashable {
         /// Only `cam16ucs` and `off` are ported.
         public var algorithm = "cam16ucs"
         /// Reinhard knee on chroma / C_max (threshold, limit, power).
