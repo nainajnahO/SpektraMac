@@ -18,17 +18,6 @@ struct OutputCompression {
 // spow (Filming.metal) per channel.
 inline float3 spow(float3 x, float p) { return copysign(pow(fabs(x), p), x); }
 
-// MSL has neither log1p nor expm1: Kahan's accurate forms (Goldberg 1991, theorem 4).
-static float log1p_accurate(float x) {
-    float u = 1.0f + x;
-    return u == 1.0f ? x : log(u) * x / (u - 1.0f);
-}
-static float expm1_accurate(float x) {
-    float u = exp(x);
-    if (u == 1.0f) return x;
-    return u - 1.0f == -1.0f ? -1.0f : (u - 1.0f) * x / log(u);
-}
-
 // reinhard_knee: identity up to the threshold, then a smooth approach to the limit. The
 // rational part rewritten for large x so x^power can't overflow in float.
 static float reinhard_knee(float d, float3 knee) {

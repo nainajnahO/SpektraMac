@@ -21,7 +21,7 @@ kernel void glare_lognormal(texture2d<float, access::write> output [[texture(0)]
                             constant float2 &mu_sigma [[buffer(1)]],
                             uint2 gid [[thread_position_in_grid]]) {
     Random random(seed, 1, gid);
-    float amount = exp(mu_sigma.x + mu_sigma.y * random.normal()) / 100.0f;
+    float amount = random.lognormal(mu_sigma.x, mu_sigma.y) / 100.0f;
     output.write(float4(float3(amount), 1.0f), gid);
 }
 
