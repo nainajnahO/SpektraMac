@@ -39,7 +39,12 @@ enlarger light at the digested neutral filters (`enlarger_<film>`), with M +12 /
 Portra chart re-run with print exposure 1.3, exposure compensation +0.7 EV balanced at the
 enlarger, and a 0.3 preflash with M +5 / Y -3 (`print_variant_cmy_film`, `print_variant_log_e_print`);
 and each paper's print curves from its fitted model, plain (`print_curves_<paper>`) and with every
-morph control moved, developer exhaustion 0.4 included (`print_curves_morphed_<paper>`).
+morph control moved, developer exhaustion 0.4 included (`print_curves_morphed_<paper>`); and CAM16-UCS
+as the output gamut compression calls it (L_A 64, Y_b 20, Average surround, the output space's white
+at Y = 1), around the sRGB and ProPhoto RGB whites: forward on XYZ of random linear RGB in
+[-0.25, 1.5] with a row in [-1, 3] and black, white and 1e-6 grey first (`cam16ucs_xyz_<space>` ->
+`cam16ucs_jab_<space>`), and inverse on those J'a'b' with chroma scaled by 0.7 plus a row with J' up
+to 130 and |a'|, |b'| up to 100 (`cam16ucs_inverse_jab_<space>` -> `cam16ucs_inverse_xyz_<space>`).
 
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
@@ -76,7 +81,13 @@ from spektrafilm.utils.fast_interp import fast_interp
 from spektrafilm.utils.gamut_compression import OutputGamutCompressSpec
 from spektrafilm.utils.morph_curves import PrintCurvesMorphParams, apply_print_curves_morph
 from matplotlib.path import Path as MplPath
-from spektrafilm.utils.gamut_compression import _ray_polygon_distance, spectral_locus_xy
+from spektrafilm.utils.gamut_compression import (
+    _CAM16UCS_L_A,
+    _CAM16UCS_Y_B,
+    _output_cs_whitepoint_xyz,
+    _ray_polygon_distance,
+    spectral_locus_xy,
+)
 from spektrafilm.utils.spectral_upsampling import _illuminant_to_xy, _quad2tri, compute_hanatos2025_tc_lut
 from spektrafilm.utils.autoexposure import measure_autoexposure_ev
 
@@ -252,6 +263,23 @@ def primitives() -> dict[str, np.ndarray]:
         for name, params in (("print_curves", PrintCurvesMorphParams(active=False)), ("print_curves_morphed", morph)):
             arrays[f"{name}_{paper}"] = apply_print_curves_morph(
                 data.log_exposure, data.density_curves_model, params, profile_type=kind)
+
+    # CAM16-UCS exactly as compress_rgb_cam16ucs_chroma calls it, around the output space's white.
+    for space in ("sRGB", "ProPhoto RGB"):
+        suffix = space.split()[0]
+        cam16 = dict(XYZ_w=_output_cs_whitepoint_xyz(space), L_A=_CAM16UCS_L_A, Y_b=_CAM16UCS_Y_B)
+        rgb = rng.uniform(-0.25, 1.5, (64, 64, 3))
+        rgb[1] = rng.uniform(-1.0, 3.0, (64, 3))
+        rgb[0, :3] = [[0.0] * 3, [1.0] * 3, [1e-6] * 3]
+        xyz = colour.RGB_to_XYZ(rgb, colourspace=space, illuminant=colour.RGB_COLOURSPACES[space].whitepoint,
+                                apply_cctf_decoding=False).astype(np.float32).astype(np.float64)
+        jab = colour.XYZ_to_CAM16UCS(xyz, **cam16)
+        inverse_jab = jab * [1.0, 0.7, 0.7]
+        inverse_jab[1] = rng.uniform([0.0, -100.0, -100.0], [130.0, 100.0, 100.0], (64, 3))
+        inverse_jab = inverse_jab.astype(np.float32).astype(np.float64)
+        arrays.update({f"cam16ucs_xyz_{suffix}": xyz, f"cam16ucs_jab_{suffix}": jab,
+                       f"cam16ucs_inverse_jab_{suffix}": inverse_jab,
+                       f"cam16ucs_inverse_xyz_{suffix}": colour.CAM16UCS_to_XYZ(inverse_jab, **cam16)})
     return arrays
 
 
