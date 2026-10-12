@@ -4,7 +4,7 @@ import Testing
 
 /// Runs one primitive over `primitives/<name>_x.npy` and compares with `<name>_out.npy`.
 private func checkPrimitive(_ name: String, tolerance: Double,
-                            encode: (GPU, any MTLComputeCommandEncoder, any MTLTexture, any MTLTexture) -> Void) throws {
+                            encode: (GPU, Encoder, any MTLTexture, any MTLTexture) -> Void) throws {
     let gpu = try GPU()
     let x = try golden("primitives", "\(name)_x")
     let reference = try golden("primitives", "\(name)_out")

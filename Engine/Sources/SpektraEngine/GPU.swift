@@ -85,33 +85,87 @@ public final class GPU: Sendable {
     /// buffers); textures bind at indices 0, 1, … in order.
     public func encode(
         _ kernel: String,
-        on encoder: any MTLComputeCommandEncoder,
+        on encoder: Encoder,
         textures: [any MTLTexture],
         grid: MTLSize,
         setArguments: (any MTLComputeCommandEncoder) -> Void = { _ in }
     ) {
         guard let pipeline = pipelines[kernel] else { preconditionFailure("No Metal kernel named \(kernel)") }
-        encoder.setComputePipelineState(pipeline)
+        encoder.flushIfOverBudget()
+        let compute = encoder.compute
+        compute.setComputePipelineState(pipeline)
         for (index, texture) in textures.enumerated() {
-            encoder.setTexture(texture, index: index)
+            compute.setTexture(texture, index: index)
         }
-        setArguments(encoder)
+        setArguments(compute)
         let width = pipeline.threadExecutionWidth
         let height = grid.height > 1 ? pipeline.maxTotalThreadsPerThreadgroup / width : 1
-        encoder.dispatchThreads(grid, threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
+        compute.dispatchThreads(grid, threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
     }
 
-    /// Runs what `body` encodes in one command buffer, waits for the GPU to finish and returns
-    /// `body`'s result (typically the output texture, complete by then).
-    public func run<Result>(_ body: (any MTLComputeCommandEncoder) -> Result) throws -> Result {
-        let commandBuffer = queue.makeCommandBuffer()!
-        let encoder = commandBuffer.makeComputeCommandEncoder()!
+    /// Runs what `body` encodes, waits for the GPU to finish and returns `body`'s result
+    /// (typically the output texture, complete by then).
+    public func run<Result>(_ body: (Encoder) -> Result) throws -> Result {
+        let encoder = Encoder(device: device, queue: queue)
         let result = body(encoder)
-        encoder.endEncoding()
+        try encoder.finish()
+        return result
+    }
+}
+
+/// Where the kernels of one ``GPU/run(_:)`` are encoded. A command buffer keeps every texture its
+/// commands use alive until it completes, which for the whole chain on a 24 MP image is tens of
+/// gigabytes of intermediates. So once the commands encoded so far have allocated ``budget``,
+/// they are committed and waited for, and encoding continues in a new command buffer: the
+/// intermediates only that work used are freed. (Metal heaps with aliasing would reuse memory
+/// within one command buffer, but need every texture's last use marked by hand.)
+public final class Encoder {
+    /// Allocation that triggers a new command buffer: under one 24 MP texture (384 MB), so dead
+    /// intermediates don't pile up; waiting between command buffers costs little next to kernels
+    /// that run for milliseconds at that size.
+    static let budget = 256 << 20
+
+    private let device: any MTLDevice
+    private let queue: any MTLCommandQueue
+    private var commandBuffer: any MTLCommandBuffer
+    /// The current command buffer's encoder, for kernels encoded outside ``GPU``.
+    public private(set) var compute: any MTLComputeCommandEncoder
+    private var allocatedAtStart: Int
+    private var error: (any Error)?
+    /// The most GPU memory allocated at any kernel encoded so far.
+    public private(set) var peakAllocatedSize: Int
+
+    init(device: any MTLDevice, queue: any MTLCommandQueue) {
+        self.device = device
+        self.queue = queue
+        commandBuffer = queue.makeCommandBuffer()!
+        compute = commandBuffer.makeComputeCommandEncoder()!
+        allocatedAtStart = device.currentAllocatedSize
+        peakAllocatedSize = allocatedAtStart
+    }
+
+    func flushIfOverBudget() {
+        let allocated = device.currentAllocatedSize
+        peakAllocatedSize = max(peakAllocatedSize, allocated)
+        guard allocated - allocatedAtStart > Self.budget else { return }
+        complete()
+        commandBuffer = queue.makeCommandBuffer()!
+        compute = commandBuffer.makeComputeCommandEncoder()!
+        allocatedAtStart = device.currentAllocatedSize
+    }
+
+    /// Completes the last command buffer; throws the first error any of them reported.
+    func finish() throws {
+        peakAllocatedSize = max(peakAllocatedSize, device.currentAllocatedSize)
+        complete()
+        if let error { throw error }
+    }
+
+    private func complete() {
+        compute.endEncoding()
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
-        if let error = commandBuffer.error { throw error }
-        return result
+        if error == nil { error = commandBuffer.error }
     }
 }
 
