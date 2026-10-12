@@ -44,14 +44,20 @@ as the output gamut compression calls it (L_A 64, Y_b 20, Average surround, the 
 at Y = 1), around the sRGB and ProPhoto RGB whites: forward on XYZ of random linear RGB in
 [-0.25, 1.5] with a row in [-1, 3] and black, white and 1e-6 grey first (`cam16ucs_xyz_<space>` ->
 `cam16ucs_jab_<space>`), and inverse on those J'a'b' with chroma scaled by 0.7 plus a row with J' up
-to 130 and |a'|, |b'| up to 100 (`cam16ucs_inverse_jab_<space>` -> `cam16ucs_inverse_xyz_<space>`).
+to 130 and |a'|, |b'| up to 100 (`cam16ucs_inverse_jab_<space>` -> `cam16ucs_inverse_xyz_<space>`); and
+the cam16ucs output gamut compression for the same two spaces: its C_max(J', h') table
+(`cmax_cam16ucs_<space>`, 64x720) and random linear RGB in [-0.3, 1.6] with black, white, 2x white,
+1e-6 grey, the primaries and an out-of-gamut red first (`output_compress_x_<space>`), compressed with
+the default spec (`output_compress_out_<space>`) and with knee (0.2, 1.1, 4) and no lightness
+compression (`output_compress_variant_out_<space>`).
 
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
 (tc_lut.npy, 192x192x3), the film density from the run's log_e_film without DIR couplers
 (cmy_film_no_couplers.npy, develop_simple on the normalised curves), the scanned RGB before output
 gamut compression, blur, unsharp mask and encoding (rgb_uncompressed.npy, the scanning stage's
-_density_to_rgb with compression off), and params.json: the digested parameters (profiles by stock name only),
+_density_to_rgb with compression off), that RGB through the run's output gamut compression
+(rgb_compressed.npy, from its float32 values), and params.json: the digested parameters (profiles by stock name only),
 pixel_size_um, the measured auto-exposure EV and the tap list.
 """
 
@@ -78,12 +84,13 @@ from spektrafilm.model.diffusion import apply_halation_um
 from spektrafilm.utils.numba_boost_hightlights import boost_highlights
 from spektrafilm.utils.fast_gaussian_filter import fast_exponential_filter, fast_gaussian_filter
 from spektrafilm.utils.fast_interp import fast_interp
-from spektrafilm.utils.gamut_compression import OutputGamutCompressSpec
+from spektrafilm.utils.gamut_compression import OutputGamutCompressSpec, compress_rgb
 from spektrafilm.utils.morph_curves import PrintCurvesMorphParams, apply_print_curves_morph
 from matplotlib.path import Path as MplPath
 from spektrafilm.utils.gamut_compression import (
     _CAM16UCS_L_A,
     _CAM16UCS_Y_B,
+    _get_output_c_max_table,
     _output_cs_whitepoint_xyz,
     _ray_polygon_distance,
     spectral_locus_xy,
@@ -280,6 +287,18 @@ def primitives() -> dict[str, np.ndarray]:
         arrays.update({f"cam16ucs_xyz_{suffix}": xyz, f"cam16ucs_jab_{suffix}": jab,
                        f"cam16ucs_inverse_jab_{suffix}": inverse_jab,
                        f"cam16ucs_inverse_xyz_{suffix}": colour.CAM16UCS_to_XYZ(inverse_jab, **cam16)})
+
+    # Output gamut compression (cam16ucs): the C_max(J', h') table and compressed samples.
+    for space in ("sRGB", "ProPhoto RGB"):
+        suffix = space.split()[0]
+        arrays[f"cmax_cam16ucs_{suffix}"] = _get_output_c_max_table("cam16ucs", space)[2]
+        x = rng.uniform(-0.3, 1.6, (64, 64, 3))
+        x[0, :8] = [[0, 0, 0], [1, 1, 1], [2, 2, 2], [1e-6] * 3, [1, 0, 0], [0, 1, 0], [0, 0, 1], [1.2, -0.1, -0.1]]
+        x = x.astype(np.float32).astype(np.float64)
+        variant = OutputGamutCompressSpec(knee=(0.2, 1.1, 4.0), lightness_compression=None)
+        arrays.update({f"output_compress_x_{suffix}": x,
+                       f"output_compress_out_{suffix}": compress_rgb(x, OutputGamutCompressSpec(), output_color_space=space),
+                       f"output_compress_variant_out_{suffix}": compress_rgb(x, variant, output_color_space=space)})
     return arrays
 
 
@@ -322,8 +341,12 @@ def main():
             uncompressed_params.io.output_gamut_compress = OutputGamutCompressSpec(algorithm="off")
             scanner = SimulationPipeline(uncompressed_params)._scanning_stage
             uncompressed = scanner._density_to_rgb(taps["cmy_film" if scan_film else "cmy_print"], use_lut=False)
+            # From the float32 values the Swift tests read, so both sides compress the same input.
+            compressed = compress_rgb(np.float32(uncompressed).astype(np.float64), params.io.output_gamut_compress,
+                                      output_color_space=params.io.output_color_space)
             arrays = dict(taps, tc_lut=pipeline._lut_service.filming_tc_lut_memory,
-                          cmy_film_no_couplers=no_couplers, rgb_uncompressed=uncompressed)
+                          cmy_film_no_couplers=no_couplers, rgb_uncompressed=uncompressed,
+                          rgb_compressed=compressed)
             for name, array in arrays.items():
                 np.save(case_dir / f"{name}.npy", np.asarray(array, dtype=np.float32))
 
