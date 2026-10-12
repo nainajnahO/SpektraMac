@@ -1,3 +1,5 @@
+import simd
+
 /// Spektrafilm's `RuntimePhotoParams` after `digest_params`, field for field. Property names are
 /// the Python names in camelCase, so the JSON the golden data records decodes directly
 /// (`JSONDecoder.KeyDecodingStrategy.convertFromSnakeCase`). Grows as stages are ported.
@@ -55,6 +57,36 @@ extension Parameters {
         /// Scales the film's contrast: the exposure axis of its density curves is divided by it.
         public var densityCurveGamma = 1.0
         public var halation = Halation()
+        public var dirCouplers = DirCouplers()
+    }
+
+    /// Spektrafilm's `DirCouplersParams`: development inhibitor release, within a layer
+    /// (contrast, local sharpening) and between layers (saturation).
+    public struct DirCouplers: Codable, Sendable {
+        public var active = true
+        public var amount = 1.0
+        public var inhibitionSamelayer = 1.0
+        public var inhibitionInterlayer = 1.0
+        public var gammaSamelayerRgb = [0.341, 0.324, 0.273]
+        public var gammaInterlayerRToGb = [0.355, 0.305]
+        public var gammaInterlayerGToRb = [0.154, 0.358]
+        public var gammaInterlayerBToRg = [0.171, 0.225]
+        public var diffusionSizeUm = 20.0
+        /// Exponential tail of the inhibitor diffusion.
+        public var diffusionTailUm = 200.0
+        public var diffusionTailWeight = 0.06
+
+        /// `compute_dir_couplers_matrix` × amount: row = donor layer, column = receiving layer.
+        var matrix: simd_double3x3 {
+            let r = gammaInterlayerRToGb, g = gammaInterlayerGToRb, b = gammaInterlayerBToRg
+            let same = gammaSamelayerRgb.map { $0 * inhibitionSamelayer }
+            let i = inhibitionInterlayer
+            return amount * simd_double3x3(rows: [
+                SIMD3(same[0], r[0] * i, r[1] * i),
+                SIMD3(g[0] * i, same[1], g[1] * i),
+                SIMD3(b[0] * i, b[1] * i, same[2]),
+            ])
+        }
     }
 
     /// Spektrafilm's `HalationParams`: highlight boost, in-emulsion scatter and back-reflection
@@ -78,9 +110,29 @@ extension Parameters {
         public var halationRenormalize = true
     }
 
-    /// The film-dependent settings `digest_params` applies (`_apply_film_specifics`). So far: the
-    /// halation preset keyed by the profile's use and antihalation layer.
+    /// The film-dependent settings `digest_params` applies (`_apply_film_specifics`): DIR coupler
+    /// strengths for positive and negative films and two slide stocks, and the halation preset
+    /// keyed by the profile's use and antihalation layer.
     public mutating func applyFilmSpecifics(_ film: Profile) {
+        func setCouplers(_ same: [Double], _ r: [Double], _ g: [Double], _ b: [Double]) {
+            filmRender.dirCouplers.gammaSamelayerRgb = same
+            filmRender.dirCouplers.gammaInterlayerRToGb = r
+            filmRender.dirCouplers.gammaInterlayerGToRb = g
+            filmRender.dirCouplers.gammaInterlayerBToRg = b
+        }
+        switch film.info.type {
+        case .positive: setCouplers([0.12, 0.08, 0.06], [0.12, 0.06], [0.08, 0.06], [0.06, 0.06])
+        case .negative: setCouplers([0.336, 0.319, 0.273], [0.353, 0.302], [0.154, 0.353], [0.168, 0.226])
+        }
+        applyHalationPreset(film)
+        switch film.info.stock {
+        case "fujifilm_velvia_100": setCouplers([0.108, 0.072, 0.054], [0.108, 0.054], [0.072, 0.054], [0.054, 0.054])
+        case "fujifilm_provia_100f": setCouplers([0.156, 0.104, 0.078], [0.156, 0.078], [0.104, 0.078], [0.078, 0.078])
+        default: break
+        }
+    }
+
+    private mutating func applyHalationPreset(_ film: Profile) {
         guard film.info.support == .film else { return }
         // sigma_h from the base (still: triacetate, cine: PET); strength from the antihalation layer.
         let sigma = film.info.use == .still ? 65.0 : 50.0

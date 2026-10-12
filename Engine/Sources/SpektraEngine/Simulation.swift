@@ -19,6 +19,9 @@ public struct Simulation {
     let inputToXYZ: simd_double3x3
     /// The film's density curves shifted so each channel starts at 0 (FilmingStage.develop).
     let filmCurves: [SIMD3<Double>]
+    /// The curves before DIR couplers act, such that development with couplers reproduces
+    /// `filmCurves` on a uniform grey (`compute_density_curves_before_dir_couplers`).
+    let filmCurvesBeforeCouplers: [SIMD3<Double>]
 
     public struct UnknownColourSpace: Error, CustomStringConvertible {
         public let name: String
@@ -42,6 +45,9 @@ public struct Simulation {
 
         let minimum = film.data.densityCurves.reduce(SIMD3(repeating: Double.infinity)) { pointwiseMin($0, $1) }
         filmCurves = film.data.densityCurves.map { $0 - minimum }
+        filmCurvesBeforeCouplers = curvesBeforeCouplers(
+            filmCurves, logExposure: film.data.logExposure,
+            couplers: parameters.filmRender.dirCouplers.matrix, positive: film.info.type == .positive)
 
         let white = tables.chromaticity(of: tables.illuminants[film.info.referenceIlluminant]!)
         inputToXYZ = vonKries(from: inputColourSpace.whitepoint, to: white,
@@ -104,17 +110,76 @@ public struct Simulation {
     }
 
     /// `log_e_film → cmy_film` (FilmingStage.develop): log exposure → CMY dye density through the
-    /// film's characteristic curves, normalised to start at 0, with the exposure axis divided by
-    /// `density_curve_gamma`.
+    /// film's characteristic curves (normalised to start at 0, exposure axis ÷ density_curve_gamma),
+    /// with DIR couplers: the silver formed releases inhibitors (matrix: donor layer → receiving
+    /// layer) that diffuse (Gaussian + exponential tail) and lower each layer's effective exposure,
+    /// which is then developed again on the pre-coupler curves.
     ///
-    /// Not yet ported: DIR couplers (Day 15) and grain (Days 26–28; off without stochastic effects).
+    /// Not yet ported: grain (Days 26–28; off without stochastic effects).
     public func encodeDevelop(_ logExposure: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        let (width, height) = (logExposure.width, logExposure.height)
         let gamma = parameters.filmRender.densityCurveGamma
-        let density = gpu.makeTexture(width: logExposure.width, height: logExposure.height)
-        gpu.encodeInterpolate(on: encoder, input: logExposure, output: density,
-                              axis: film.data.logExposure.map { SIMD3(repeating: $0 / gamma) }, values: filmCurves)
-        return density
+        let axis = film.data.logExposure.map { SIMD3(repeating: $0 / gamma) }
+        let density = gpu.makeTexture(width: width, height: height)
+        gpu.encodeInterpolate(on: encoder, input: logExposure, output: density, axis: axis, values: filmCurves)
+        let couplers = parameters.filmRender.dirCouplers
+        guard couplers.active else { return density }
+
+        // Exposure correction Σ_k silver_k · M[k, m]: silver is the density for negatives and
+        // d_max − density for positives (inhibitors act at silver development).
+        // Rows of Mᵀ are M's columns (simd subscripts are columns).
+        let matrix = couplers.matrix
+        let rows = [matrix[0], matrix[1], matrix[2]]
+        let correction = gpu.makeTexture(width: width, height: height)
+        if film.info.type == .positive {
+            let densityMax = filmCurves.reduce(SIMD3(repeating: -Double.infinity)) { pointwiseMax($0, $1) }
+            gpu.encodeMatrix(on: encoder, input: density, output: correction, rows: rows.map { -$0 },
+                             offset: matrix.transpose * densityMax)
+        } else {
+            gpu.encodeMatrix(on: encoder, input: density, output: correction, rows: rows)
+        }
+
+        var diffused = correction
+        if couplers.diffusionSizeUm > 0 {
+            let pixelSizeUm = parameters.camera.filmFormatMm * 1000 / Double(max(width, height))
+            let (core, tail) = (gpu.makeTexture(width: width, height: height), gpu.makeTexture(width: width, height: height))
+            gpu.encodeGaussianBlur(on: encoder, input: correction, output: core,
+                                   sigma: SIMD3(repeating: couplers.diffusionSizeUm / pixelSizeUm))
+            gpu.encodeExponentialBlur(on: encoder, input: correction, output: tail,
+                                      decay: SIMD3(repeating: couplers.diffusionTailUm / pixelSizeUm))
+            gpu.encodeScale(on: encoder, input: core, output: core, by: 1 - couplers.diffusionTailWeight)
+            gpu.encodeAddScaled(on: encoder, accumulator: core, input: tail, output: core,
+                                weight: SIMD3(repeating: couplers.diffusionTailWeight))
+            diffused = core
+        }
+        let corrected = gpu.makeTexture(width: width, height: height)
+        gpu.encodeAddScaled(on: encoder, accumulator: logExposure, input: diffused, output: corrected,
+                            weight: SIMD3(repeating: -1))
+        let developed = gpu.makeTexture(width: width, height: height)
+        gpu.encodeInterpolate(on: encoder, input: corrected, output: developed, axis: axis, values: filmCurvesBeforeCouplers)
+        return developed
     }
+}
+
+/// `compute_density_curves_before_dir_couplers`, f64: shifts each curve's exposure axis by the
+/// inhibition a uniform grey of that density would cause, and resamples on the original axis.
+func curvesBeforeCouplers(_ curves: [SIMD3<Double>], logExposure: [Double], couplers: simd_double3x3,
+                          positive: Bool) -> [SIMD3<Double>] {
+    let densityMax = curves.reduce(SIMD3(repeating: -Double.infinity)) { pointwiseMax($0, $1) }
+    // silver · M, row vector times matrix.
+    let shifted = zip(curves, logExposure).map { density, exposure in
+        SIMD3(repeating: exposure) - (positive ? densityMax - density : density) * couplers
+    }
+    var corrected = curves
+    for channel in 0..<3 {
+        let xp = shifted.map { $0[channel] }
+        let fp = curves.map { positive ? -$0[channel] : $0[channel] }
+        for (index, exposure) in logExposure.enumerated() {
+            let value = interp(exposure, xp, fp)
+            corrected[index][channel] = positive ? -value : value
+        }
+    }
+    return corrected
 }
 
 /// colour-science's `matrix_chromatic_adaptation_VonKries` between two xy whites (Y = 1).

@@ -122,7 +122,9 @@ func halationPresetMatchesDigest(caseName: String) throws {
 func developMatchesPythonWithoutCouplers(caseName: String) throws {
     let golden = try GoldenCase(caseName)
     let gpu = try GPU()
-    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), gpu: gpu,
+    var parameters = golden.params
+    parameters.filmRender.dirCouplers.active = false
+    let simulation = try Simulation(parameters: parameters, film: Profile.load(golden.film), gpu: gpu,
                                     tables: Tables.load())
     let logEFilm = try SpektraEngineTests.golden(caseName, "log_e_film")
     let input = gpu.upload(rgb: logEFilm.values, width: logEFilm.shape[1], height: logEFilm.shape[0])
@@ -131,4 +133,49 @@ func developMatchesPythonWithoutCouplers(caseName: String) throws {
     let difference = Difference(gpu.download(output), reference.values, floor: 1)
     print("\(caseName) density without couplers: \(difference)")
     #expect(difference.maxAbsolute < 1e-5)
+}
+
+/// Chart: couplers without diffusion (lut_mode). Photo: with the inhibitor diffusion blur.
+@Test(arguments: goldenCases)
+func developMatchesCMYFilm(caseName: String) throws {
+    let golden = try GoldenCase(caseName)
+    let gpu = try GPU()
+    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), gpu: gpu,
+                                    tables: Tables.load())
+    let logEFilm = try SpektraEngineTests.golden(caseName, "log_e_film")
+    let input = gpu.upload(rgb: logEFilm.values, width: logEFilm.shape[1], height: logEFilm.shape[0])
+    let output = try gpu.run { simulation.encodeDevelop(input, on: $0) }
+    let reference = try SpektraEngineTests.golden(caseName, "cmy_film")
+    let difference = Difference(gpu.download(output), reference.values, floor: 1)
+    print("\(caseName) cmy_film: \(difference)")
+    #expect(difference.maxAbsolute < 1e-4)
+}
+
+@Test(arguments: goldenCases.filter { $0.hasPrefix("photo") })
+func couplerSettingsMatchDigest(caseName: String) throws {
+    let golden = try GoldenCase(caseName)
+    var parameters = Parameters()
+    parameters.applyFilmSpecifics(try Profile.load(golden.film))
+    let ours = parameters.filmRender.dirCouplers, theirs = golden.params.filmRender.dirCouplers
+    #expect(ours.gammaSamelayerRgb == theirs.gammaSamelayerRgb)
+    #expect(ours.gammaInterlayerRToGb == theirs.gammaInterlayerRToGb)
+    #expect(ours.gammaInterlayerGToRb == theirs.gammaInterlayerGToRb)
+    #expect(ours.gammaInterlayerBToRg == theirs.gammaInterlayerBToRg)
+}
+
+/// The filming chain end to end from the golden input: rgb_in → rgb_pre → log_e_film → cmy_film.
+@Test(arguments: goldenCases)
+func filmingChainMatchesCMYFilm(caseName: String) throws {
+    let golden = try GoldenCase(caseName)
+    let gpu = try GPU()
+    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), gpu: gpu,
+                                    tables: Tables.load())
+    let rgbIn = try SpektraEngineTests.golden(caseName, "rgb_in").image
+    let output = try gpu.run { encoder in
+        simulation.encodeDevelop(simulation.encodeExpose(simulation.encodePreprocess(rgbIn, on: encoder), on: encoder),
+                                 on: encoder)
+    }
+    let difference = Difference(gpu.download(output), try SpektraEngineTests.golden(caseName, "cmy_film").values, floor: 1)
+    print("\(caseName) chain to cmy_film: \(difference)")
+    #expect(difference.maxAbsolute < 1e-4)
 }

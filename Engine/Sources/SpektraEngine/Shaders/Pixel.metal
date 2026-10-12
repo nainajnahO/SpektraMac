@@ -58,10 +58,11 @@ kernel void exp10_rgb(texture2d<float, access::read> input [[texture(0)]],
     output.write(float4(exp10(input.read(gid).rgb), 1.0), gid);
 }
 
-// rgb' = M · rgb (colour-space changes; M is the row-major matrix NumPy would use).
+// rgb' = M · rgb + offset (colour-space changes, coupler inhibition).
 kernel void matrix_rgb(texture2d<float, access::read> input [[texture(0)]],
                        texture2d<float, access::write> output [[texture(1)]],
                        constant float3x3 &matrix [[buffer(0)]],
+                       constant float3 &offset [[buffer(1)]],
                        uint2 gid [[thread_position_in_grid]]) {
-    output.write(float4(matrix * input.read(gid).rgb, 1.0), gid);
+    output.write(float4(matrix * input.read(gid).rgb + offset, 1.0), gid);
 }
