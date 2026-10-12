@@ -57,6 +57,11 @@ public struct Tables: Decodable, Sendable {
 }
 
 extension Tables.ColourSpace {
+    /// The transfer function's number in the Metal kernels (`decode_channel`, `encode_channel`).
+    var transferIndex: UInt32 {
+        ["linear": 0, "sRGB": 1, "gamma": 2, "BT.2020": 3, "ROMM RGB": 4][cctf]!
+    }
+
     /// colour-science's `cctf_decoding` for this space: encoded value → linear, in f64.
     public func decode(_ value: Double) -> Double {
         switch cctf {

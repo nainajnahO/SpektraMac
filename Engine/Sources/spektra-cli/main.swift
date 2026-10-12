@@ -55,7 +55,7 @@ func benchmark(width: Int, height: Int) throws {
     lap("cmy_film → log_e_print (81 bands)")
     let cmyPrint = try gpu.run { simulation.encodePrintDevelop(logEPrint, on: $0) }
     lap("log_e_print → cmy_print")
-    let scanned = try gpu.run { simulation.encodeScan(cmyPrint, on: $0) }
+    let scanned = try gpu.run { simulation.encodeDensityToRGB(cmyPrint, on: $0) }
     lap("cmy_print → scanned RGB (81 bands)")
     _ = try gpu.run { simulation.encodeOutputCompression(scanned, on: $0) }
     lap("output gamut compression (cam16ucs)")

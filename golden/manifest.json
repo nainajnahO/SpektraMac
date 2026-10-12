@@ -19,6 +19,12 @@
   "chart-kodak_portra_400-kodak_portra_endura/rgb_compressed.npy": "a698441131e1562a109728b9b0365f46f9e439b38dd770a2787ec696864a7953",
   "chart-kodak_portra_400-kodak_portra_endura/rgb_in.npy": "8841a5dd62251b2191943da5b04b97e1a399e2138f3c48ea4c92a8ae80037dec",
   "chart-kodak_portra_400-kodak_portra_endura/rgb_out.npy": "234b4175465f30e003257304230ae97de43570f7410e800e1bd333e96c195feb",
+  "chart-kodak_portra_400-kodak_portra_endura/rgb_out_ACES2065-1.npy": "a5e206bfa6611c1763ceb48bfd201ef7ee08b9bbcf5832ff96d2d22a9b6b362c",
+  "chart-kodak_portra_400-kodak_portra_endura/rgb_out_Adobe_RGB_1998.npy": "65f054f9fcd0d277d7b8bb64586b47dfa464805e0984e34a69595a943a3b5776",
+  "chart-kodak_portra_400-kodak_portra_endura/rgb_out_DCI-P3.npy": "a8f8594f0df797194135480e99182125e2c71137ce02457c5cde4c3891117e2d",
+  "chart-kodak_portra_400-kodak_portra_endura/rgb_out_Display_P3.npy": "519d8dc563da351aa7a0ea6bc04916c13023480076254509f2f8f37449cf8f65",
+  "chart-kodak_portra_400-kodak_portra_endura/rgb_out_ITU-R_BT.2020.npy": "6ef4904238391bb1c3ba2804001017569a4dad195f383bc669e9c62b7cbeea9b",
+  "chart-kodak_portra_400-kodak_portra_endura/rgb_out_ProPhoto_RGB.npy": "cca86a4a8521ca0b560407afa4409ccdaa4ac3f166caaedd415f6e5a3ba4c103",
   "chart-kodak_portra_400-kodak_portra_endura/rgb_pre.npy": "8841a5dd62251b2191943da5b04b97e1a399e2138f3c48ea4c92a8ae80037dec",
   "chart-kodak_portra_400-kodak_portra_endura/rgb_uncompressed.npy": "76e18994963d8b4494e21fff6ebbe5e890495f6c611f139dba92d0e89cff1b2b",
   "chart-kodak_portra_400-kodak_portra_endura/tc_lut.npy": "90a7e12f035501fde20d2c4edb9be0118b6bb77f7dd1f9d5425b1513b724a58a",
@@ -138,7 +144,13 @@
   "primitives/print_variant_log_e_print.npy": "5f38424f03481eb3806e6ae8ba4b614d05f6241540d055cd48e0aa11b6ff4cf0",
   "primitives/tc_lut_raw_fujifilm_velvia_100.npy": "568c5ee66f6c8b7aa1c2b496789af329d29cf8c4f6187c789666bfe7450780bc",
   "primitives/tc_lut_raw_kodak_portra_400.npy": "3e3829b074b4bc7c97043c3c747a6c2df252d2e47e57343e6885d1a57ac16274",
-  "primitives/tc_lut_raw_kodak_vision3_500t.npy": "64c8687f10204f04efdaa4081fc7765f1523236bd1e5a0f8e7f7633ed62e100e"
+  "primitives/tc_lut_raw_kodak_vision3_500t.npy": "64c8687f10204f04efdaa4081fc7765f1523236bd1e5a0f8e7f7633ed62e100e",
+  "qa-kodak_portra_400-kodak_portra_endura/params.json": "ef92c4535504b317ab5c452e8c28bc8661a4c349888e5ba2dbbc0299d057ffef",
+  "qa-kodak_portra_400-kodak_portra_endura/reference_xyz.npy": "ed18e9aefb80fd9ce4733224c7824f5875a3ac123b12517b894469fdd6a1506e",
+  "qa-kodak_portra_400-kodak_portra_endura/samples.npy": "75bb164926f45e2dd9b88b1750d69fecb5d9668758683e03753a17ac6252ee65",
+  "qa-kodak_vision3_500t-kodak_2383/params.json": "2b202939aa2d28458be0a13c692b6ae37ebf1cca23d9e20f1dd232b725c5bd36",
+  "qa-kodak_vision3_500t-kodak_2383/reference_xyz.npy": "d6a8f5977eb05cb33c62a6d6f07c82a93c9fd1e235b45a6f638cad3be877d55f",
+  "qa-kodak_vision3_500t-kodak_2383/samples.npy": "75bb164926f45e2dd9b88b1750d69fecb5d9668758683e03753a17ac6252ee65"
  },
  "versions": {
   "colour-science": "0.4.7",

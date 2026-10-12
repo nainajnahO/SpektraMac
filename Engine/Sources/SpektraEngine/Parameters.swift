@@ -8,10 +8,19 @@ public struct Parameters: Codable, Sendable {
     public var filmRender = FilmRender()
     public var enlarger = Enlarger()
     public var printRender = PrintRender()
+    public var scanner = Scanner()
     public var io = IO()
     public var settings = Settings()
 
     public init() {}
+
+    /// Spektrafilm's `ScannerParams`. Black/white correction is not ported (off by default).
+    public struct Scanner: Codable, Sendable {
+        /// Gaussian σ of the scanner lens, in pixels.
+        public var lensBlur = 0.0
+        /// σ in pixels, amount; either 0 is off.
+        public var unsharpMask = [0.7, 0.7]
+    }
 
     public struct Camera: Codable, Sendable {
         public var exposureCompensationEv = 0.0
