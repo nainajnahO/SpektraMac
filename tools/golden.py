@@ -23,6 +23,11 @@ Regimes (stochastic effects are always off: no grain, no glare)
 
 Pairs: Portra 400 -> Portra Endura, Vision3 500T -> 2383, Velvia 100 scanned directly (scan_film).
 
+primitives/ holds per-pixel kernel cases on 64x64x3 float32 inputs, with references computed in
+float64 by the Python functions themselves from those same float32 inputs (so only the kernel's
+own error shows): curve interpolation (numba fast_interp) on a negative film's exposure axis and on
+a positive film's non-monotonic -density axis, log10(max(x, 0) + 1e-10), 10**x and a 3x3 matrix.
+
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
 (tc_lut.npy, 192x192x3), and params.json: the digested parameters (profiles by stock name only),
@@ -42,7 +47,9 @@ import numpy as np
 import skimage.data
 
 from spektrafilm import digest_params, init_params
+from spektrafilm.profiles.io import load_profile
 from spektrafilm.runtime.pipeline import SimulationPipeline
+from spektrafilm.utils.fast_interp import fast_interp
 from spektrafilm.utils.autoexposure import measure_autoexposure_ev
 
 REFERENCE_VERSION = "0.3.4"
@@ -110,6 +117,43 @@ def to_jsonable(value):
     return value
 
 
+def primitives() -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(20260515)
+
+    def image(low, high):
+        return rng.uniform(low, high, (64, 64, 3)).astype(np.float32).astype(np.float64)
+
+    arrays = {}
+    negative = load_profile("kodak_portra_400").data
+    curves = negative.density_curves - np.nanmin(negative.density_curves, axis=0)
+    axis = np.tile(negative.log_exposure[:, None], (1, 3)).astype(np.float32).astype(np.float64)
+    values = curves.astype(np.float32).astype(np.float64)
+    x = image(-3.5, 4.5)
+    x[0, :, :] = axis[::4][:64]  # exact nodes: np.interp's right-biased matches
+    arrays.update(interp_negative_x=x, interp_negative_axis=axis, interp_negative_values=values,
+                  interp_negative_out=fast_interp(x, axis, values))
+
+    positive = load_profile("fujifilm_velvia_100").data
+    axis = (-positive.density_curves).astype(np.float32).astype(np.float64)
+    values = np.tile(positive.log_exposure[:, None], (1, 3)).astype(np.float32).astype(np.float64)
+    x = image(-4.0, 0.5)
+    arrays.update(interp_positive_x=x, interp_positive_axis=axis, interp_positive_values=values,
+                  interp_positive_out=fast_interp(x, axis, values))
+
+    x = image(-0.5, 20.0)
+    x[0, :8, :] = 0.0
+    x[1, :8, :] = 1e-12
+    arrays.update(log10_x=x, log10_out=np.log10(np.fmax(x, 0.0) + 1e-10))
+
+    x = image(-4.0, 4.0)
+    arrays.update(pow10_x=x, pow10_out=10**x)
+
+    matrix = colour.RGB_COLOURSPACES["ProPhoto RGB"].matrix_RGB_to_XYZ.astype(np.float32).astype(np.float64)
+    x = image(-0.2, 2.0)
+    arrays.update(matmul_x=x, matmul_matrix=matrix, matmul_out=np.einsum("ijk,lk->ijl", x, matrix))
+    return arrays
+
+
 def main():
     installed = version("spektrafilm")
     if installed != REFERENCE_VERSION:
@@ -165,6 +209,14 @@ def main():
                 digest = hashlib.sha256(path.read_bytes()).hexdigest()
                 manifest["files"][f"{case}/{path.name}"] = digest
             print(f"{case}: {', '.join(taps)}")
+
+    primitives_dir = OUT / "primitives"
+    primitives_dir.mkdir(parents=True, exist_ok=True)
+    for name, array in primitives().items():
+        path = primitives_dir / f"{name}.npy"
+        np.save(path, np.asarray(array, dtype=np.float32))
+        manifest["files"][f"primitives/{path.name}"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    print(f"primitives: {len(list(primitives_dir.iterdir()))} arrays")
 
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
 
