@@ -46,18 +46,24 @@ func preprocessMatchesRGBPre(caseName: String) throws {
 
 @Test(arguments: ["kodak_portra_400", "kodak_vision3_500t", "fujifilm_velvia_100"])
 func rawLUTMatchesPython(film: String) throws {
-    let tables = try Tables.load()
-    let profile = try Profile.load(film)
-    let sensitivity = profile.data.logSensitivity.map { log in
-        let linear = SIMD3(pow(10, log.x), pow(10, log.y), pow(10, log.z))
-        return linear.replacing(with: 0, where: .!(linear .== linear))
-    }
-    let lut = hanatos2025RawLUT(spectra: try Tables.loadSpectraLUT(), sensitivity: sensitivity,
-                                windowParams: profile.data.hanatos2025AdaptationWindowParams,
-                                referenceIlluminant: tables.illuminants[profile.info.referenceIlluminant]!,
-                                wavelengths: tables.wavelengths)
+    var parameters = Parameters()
+    parameters.io.inputGamutCompress.active = false
+    let lut = filmingTCLUT(film: try Profile.load(film), parameters: parameters, tables: try Tables.load(),
+                           spectra: try Tables.loadSpectraLUT())
     let reference = try golden("primitives", "tc_lut_raw_\(film)")
     let difference = Difference(lut.flatMap { [$0.x, $0.y, $0.z] }, reference.values, floor: 1e-3)
     print("\(film) raw tc LUT: \(difference)")
+    #expect(difference.maxRelative < 1e-6)
+}
+
+/// The LUT each golden run actually used: gamut compression baked in.
+@Test(arguments: goldenCases.filter { $0.hasPrefix("chart") })
+func filmingLUTMatchesPython(caseName: String) throws {
+    let golden = try GoldenCase(caseName)
+    let lut = filmingTCLUT(film: try Profile.load(golden.film), parameters: golden.params, tables: try Tables.load(),
+                           spectra: try Tables.loadSpectraLUT())
+    let reference = try SpektraEngineTests.golden(caseName, "tc_lut")
+    let difference = Difference(lut.flatMap { [$0.x, $0.y, $0.z] }, reference.values, floor: 1e-3)
+    print("\(golden.film) compressed tc LUT: \(difference)")
     #expect(difference.maxRelative < 1e-6)
 }
