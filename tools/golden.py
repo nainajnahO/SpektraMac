@@ -28,7 +28,8 @@ float64 by the Python functions themselves from those same float32 inputs (so on
 own error shows): curve interpolation (numba fast_interp) on a negative film's exposure axis and on
 a positive film's non-monotonic -density axis, log10(max(x, 0) + 1e-10), 10**x and a 3x3 matrix;
 and blurs (fast_gaussian_filter, fast_exponential_filter) with per-channel sigmas covering the FIR
-path, the IIR path, a mix, and an image smaller than the kernel, with `<name>_sigma` alongside.
+path, the IIR path, a mix, and an image smaller than the kernel, with `<name>_sigma` alongside; and each film's
+hanatos2025 tc LUT before input gamut compression (`tc_lut_raw_<film>`, 192x192x3).
 
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
@@ -53,6 +54,7 @@ from spektrafilm.profiles.io import load_profile
 from spektrafilm.runtime.pipeline import SimulationPipeline
 from spektrafilm.utils.fast_gaussian_filter import fast_exponential_filter, fast_gaussian_filter
 from spektrafilm.utils.fast_interp import fast_interp
+from spektrafilm.utils.spectral_upsampling import compute_hanatos2025_tc_lut
 from spektrafilm.utils.autoexposure import measure_autoexposure_ev
 
 REFERENCE_VERSION = "0.3.4"
@@ -171,6 +173,14 @@ def primitives() -> dict[str, np.ndarray]:
     decay = np.array([2.0, 9.7, 34.0])
     arrays.update(blur_exponential_x=x, blur_exponential_sigma=decay,
                   blur_exponential_out=fast_exponential_filter(x, decay))
+
+    # As FilmingStage builds it with the default settings (window on, surface off, no blur).
+    for film, _, _ in PAIRS:
+        profile = load_profile(film)
+        adaptation = profile.hanatos2025_adaptation()
+        adaptation.apply_window, adaptation.apply_surface = True, False
+        sensitivity = np.nan_to_num(10 ** profile.data.log_sensitivity)
+        arrays[f"tc_lut_raw_{film}"] = compute_hanatos2025_tc_lut(sensitivity, adaptation, gamut_compress=None)
     return arrays
 
 
