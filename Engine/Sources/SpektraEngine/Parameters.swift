@@ -52,6 +52,8 @@ extension Parameters {
 
 extension Parameters {
     public struct FilmRender: Codable, Sendable {
+        /// Scales the film's contrast: the exposure axis of its density curves is divided by it.
+        public var densityCurveGamma = 1.0
         public var halation = Halation()
     }
 

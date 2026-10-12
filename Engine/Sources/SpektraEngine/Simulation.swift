@@ -17,6 +17,8 @@ public struct Simulation {
     let filmingLUT: any MTLTexture
     /// Input RGB (linear) → XYZ adapted to the film's reference white with CAT16.
     let inputToXYZ: simd_double3x3
+    /// The film's density curves shifted so each channel starts at 0 (FilmingStage.develop).
+    let filmCurves: [SIMD3<Double>]
 
     public struct UnknownColourSpace: Error, CustomStringConvertible {
         public let name: String
@@ -37,6 +39,9 @@ public struct Simulation {
         let lut = filmingTCLUT(film: film, parameters: parameters, tables: tables, spectra: spectra)
         let size = spectra.shape[0]
         filmingLUT = gpu.upload(rgb: lut.flatMap { [Float($0.x), Float($0.y), Float($0.z)] }, width: size, height: size)
+
+        let minimum = film.data.densityCurves.reduce(SIMD3(repeating: Double.infinity)) { pointwiseMin($0, $1) }
+        filmCurves = film.data.densityCurves.map { $0 - minimum }
 
         let white = tables.chromaticity(of: tables.illuminants[film.info.referenceIlluminant]!)
         inputToXYZ = vonKries(from: inputColourSpace.whitepoint, to: white,
@@ -96,6 +101,19 @@ public struct Simulation {
         let logExposure = gpu.makeTexture(width: rgb.width, height: rgb.height)
         gpu.encodeLogExposure(on: encoder, input: light, output: logExposure)
         return logExposure
+    }
+
+    /// `log_e_film → cmy_film` (FilmingStage.develop): log exposure → CMY dye density through the
+    /// film's characteristic curves, normalised to start at 0, with the exposure axis divided by
+    /// `density_curve_gamma`.
+    ///
+    /// Not yet ported: DIR couplers (Day 15) and grain (Days 26–28; off without stochastic effects).
+    public func encodeDevelop(_ logExposure: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        let gamma = parameters.filmRender.densityCurveGamma
+        let density = gpu.makeTexture(width: logExposure.width, height: logExposure.height)
+        gpu.encodeInterpolate(on: encoder, input: logExposure, output: density,
+                              axis: film.data.logExposure.map { SIMD3(repeating: $0 / gamma) }, values: filmCurves)
+        return density
     }
 }
 
