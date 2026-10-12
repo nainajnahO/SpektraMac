@@ -20,6 +20,37 @@ func golden(_ caseName: String, _ tap: String) throws -> NPYArray {
     return try NPYArray(contentsOf: url)
 }
 
+/// The golden cases `tools/golden.py` writes: every film pair on the chart and on the photo.
+let goldenCases = ["chart", "photo"].flatMap { input in
+    ["kodak_portra_400-kodak_portra_endura", "kodak_vision3_500t-kodak_2383", "fujifilm_velvia_100-scan"]
+        .map { "\(input)-\($0)" }
+}
+
+/// A case's `params.json`: the digested parameters and what the run measured.
+struct GoldenCase: Decodable {
+    let film: String
+    let print: String?
+    let taps: [String]
+    let pixelSizeUm: Double
+    let autoexposureEv: Double
+    let params: Parameters
+
+    init(_ name: String) throws {
+        let url = goldenDirectory.appending(components: name, "params.json")
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
+            throw MissingGoldenData(path: url.path(percentEncoded: false))
+        }
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        self = try decoder.decode(GoldenCase.self, from: Data(contentsOf: url))
+    }
+}
+
+extension NPYArray {
+    /// An `H × W × 3` array as an image.
+    var image: RGBImage { RGBImage(width: shape[1], height: shape[0], pixels: values) }
+}
+
 /// Element-wise differences between a result and its reference.
 struct Difference: CustomStringConvertible {
     var maxAbsolute: Double = 0

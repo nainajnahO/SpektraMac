@@ -7,15 +7,18 @@ public actor Engine {
     public nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
 
     private let gpu: GPU
+    private let simulation: Simulation
 
     public init() throws {
         gpu = try GPU()
+        var parameters = Parameters()
+        parameters.io.inputColorSpace = "ITU-R BT.2020"  // RGBImage's working space, linear
+        simulation = try Simulation(parameters: parameters, gpu: gpu, tables: Tables.load())
     }
 
-    /// The simulation of `image`. For now a pass-through on the GPU; stages are added as they
-    /// are ported (PLAN.md).
-    public func render(_ image: RGBImage) -> RGBImage {
-        let texture = gpu.upload(rgb: image.pixels, width: image.width, height: image.height)
-        return RGBImage(width: image.width, height: image.height, pixels: gpu.download(texture))
+    /// The simulation of `image`, as far as it is ported (PLAN.md): today the auto-exposed input.
+    public func render(_ image: RGBImage) throws -> RGBImage {
+        let output = try gpu.run { simulation.encodePreprocess(image, on: $0) }
+        return RGBImage(width: image.width, height: image.height, pixels: gpu.download(output))
     }
 }
