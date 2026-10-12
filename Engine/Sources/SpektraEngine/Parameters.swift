@@ -6,6 +6,7 @@ import simd
 public struct Parameters: Codable, Sendable {
     public var camera = Camera()
     public var filmRender = FilmRender()
+    public var enlarger = Enlarger()
     public var io = IO()
     public var settings = Settings()
 
@@ -49,6 +50,47 @@ extension Parameters {
         public var applyHanatos2025AdaptationSurface = false
         /// Not ported (0 by default).
         public var spectralGaussianBlur = 0.0
+        public var neutralPrintFiltersFromDatabase = true
+    }
+
+    /// Spektrafilm's `EnlargerParams`. Filter values are Kodak CC units (100 = density 1.0).
+    public struct Enlarger: Codable, Sendable {
+        /// A key of ``Tables/illuminants``.
+        public var illuminant = "TH-KG3"
+        public var printExposure = 1.0
+        public var printExposureCompensation = true
+        public var normalizePrintExposure = true
+        public var yFilterShift = 0.0
+        public var mFilterShift = 0.0
+        public var yFilterNeutral = 55.0
+        public var mFilterNeutral = 65.0
+        public var cFilterNeutral = 0.0
+        public var lensBlur = 0.0
+        public var preflashExposure = 0.0
+        public var preflashYFilterShift = 0.0
+        public var preflashMFilterShift = 0.0
+
+        /// The filters the print is exposed through: neutral plus the user's shifts.
+        var printFilters: SIMD3<Double> {
+            SIMD3(cFilterNeutral, mFilterNeutral + mFilterShift, yFilterNeutral + yFilterShift)
+        }
+
+        /// The filters for the preflash exposure.
+        var preflashFilters: SIMD3<Double> {
+            SIMD3(cFilterNeutral, mFilterNeutral + preflashMFilterShift, yFilterNeutral + preflashYFilterShift)
+        }
+    }
+
+    /// `apply_database_neutral_print_filters`: the C, M, Y filters that print a grey neutral for
+    /// this film, paper and enlarger lamp. Unknown combinations keep the current values.
+    public mutating func applyNeutralPrintFilters(film: Profile, print: Profile,
+                                                  database: [String: [String: [String: SIMD3<Double>]]]) {
+        guard settings.neutralPrintFiltersFromDatabase,
+              let filters = database[print.info.stock]?[enlarger.illuminant]?[film.info.stock]
+        else { return }
+        enlarger.cFilterNeutral = filters.x
+        enlarger.mFilterNeutral = filters.y
+        enlarger.yFilterNeutral = filters.z
     }
 }
 
