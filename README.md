@@ -23,6 +23,21 @@ Swift with the image pipeline on the GPU via Metal.
 
 Requires macOS 26.5 or newer and Xcode 27.
 
+## Reference data
+
+The parity tests compare every stage against dumps from the original Python Spektrafilm. They are
+not committed (about 80 MB); generate them once with the pinned release:
+
+```bash
+uv tool install spektrafilm==0.3.4
+~/.local/share/uv/tools/spektrafilm/bin/python tools/golden.py
+```
+
+This writes `golden/<case>/` with one float32 `.npy` per pipeline tap, the film's spectral lookup
+table and the parameters used. `golden/manifest.json` (committed) holds a checksum of every file,
+so `git diff` shows whether a regeneration changed anything. See the top of
+[tools/golden.py](tools/golden.py) for the inputs, film pairs and settings.
+
 ## Credits and licence
 
 All of the photographic model, film and paper data and the methods come from
