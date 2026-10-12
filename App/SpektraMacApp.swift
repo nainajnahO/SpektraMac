@@ -23,6 +23,13 @@ struct SpektraMacApp: App {
                 Button("Render", systemImage: "camera.aperture") { model.renderFullResolution() }
                     .keyboardShortcut("r", modifiers: .command)
                     .disabled(!model.canRender)
+                Button("Cancel", systemImage: "xmark.circle") { model.cancel() }
+                    .keyboardShortcut(".", modifiers: .command)
+                    .disabled(!model.canCancel)
+                Divider()
+                Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
+                    .keyboardShortcut("s", modifiers: .command)
+                    .disabled(!model.canSave)
             }
         }
     }

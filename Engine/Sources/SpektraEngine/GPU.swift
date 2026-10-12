@@ -92,6 +92,7 @@ public final class GPU: Sendable {
     ) {
         guard let pipeline = pipelines[kernel] else { preconditionFailure("No Metal kernel named \(kernel)") }
         encoder.flushIfOverBudget()
+        guard !encoder.isCancelled else { return }
         let compute = encoder.compute
         compute.setComputePipelineState(pipeline)
         for (index, texture) in textures.enumerated() {
@@ -104,7 +105,8 @@ public final class GPU: Sendable {
     }
 
     /// Runs what `body` encodes, waits for the GPU to finish and returns `body`'s result
-    /// (typically the output texture, complete by then).
+    /// (typically the output texture, complete by then). Throws `CancellationError` if the
+    /// task is cancelled meanwhile.
     public func run<Result>(_ body: (Encoder) -> Result) throws -> Result {
         let encoder = Encoder(device: device, queue: queue)
         let result = body(encoder)
@@ -134,6 +136,9 @@ public final class Encoder {
     private var error: (any Error)?
     /// The most GPU memory allocated at any kernel encoded so far.
     public private(set) var peakAllocatedSize: Int
+    /// Set once the task is cancelled: from then on kernels aren't encoded, so the work stops at
+    /// the next commit, and ``finish()`` throws.
+    private(set) var isCancelled = false
 
     init(device: any MTLDevice, queue: any MTLCommandQueue) {
         self.device = device
@@ -145,6 +150,7 @@ public final class Encoder {
     }
 
     func flushIfOverBudget() {
+        isCancelled = isCancelled || Task.isCancelled
         let allocated = device.currentAllocatedSize
         peakAllocatedSize = max(peakAllocatedSize, allocated)
         guard allocated - allocatedAtStart > Self.budget else { return }
@@ -154,11 +160,13 @@ public final class Encoder {
         allocatedAtStart = device.currentAllocatedSize
     }
 
-    /// Completes the last command buffer; throws the first error any of them reported.
+    /// Completes the last command buffer; throws the first error any of them reported, or
+    /// `CancellationError` if the task was cancelled.
     func finish() throws {
         peakAllocatedSize = max(peakAllocatedSize, device.currentAllocatedSize)
         complete()
         if let error { throw error }
+        if isCancelled { throw CancellationError() }
     }
 
     private func complete() {

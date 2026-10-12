@@ -1,7 +1,8 @@
-import CoreGraphics
+import AppKit
 import Foundation
 import Observation
 import SpektraEngine
+import UniformTypeIdentifiers
 import os
 
 @MainActor
@@ -20,6 +21,8 @@ final class PhotoModel {
         didSet { scheduleRender() }
     }
     private(set) var sourceName = ""
+    /// The photo's EXIF, GPS and IPTC records, for saved renderings.
+    @ObservationIgnored private var metadata: PhotoMetadata?
     /// What the sidebar and the Film | Negative switch set; every change re-renders the preview.
     var controls = Controls() {
         didSet { scheduleRender() }
@@ -45,6 +48,9 @@ final class PhotoModel {
     private(set) var showsFullResolution = false
     private(set) var isLoading = false
     private(set) var isRendering = false
+    private(set) var isRenderingFullResolution = false
+    /// What saving is doing, while it runs.
+    private(set) var savePhase: String?
     private(set) var errorMessage: String?
     private(set) var log: [LogEntry] = []
     /// Drives the Open panel (`fileImporter`); ⌘O and the toolbar set it.
@@ -54,6 +60,7 @@ final class PhotoModel {
     private let logger = Logger(subsystem: "nainajnahO.SpektraMac", category: "model")
     private var renderTask: Task<Void, Never>?
     private var renderScheduled = false
+    private var saveTask: Task<Void, Never>?
 
     init() {
         do {
@@ -75,12 +82,13 @@ final class PhotoModel {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 let engine = engine
-                let (image, preview) = try await Task.detached(priority: .userInitiated) {
+                let (image, preview, metadata) = try await Task.detached(priority: .userInitiated) {
                     let image = try RGBImage(contentsOf: url)
-                    return (image, engine?.preview(of: image))
+                    return (image, engine?.preview(of: image), PhotoMetadata(contentsOf: url))
                 }.value
                 sourceName = url.lastPathComponent
                 source = image
+                self.metadata = metadata
                 self.preview = preview
                 note("Opened \(sourceName) (\(image.width) × \(image.height))")
             } catch {
@@ -127,11 +135,12 @@ final class PhotoModel {
             return
         }
         isRendering = true
+        isRenderingFullResolution = fullResolution
         let controls = controls
         renderTask = Task {
             let start = ContinuousClock.now
             do {
-                let output = try await engine.render(image, controls: controls, preview: !fullResolution)
+                let output = try await engine.render(image, controls: controls, mode: fullResolution ? .full : .preview)
                 let display = await Task.detached(priority: .userInitiated) {
                     output.displayImage(in: Engine.outputColorSpace)
                 }.value
@@ -145,6 +154,56 @@ final class PhotoModel {
                 fail("Could not render", error)
             }
             isRendering = false
+            isRenderingFullResolution = false
+        }
+    }
+
+    // MARK: Saving and cancelling
+
+    var canSave: Bool { canRender && savePhase == nil }
+    var canCancel: Bool { isRenderingFullResolution || savePhase != nil }
+
+    /// Renders the photo at full resolution, sRGB-encoded, and writes it where the Save panel says:
+    /// 16-bit TIFF or PNG, or JPEG, by the name's extension.
+    func save() {
+        guard let source, let engine else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.jpeg, .tiff, .png]
+        panel.nameFieldStringValue = (sourceName as NSString).deletingPathExtension + ".jpg"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let type = UTType(filenameExtension: url.pathExtension) ?? .jpeg
+        let (controls, metadata) = (controls, metadata)
+        savePhase = "Rendering \(url.lastPathComponent) at full resolution…"
+        saveTask = Task {
+            defer { savePhase = nil; saveTask = nil }
+            let start = ContinuousClock.now
+            do {
+                let output = try await engine.render(source, controls: controls, mode: .export)
+                try Task.checkCancellation()
+                savePhase = "Writing \(url.lastPathComponent)…"
+                try await Task.detached(priority: .userInitiated) {
+                    try output.write(to: url, as: type, colorSpace: Engine.exportColorSpace, metadata: metadata)
+                }.value
+                let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.seconds, .milliseconds]))
+                note("Saved \(url.lastPathComponent) in \(elapsed)")
+            } catch is CancellationError {
+                note("Cancelled saving \(url.lastPathComponent)")
+            } catch {
+                fail("Could not save \(url.lastPathComponent)", error)
+            }
+        }
+    }
+
+    /// Stops a full-resolution render or a save; the GPU stops at its next memory flush.
+    func cancel() {
+        if let saveTask {
+            saveTask.cancel()
+        } else if isRenderingFullResolution {
+            renderTask?.cancel()
+            isRendering = false
+            isRenderingFullResolution = false
+            note("Cancelled the full-resolution render")
         }
     }
 

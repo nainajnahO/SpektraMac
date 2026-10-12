@@ -3,6 +3,7 @@ import Foundation
 import ImageIO
 import Testing
 import UniformTypeIdentifiers
+import simd
 @testable import SpektraEngine
 
 /// Writes an 8-bit sRGB PNG of `pixels` (RGB bytes) and returns its URL.
@@ -30,7 +31,7 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
                               0.6274413720579783, 0.0690276171470781, 0.016364235071680725]
     #expect(Difference(image.pixels, expected).maxAbsolute < 2e-4)
 
-    let rendered = try await Engine().render(image, controls: Controls(), preview: false)
+    let rendered = try await Engine().render(image, controls: Controls(), mode: .full)
     #expect(rendered.width == 2 && rendered.height == 1)
 
     let display = try #require(rendered.displayImage(in: Engine.outputColorSpace))
@@ -49,7 +50,7 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
         #expect(rgb.allSatisfy { abs($0 / raw - 1) < 0.005 })
     }
 
-    let rendered = try await Engine().render(image, controls: Controls(), preview: false)
+    let rendered = try await Engine().render(image, controls: Controls(), mode: .full)
     #expect(rendered.width == 512 && rendered.height == 256)
     let finite = rendered.pixels.allSatisfy { $0.isFinite }
     #expect(finite)
@@ -68,13 +69,14 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
     #expect(preview.pixels.allSatisfy { abs($0 - 0.18) < 1e-5 })
     var controls = Controls()
     controls.scanFilm = true
-    let rendered = try await engine.render(preview, controls: controls, preview: true)
+    let rendered = try await engine.render(preview, controls: controls, mode: .preview)
     #expect(rendered.width == 640 && rendered.height == 427)
 }
 
-/// The app's parameters for each golden photo case's film and paper are Python's digested ones,
-/// once the case's own choices are applied: sRGB input with its CCTF, encoded output, and no grain
-/// or glare (`deactivate_stochastic_effects`).
+/// The app's export parameters for each golden photo case's film and paper, and its preview
+/// parameters for the preview case, are Python's digested ones once the cases' own choices are
+/// applied: sRGB input with its CCTF, encoded output (which export has already), and no grain or
+/// glare (`deactivate_stochastic_effects`).
 @Test(arguments: goldenCases.filter { !$0.hasPrefix("chart") })
 func controlsDigestLikePython(caseName: String) throws {
     let golden = try GoldenCase(caseName)
@@ -82,12 +84,14 @@ func controlsDigestLikePython(caseName: String) throws {
     controls.film = golden.film
     controls.paper = try golden.printProfile().info.stock
     controls.scanFilm = golden.params.io.scanFilm
+    let preview = caseName.hasPrefix("preview")
     var parameters = Engine.parameters(for: controls, film: try Profile.load(golden.film), print: try golden.printProfile(),
-                                       database: try Tables.loadNeutralPrintFilters(),
-                                       preview: caseName.hasPrefix("preview"))
+                                       database: try Tables.loadNeutralPrintFilters(), mode: preview ? .preview : .export)
     parameters.io.inputColorSpace = "sRGB"
     parameters.io.inputCctfDecoding = true
-    parameters.io.outputCctfEncoding = true
+    if preview {
+        parameters.io.outputCctfEncoding = true
+    }
     parameters.filmRender.grain.active = false
     parameters.printRender.glare.active = false
     #expect(parameters == golden.params)
@@ -117,4 +121,84 @@ func controlsDigestLikePython(caseName: String) throws {
     let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
     let results = try [cached, fresh].map { simulation in gpu.download(try gpu.run { simulation.encode(image, on: $0) }) }
     #expect(results[0] == results[1])
+}
+
+/// Exported files carry 16 bits (TIFF, PNG) or 8 (JPEG), the sRGB profile and the photo's
+/// metadata, and read back colour-managed as the colours written: a grey and a red block, sRGB
+/// 0.5 and (1, 0, 0), against colour-science's linear BT.2020 for the stored integers.
+@Test(arguments: [UTType.tiff, .png, .jpeg])
+func exportWritesProfileAndMetadata(type: UTType) throws {
+    let directory = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    // A photo with metadata, sideways.
+    let photo = directory.appending(component: "photo.jpg")
+    let destination = try #require(CGImageDestinationCreateWithURL(photo as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+    let pixel = try #require(CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                       bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)?.makeImage())
+    CGImageDestinationAddImage(destination, pixel, [
+        kCGImagePropertyOrientation: 6,
+        kCGImagePropertyExifDictionary: [kCGImagePropertyExifDateTimeOriginal: "2026:05:15 12:00:00",
+                                         kCGImagePropertyExifFNumber: 2.8],
+        kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFMake: "Test", kCGImagePropertyTIFFModel: "Camera"],
+    ] as CFDictionary)
+    #expect(CGImageDestinationFinalize(destination))
+    let metadata = try #require(PhotoMetadata(contentsOf: photo))
+
+    let (width, height) = (32, 16)
+    var pixels = [Float](repeating: 0, count: width * height * 3)
+    for y in 0..<height {
+        for x in 0..<width {
+            let rgb: [Float] = x < 16 ? [0.5, 0.5, 0.5] : [1, 0, 0]
+            pixels.replaceSubrange((y * width + x) * 3..<((y * width + x) * 3 + 3), with: rgb)
+        }
+    }
+    let exported = directory.appending(component: "out").appendingPathExtension(for: type)
+    try RGBImage(width: width, height: height, pixels: pixels)
+        .write(to: exported, as: type, colorSpace: Engine.exportColorSpace, metadata: metadata)
+
+    let source = try #require(CGImageSourceCreateWithURL(exported as CFURL, nil))
+    let properties = try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+    #expect(properties[kCGImagePropertyDepth] as? Int == (type == .jpeg ? 8 : 16))
+    #expect(properties[kCGImagePropertyProfileName] as? String == "sRGB IEC61966-2.1")
+    #expect(properties[kCGImagePropertyOrientation] as? Int == 1)
+    let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+    #expect(exif?[kCGImagePropertyExifDateTimeOriginal] as? String == "2026:05:15 12:00:00")
+    #expect(exif?[kCGImagePropertyExifFNumber] as? Double == 2.8)
+    let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+    #expect(tiff?[kCGImagePropertyTIFFModel] as? String == "Camera")
+    if type == .tiff {
+        #expect(tiff?[kCGImagePropertyTIFFCompression] as? Int == 8)
+    }
+
+    // The stored integers (truncated), decoded by colour-science's formulas into linear BT.2020.
+    let tables = try Tables.load()
+    let (sRGB, bt2020) = (tables.colourSpaces["sRGB"]!, tables.colourSpaces["ITU-R BT.2020"]!)
+    let maximum = type == .jpeg ? 255.0 : 65535.0
+    func expected(_ encoded: SIMD3<Double>) -> SIMD3<Double> {
+        let stored = (encoded * maximum).rounded(.down) / maximum
+        let linear = SIMD3(sRGB.decode(stored.x), sRGB.decode(stored.y), sRGB.decode(stored.z))
+        return simd_double3x3(rows: bt2020.xyzToRGB) * simd_double3x3(rows: sRGB.rgbToXYZ) * linear
+    }
+    let decoded = try RGBImage(contentsOf: exported)
+    #expect(decoded.width == width && decoded.height == height)
+    for (x, encoded) in [(8, SIMD3<Double>(0.5, 0.5, 0.5)), (24, SIMD3<Double>(1, 0, 0))] {
+        let index = (8 * width + x) * 3
+        let read = SIMD3(Double(decoded.pixels[index]), Double(decoded.pixels[index + 1]), Double(decoded.pixels[index + 2]))
+        let error = abs(read - expected(encoded)).max()
+        print("\(type.preferredFilenameExtension!) \(encoded): read \(read), error \(error)")
+        // JPEG: lossy, and its chroma is subsampled.
+        #expect(error < (type == .jpeg ? 0.02 : 2e-4))
+    }
+}
+
+/// A cancelled render stops encoding kernels and throws.
+@Test func renderStopsWhenCancelled() async throws {
+    let engine = try Engine()
+    let image = RGBImage(width: 2000, height: 2000, pixels: [Float](repeating: 0.18, count: 2000 * 2000 * 3))
+    let render = Task { try await engine.render(image, controls: Controls(), mode: .full) }
+    render.cancel()
+    await #expect(throws: CancellationError.self) { try await render.value }
 }
