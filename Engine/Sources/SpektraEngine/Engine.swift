@@ -19,13 +19,14 @@ public actor Engine {
         let print = try Profile.load("kodak_portra_endura")
         var parameters = Parameters()
         parameters.io.inputColorSpace = "ITU-R BT.2020"  // RGBImage's working space, linear
+        parameters.io.outputCctfEncoding = false  // linear out: the display is colour-managed
         parameters.applyNeutralPrintFilters(film: film, print: print, database: try Tables.loadNeutralPrintFilters())
         parameters.applyFilmSpecifics(film)
         simulation = try Simulation(parameters: parameters, film: film, print: print, gpu: gpu, tables: Tables.load())
     }
 
-    /// The simulation of `image`, as far as it is ported (PLAN.md): today the scanned print as
-    /// linear RGB in ``outputColorSpace``, gamut-compressed, before sharpening and encoding.
+    /// The simulation of `image`, as far as it is ported (PLAN.md): the scanned print as linear RGB
+    /// in ``outputColorSpace`` (no grain or glare yet).
     public func render(_ image: RGBImage) throws -> RGBImage {
         let output = try gpu.run { simulation.encode(image, on: $0) }
         return RGBImage(width: image.width, height: image.height, pixels: gpu.download(output))

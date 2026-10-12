@@ -43,6 +43,7 @@ public struct Simulation {
     let scanToOutput: simd_double3x3
     /// The output gamut compression and its C_max table on the GPU; nil when it's off.
     let outputCompression: (model: OutputGamutCompression, maxChroma: any MTLBuffer)?
+    let outputColourSpace: Tables.ColourSpace
 
     public struct UnknownColourSpace: Error, CustomStringConvertible {
         public let name: String
@@ -152,6 +153,7 @@ public struct Simulation {
         scanDyeBands = scanBands.map { SIMD4(SIMD3<Float>(scanned.data.channelDensity[$0]), Float(scanned.data.baseDensity[$0])) }
         scanCMFBands = scanBands.map { SIMD4(SIMD3<Float>(scanLight[$0] * tables.cmfs[$0] / normalization), 0) }
         let scanWhite = zip(scanLight, tables.cmfs).reduce(SIMD3<Double>.zero) { $0 + $1.0 * $1.1 } / normalization
+        outputColourSpace = outputSpace
         scanToOutput = simd_double3x3(rows: outputSpace.xyzToRGB)
             * vonKries(from: SIMD2(scanWhite.x, scanWhite.y) / scanWhite.sum(), to: outputSpace.whitepoint,
                        transform: tables.chromaticAdaptation["CAT02"]!)
@@ -194,10 +196,8 @@ public struct Simulation {
     /// default).
     public func encodeExpose(_ rgb: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
         let raw = gpu.makeTexture(width: rgb.width, height: rgb.height)
-        let m = inputToXYZ
-        var matrix = simd_float3x3(SIMD3<Float>(m.columns.0), SIMD3<Float>(m.columns.1), SIMD3<Float>(m.columns.2))
-        let transfers = ["linear": 0, "sRGB": 1, "gamma": 2, "BT.2020": 3, "ROMM RGB": 4]
-        var transfer = UInt32(parameters.io.inputCctfDecoding ? transfers[inputColourSpace.cctf]! : 0)
+        var matrix = simd_float3x3(inputToXYZ)
+        var transfer = parameters.io.inputCctfDecoding ? inputColourSpace.transferIndex : 0
         var gamma = Float(inputColourSpace.gamma ?? 1)
         var exposure = Float(pow(2, parameters.camera.exposureCompensationEv))
         gpu.encode("hanatos2025_raw", on: encoder, textures: [rgb, raw, filmingLUT], grid: raw.size) {
@@ -316,13 +316,19 @@ extension Simulation {
 }
 
 extension Simulation {
-    /// Every ported stage from `rgb_in`: filming, printing (skipped when scanning the film
-    /// itself), scanning and output gamut compression.
+    /// `rgb_in → rgb_out`: filming, printing (skipped when scanning the film itself) and scanning.
     public func encode(_ image: RGBImage, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
         let cmyFilm = encodeDevelop(encodeExpose(encodePreprocess(image, on: encoder), on: encoder), on: encoder)
         let cmy = parameters.io.scanFilm
             ? cmyFilm : encodePrintDevelop(encodePrintExpose(cmyFilm, on: encoder), on: encoder)
-        return encodeOutputCompression(encodeScan(cmy, on: encoder), on: encoder)
+        return encodeScan(cmy, on: encoder)
+    }
+
+    /// `cmy_print` (or `cmy_film` when scanning film) → `rgb_out` (ScanningStage.scan): to linear
+    /// output RGB, gamut compression, the scanner's lens blur and unsharp mask, and encoding.
+    public func encodeScan(_ cmy: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        let rgb = encodeOutputCompression(encodeDensityToRGB(cmy, on: encoder), on: encoder)
+        return encodeOutputEncoding(encodeScannerOptics(rgb, on: encoder), on: encoder)
     }
 
     /// `cmy_print` (or `cmy_film` when scanning film) → linear RGB in the output colour space
@@ -331,7 +337,7 @@ extension Simulation {
     ///
     /// Not ported yet: glare (stochastic; off in the golden runs), the scanner's black/white
     /// correction (off by default).
-    public func encodeScan(_ cmy: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+    public func encodeDensityToRGB(_ cmy: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
         let output = gpu.makeTexture(width: cmy.width, height: cmy.height)
         var bandCount = UInt32(scanDyeBands.count)
         var matrix = simd_float3x3(scanToOutput)
@@ -350,6 +356,51 @@ extension Simulation {
         guard let outputCompression else { return rgb }
         return gpu.encodeOutputCompression(outputCompression.model, maxChroma: outputCompression.maxChroma,
                                            on: encoder, input: rgb)
+    }
+
+    /// The scanner's lens blur, then its unsharp mask: `rgb + amount · (rgb − blur(rgb, σ))`
+    /// (ScanningStage._apply_blur_and_unsharp). Returns `rgb` itself when both are off.
+    public func encodeScannerOptics(_ rgb: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        var output = rgb
+        if parameters.scanner.lensBlur > 0 {
+            let blurred = gpu.makeTexture(width: rgb.width, height: rgb.height)
+            gpu.encodeGaussianBlur(on: encoder, input: output, output: blurred,
+                                   sigma: SIMD3(repeating: parameters.scanner.lensBlur))
+            output = blurred
+        }
+        let (sigma, amount) = (parameters.scanner.unsharpMask[0], parameters.scanner.unsharpMask[1])
+        if sigma > 0 && amount > 0 {
+            let blurred = gpu.makeTexture(width: rgb.width, height: rgb.height)
+            gpu.encodeGaussianBlur(on: encoder, input: output, output: blurred, sigma: SIMD3(repeating: sigma))
+            let detail = gpu.makeTexture(width: rgb.width, height: rgb.height)
+            gpu.encodeAddScaled(on: encoder, accumulator: output, input: blurred, output: detail,
+                                weight: SIMD3(repeating: -1))
+            let sharpened = gpu.makeTexture(width: rgb.width, height: rgb.height)
+            gpu.encodeAddScaled(on: encoder, accumulator: output, input: detail, output: sharpened,
+                                weight: SIMD3(repeating: amount))
+            output = sharpened
+        }
+        return output
+    }
+
+    /// The output colour space's transfer function (ScanningStage._apply_cctf_encoding: colour's
+    /// RGB_to_RGB from the space to itself). Returns `rgb` itself when encoding is off.
+    public func encodeOutputEncoding(_ rgb: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        guard parameters.io.outputCctfEncoding else { return rgb }
+        // RGB → XYZ → RGB: up to 9e-5 off the identity where colour's XYZ → RGB matrix is the
+        // rounded published one (sRGB, Adobe RGB, ProPhoto). Its CAT02 between the space's white
+        // and itself is the identity up to rounding, so left out.
+        var matrix = simd_float3x3(simd_double3x3(rows: outputColourSpace.xyzToRGB)
+                                   * simd_double3x3(rows: outputColourSpace.rgbToXYZ))
+        var transfer = outputColourSpace.transferIndex
+        var gamma = Float(1 / (outputColourSpace.gamma ?? 1))
+        let output = gpu.makeTexture(width: rgb.width, height: rgb.height)
+        gpu.encode("encode_rgb", on: encoder, textures: [rgb, output], grid: output.size) {
+            $0.setBytes(&matrix, length: MemoryLayout<simd_float3x3>.size, index: 0)
+            $0.setBytes(&transfer, length: 4, index: 1)
+            $0.setBytes(&gamma, length: 4, index: 2)
+        }
+        return output
     }
 }
 

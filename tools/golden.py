@@ -51,13 +51,21 @@ the cam16ucs output gamut compression for the same two spaces: its C_max(J', h')
 the default spec (`output_compress_out_<space>`) and with knee (0.2, 1.1, 4) and no lightness
 compression (`output_compress_variant_out_<space>`).
 
+qa-<film>-<paper>/ holds the LUT creator's QA oracle (spektrafilm_lut_creator.qa.reference, the 50k
+random sRGB samples of seed 20260515 through the pipeline in lut_mode, linear in and out) for each
+printed pair: the linear input samples after its input gain (samples.npy, 200x250x3), the oracle's output as XYZ the way
+its ΔE2000 metric reads it (reference_xyz.npy: encoded, clipped to [0, 1], decoded, to XYZ) and
+params.json.
+
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
 (tc_lut.npy, 192x192x3), the film density from the run's log_e_film without DIR couplers
 (cmy_film_no_couplers.npy, develop_simple on the normalised curves), the scanned RGB before output
 gamut compression, blur, unsharp mask and encoding (rgb_uncompressed.npy, the scanning stage's
 _density_to_rgb with compression off), that RGB through the run's output gamut compression
-(rgb_compressed.npy, from its float32 values), and params.json: the digested parameters (profiles by stock name only),
+(rgb_compressed.npy, from its float32 values), for the Portra chart also the scan of its float32
+cmy_print into each other output space (rgb_out_<space>.npy, spaces as file names: DCI-P3,
+Display_P3, Adobe_RGB_1998, ITU-R_BT.2020, ProPhoto_RGB, ACES2065-1), and params.json: the digested parameters (profiles by stock name only),
 pixel_size_um, the measured auto-exposure EV and the tap list.
 """
 
@@ -75,6 +83,9 @@ import numpy as np
 import skimage.data
 
 from spektrafilm import digest_params, init_params
+from spektrafilm_lut_creator.bundles import Bundle, BundleSpec
+from spektrafilm_lut_creator.color_spaces import to_xyz_qa
+from spektrafilm_lut_creator.qa import reference as qa_reference
 from spektrafilm.model.develop import develop_simple
 from spektrafilm.profiles.io import load_profile
 from spektrafilm.model.illuminants import standard_illuminant
@@ -100,6 +111,13 @@ from spektrafilm.utils.autoexposure import measure_autoexposure_ev
 
 REFERENCE_VERSION = "0.3.4"
 OUT = Path(__file__).resolve().parent.parent / "golden"
+OTHER_OUTPUT_SPACES = ["DCI-P3", "Display P3", "Adobe RGB (1998)", "ITU-R BT.2020", "ProPhoto RGB", "ACES2065-1"]
+
+
+def space_file_name(space: str) -> str:
+    return space.replace(" ", "_").replace("(", "").replace(")", "")
+
+
 PAIRS = [
     ("kodak_portra_400", "kodak_portra_endura", False),
     ("kodak_vision3_500t", "kodak_2383", False),
@@ -161,6 +179,13 @@ def to_jsonable(value):
     if isinstance(value, (tuple, list)):
         return [to_jsonable(v) for v in value]
     return value
+
+
+def params_json(params, **info) -> str:
+    """A case's params.json: `info`, then the digested parameters (profiles by stock name only)."""
+    info["params"] = {f.name: to_jsonable(getattr(params, f.name))
+                      for f in dataclasses.fields(params) if f.name not in ("film", "print")}
+    return json.dumps(info, indent=1)
 
 
 def primitives() -> dict[str, np.ndarray]:
@@ -347,29 +372,61 @@ def main():
             arrays = dict(taps, tc_lut=pipeline._lut_service.filming_tc_lut_memory,
                           cmy_film_no_couplers=no_couplers, rgb_uncompressed=uncompressed,
                           rgb_compressed=compressed)
+            if case == "chart-kodak_portra_400-kodak_portra_endura":
+                # The scan into every other output space, from the float32 cmy_print.
+                for space in OTHER_OUTPUT_SPACES:
+                    variant = copy.deepcopy(params)
+                    variant.io.output_color_space = space
+                    scanner = SimulationPipeline(variant)._scanning_stage
+                    arrays[f"rgb_out_{space_file_name(space)}"] = scanner.scan(
+                        np.float32(taps["cmy_print"]).astype(np.float64))
             for name, array in arrays.items():
                 np.save(case_dir / f"{name}.npy", np.asarray(array, dtype=np.float32))
 
-            info = {
-                "film": film,
-                "print": None if scan_film else paper,
-                "input": input_name,
-                "regime": "lut_mode" if input_name == "chart" else "default",
-                "taps": list(taps),
-                "pixel_size_um": pipeline._resize_service.pixel_size_um,
-                "autoexposure_ev": float(autoexposure_ev),
-                "params": {
-                    f.name: to_jsonable(getattr(params, f.name))
-                    for f in dataclasses.fields(params)
-                    if f.name not in ("film", "print")
-                },
-            }
-            (case_dir / "params.json").write_text(json.dumps(info, indent=1))
+            (case_dir / "params.json").write_text(params_json(
+                params, film=film, print=None if scan_film else paper, input=input_name,
+                regime="lut_mode" if input_name == "chart" else "default", taps=list(taps),
+                pixel_size_um=pipeline._resize_service.pixel_size_um, autoexposure_ev=float(autoexposure_ev)))
 
             for path in sorted(case_dir.iterdir()):
                 digest = hashlib.sha256(path.read_bytes()).hexdigest()
                 manifest["files"][f"{case}/{path.name}"] = digest
             print(f"{case}: {', '.join(taps)}")
+
+    # The LUT creator's QA oracle for each printed pair: its 50k random sRGB samples through the
+    # pipeline in lut_mode, linear in and out (qa.reference._compute with the default bundle spec:
+    # the samples carry its input gain, white 4 stops over grey; the SDR output's gain is 1).
+    for film, paper, scan_film in PAIRS:
+        if scan_film:
+            continue
+        spec = BundleSpec(film_profile=film, print_profiles=(paper,), input_color_space="sRGB",
+                          output_color_space="sRGB")
+        frame = spec.bake_frame()
+        assert frame.output_gain == 1
+        oracle = qa_reference._compute(spec, Bundle(), 0, n_samples=qa_reference.DEFAULT_OFFGRID_SAMPLES,
+                                       rng_seed=qa_reference.DEFAULT_RNG_SEED)
+        # Its params, rebuilt as it builds them; checked by rerunning.
+        params = init_params(film, paper)
+        params.debug.lut_mode = True
+        params.io.input_color_space = params.io.output_color_space = "sRGB"
+        params.io.input_cctf_decoding = params.io.output_cctf_encoding = False
+        params = digest_params(params)
+        pipeline = SimulationPipeline(params)
+        rerun = np.asarray(pipeline.process(oracle.rng_samples_linear.reshape(1, -1, 3)), dtype=float)
+        assert np.array_equal(rerun.reshape(-1, 3), oracle.pipeline_out_linear)
+
+        case = f"qa-{film}-{paper}"
+        case_dir = OUT / case
+        case_dir.mkdir(parents=True, exist_ok=True)
+        np.save(case_dir / "samples.npy", oracle.rng_samples_linear.reshape(200, 250, 3))
+        np.save(case_dir / "reference_xyz.npy",
+                np.float32(to_xyz_qa(oracle.pipeline_out_encoded, "sRGB")).reshape(200, 250, 3))
+        (case_dir / "params.json").write_text(params_json(
+            params, film=film, print=paper, input="qa", regime="lut_mode", taps=[],
+            pixel_size_um=pipeline._resize_service.pixel_size_um, autoexposure_ev=0.0))
+        for path in sorted(case_dir.iterdir()):
+            manifest["files"][f"{case}/{path.name}"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        print(f"{case}: {len(oracle.rng_samples_linear)} samples")
 
     primitives_dir = OUT / "primitives"
     primitives_dir.mkdir(parents=True, exist_ok=True)
