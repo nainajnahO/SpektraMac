@@ -2,11 +2,6 @@ import Foundation
 import Testing
 @testable import SpektraEngine
 
-/// `golden/` at the repository root, written by `tools/golden.py`.
-let goldenDirectory = URL(filePath: #filePath)
-    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    .appending(component: "golden")
-
 @Test func allProfilesLoad() throws {
     let stocks = try Profile.stocks()
     #expect(stocks.count == 28)
@@ -65,8 +60,7 @@ let goldenDirectory = URL(filePath: #filePath)
 }
 
 @Test func goldenFloat32Loads() throws {
-    let url = goldenDirectory.appending(path: "chart-kodak_portra_400-kodak_portra_endura/rgb_out.npy")
-    let array = try NPYArray(contentsOf: url)
+    let array = try golden("chart-kodak_portra_400-kodak_portra_endura", "rgb_out")
     #expect(array.shape == [256, 384, 3])
     #expect(array.values[(200 * 384 + 300) * 3 + 2] == 0.4720475971698761)
 }

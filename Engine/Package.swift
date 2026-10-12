@@ -9,7 +9,7 @@ let package = Package(
         .executable(name: "spektra-cli", targets: ["spektra-cli"]),
     ],
     targets: [
-        .target(name: "SpektraEngine", resources: [.copy("Resources")]),
+        .target(name: "SpektraEngine", resources: [.copy("Resources"), .copy("Shaders")]),
         .executableTarget(name: "spektra-cli", dependencies: ["SpektraEngine"]),
         .testTarget(name: "SpektraEngineTests", dependencies: ["SpektraEngine"]),
     ]
