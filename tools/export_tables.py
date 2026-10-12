@@ -9,7 +9,8 @@ Writes Engine/Sources/SpektraEngine/Resources/ (committed, it ships with the eng
   on Spektrafilm's 380-780 nm / 5 nm grid exactly as the Python code computes them:
   CIE 1931 2-degree CMFs, the normalised illuminants used by profiles and the enlarger, the KG3
   heat filter and lens transmission (Akima-resampled), the analytic dichroic CMY filters, RGB
-  colour spaces (RGB->XYZ matrix, whitepoint, transfer function) and chromatic-adaptation matrices.
+  colour spaces (RGB->XYZ matrix, whitepoint, transfer function), chromatic-adaptation matrices,
+  and the closed spectral-locus polygon the input gamut compression uses.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from spektrafilm.model.color_filters import (
     schott_kg3_heat_filter,
 )
 from spektrafilm.model.illuminants import standard_illuminant
+from spektrafilm.utils.gamut_compression import spectral_locus_xy
 
 REFERENCE_VERSION = "0.3.4"
 OUT = Path(__file__).resolve().parent.parent / "Engine/Sources/SpektraEngine/Resources"
@@ -82,6 +84,7 @@ def main():
         "lensTransmission": generic_lens_transmission.transmittance.tolist(),
         "dichroicFilters": custom_dichroic_filters.filters.tolist(),
         "colourSpaces": colour_spaces,
+        "spectralLocus": spectral_locus_xy().tolist(),
         "chromaticAdaptation": {
             name: colour.adaptation.CHROMATIC_ADAPTATION_TRANSFORMS[name].tolist() for name in CATS
         },
