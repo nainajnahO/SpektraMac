@@ -49,7 +49,9 @@ the cam16ucs output gamut compression for the same two spaces: its C_max(J', h')
 (`cmax_cam16ucs_<space>`, 64x720) and random linear RGB in [-0.3, 1.6] with black, white, 2x white,
 1e-6 grey, the primaries and an out-of-gamut red first (`output_compress_x_<space>`), compressed with
 the default spec (`output_compress_out_<space>`) and with knee (0.2, 1.1, 4) and no lightness
-compression (`output_compress_variant_out_<space>`).
+compression (`output_compress_variant_out_<space>`); and print glare with the default parameters
+on a 512x512 frame, blurred (`glare_amount`) and not (`glare_amount_unblurred`), drawn with NumPy's
+generator seeded 20260515 in place of numba's.
 
 qa-<film>-<paper>/ holds the LUT creator's QA oracle (spektrafilm_lut_creator.qa.reference, the 50k
 random sRGB samples of seed 20260515 through the pipeline in lut_mode, linear in and out) for each
@@ -91,7 +93,10 @@ from spektrafilm.profiles.io import load_profile
 from spektrafilm.model.illuminants import standard_illuminant
 from spektrafilm.runtime.pipeline import SimulationPipeline
 from spektrafilm.runtime.services import EnlargerService
+from spektrafilm.model import glare as glare_module
 from spektrafilm.model.diffusion import apply_halation_um
+from spektrafilm.runtime.params_schema import GlareParams
+from spektrafilm.utils import fast_stats
 from spektrafilm.utils.numba_boost_hightlights import boost_highlights
 from spektrafilm.utils.fast_gaussian_filter import fast_exponential_filter, fast_gaussian_filter
 from spektrafilm.utils.fast_interp import fast_interp
@@ -312,6 +317,21 @@ def primitives() -> dict[str, np.ndarray]:
         arrays.update({f"cam16ucs_xyz_{suffix}": xyz, f"cam16ucs_jab_{suffix}": jab,
                        f"cam16ucs_inverse_jab_{suffix}": inverse_jab,
                        f"cam16ucs_inverse_xyz_{suffix}": colour.CAM16UCS_to_XYZ(inverse_jab, **cam16)})
+
+    # Python's glare with its numba RNG (per-thread, not seedable from here) swapped for NumPy's
+    # seeded one, so the field is reproducible.
+    glare = GlareParams()
+    saved = glare_module.fast_lognormal_from_mean_std, fast_stats.fast_lognormal
+    glare_module.fast_lognormal_from_mean_std = fast_stats.fast_lognormal_from_mean_std.py_func
+    fast_stats.fast_lognormal = fast_stats.fast_lognormal.py_func
+    try:
+        np.random.seed(20260515)
+        arrays["glare_amount"] = glare_module.compute_random_glare_amount(
+            glare.percent, glare.roughness, glare.blur, (512, 512))
+        arrays["glare_amount_unblurred"] = glare_module.compute_random_glare_amount(
+            glare.percent, glare.roughness, 0.0, (512, 512))
+    finally:
+        glare_module.fast_lognormal_from_mean_std, fast_stats.fast_lognormal = saved
 
     # Output gamut compression (cam16ucs): the C_max(J', h') table and compressed samples.
     for space in ("sRGB", "ProPhoto RGB"):
