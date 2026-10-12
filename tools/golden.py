@@ -37,7 +37,8 @@ boost (`boost`: boost_ev 2, range 0.3, protect 1) and Portra 400's digested hala
 
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
-(tc_lut.npy, 192x192x3), and params.json: the digested parameters (profiles by stock name only),
+(tc_lut.npy, 192x192x3), the film density from the run's log_e_film without DIR couplers
+(cmy_film_no_couplers.npy, develop_simple on the normalised curves), and params.json: the digested parameters (profiles by stock name only),
 pixel_size_um, the measured auto-exposure EV and the tap list.
 """
 
@@ -54,6 +55,7 @@ import numpy as np
 import skimage.data
 
 from spektrafilm import digest_params, init_params
+from spektrafilm.model.develop import develop_simple
 from spektrafilm.profiles.io import load_profile
 from spektrafilm.runtime.pipeline import SimulationPipeline
 from spektrafilm.model.diffusion import apply_halation_um
@@ -242,7 +244,12 @@ def main():
 
             case_dir = OUT / case
             case_dir.mkdir(parents=True, exist_ok=True)
-            arrays = dict(taps, tc_lut=pipeline._lut_service.filming_tc_lut_memory)
+            curves = params.film.data.density_curves
+            no_couplers = develop_simple(taps["log_e_film"], params.film.data.log_exposure,
+                                         curves - np.nanmin(curves, axis=0),
+                                         gamma_factor=params.film_render.density_curve_gamma)
+            arrays = dict(taps, tc_lut=pipeline._lut_service.filming_tc_lut_memory,
+                          cmy_film_no_couplers=no_couplers)
             for name, array in arrays.items():
                 np.save(case_dir / f"{name}.npy", np.asarray(array, dtype=np.float32))
 

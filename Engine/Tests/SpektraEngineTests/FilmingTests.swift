@@ -117,3 +117,18 @@ func halationPresetMatchesDigest(caseName: String) throws {
     #expect(parameters.filmRender.halation.halationStrength == golden.params.filmRender.halation.halationStrength)
     #expect(parameters.filmRender.halation.halationFirstSigmaUm == golden.params.filmRender.halation.halationFirstSigmaUm)
 }
+
+@Test(arguments: goldenCases)
+func developMatchesPythonWithoutCouplers(caseName: String) throws {
+    let golden = try GoldenCase(caseName)
+    let gpu = try GPU()
+    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), gpu: gpu,
+                                    tables: Tables.load())
+    let logEFilm = try SpektraEngineTests.golden(caseName, "log_e_film")
+    let input = gpu.upload(rgb: logEFilm.values, width: logEFilm.shape[1], height: logEFilm.shape[0])
+    let output = try gpu.run { simulation.encodeDevelop(input, on: $0) }
+    let reference = try SpektraEngineTests.golden(caseName, "cmy_film_no_couplers")
+    let difference = Difference(gpu.download(output), reference.values, floor: 1)
+    print("\(caseName) density without couplers: \(difference)")
+    #expect(difference.maxAbsolute < 1e-5)
+}
