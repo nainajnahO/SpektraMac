@@ -20,6 +20,8 @@ Regimes (stochastic effects are always off: no grain, no glare)
   auto-exposure, no highlight boost, no scanner corrections). Target for the per-pixel kernels.
 - photo runs with the default settings: spatial effects (halation, DIR diffusion, unsharp mask) and
   centre-weighted auto-exposure on. Target for the spatial stages and the end-to-end check.
+- preview (Portra 400 -> Portra Endura only) is photo with settings.preview_mode=True, what the GUI's
+  preview runs (simulate_preview: the photo is under preview_max_size, so it isn't resized).
 
 Pairs: Portra 400 -> Portra Endura, Vision3 500T -> 2383, and scanned directly (scan_film): Velvia 100
 (a slide) and Portra 400 (the negative itself).
@@ -77,6 +79,10 @@ _density_to_rgb with compression off), that RGB through the run's output gamut c
 cmy_print into each other output space (rgb_out_<space>.npy, spaces as file names: DCI-P3,
 Display_P3, Adobe_RGB_1998, ITU-R_BT.2020, ProPhoto_RGB, ACES2065-1), and params.json: the digested parameters (profiles by stock name only),
 pixel_size_um, the measured auto-exposure EV and the tap list.
+
+raw/patches.dng is not Python's output but an input for the RAW import test: a 512x256 RGGB Bayer
+DNG whose camera RGB is linear sRGB (ColorMatrix1 = XYZ -> sRGB, D65), as-shot neutral 1, black 0,
+white 65535, baseline exposure 0, with four grey patches at raw 0.05, 0.1, 0.2 and 0.4.
 """
 
 from __future__ import annotations
@@ -92,6 +98,7 @@ from pathlib import Path
 import colour
 import numpy as np
 import skimage.data
+import tifffile
 
 from spektrafilm import digest_params, init_params
 from spektrafilm_lut_creator.bundles import Bundle, BundleSpec
@@ -175,7 +182,51 @@ def params_for(film: str, paper: str, scan_film: bool, input_name: str):
     else:
         params.io.input_color_space = "sRGB"
         params.io.input_cctf_decoding = True
+    params.settings.preview_mode = input_name == "preview"
     return digest_params(params)
+
+
+def write_raw_patches(path: Path):
+    """The Bayer DNG described in the module docstring (tifffile writes the TIFF; the DNG tags are
+    extra tags, and PhotometricInterpretation is patched to CFA afterwards)."""
+    width, height = 512, 256
+    data = np.zeros((height, width), np.uint16)
+    for i, value in enumerate([0.05, 0.1, 0.2, 0.4]):
+        data[:, i * 128:(i + 1) * 128] = round(value * 65535)
+
+    def srationals(values):
+        return [part for value in values for part in (round(value * 10000), 10000)]
+
+    xyz_to_srgb = colour.RGB_COLOURSPACES["sRGB"].matrix_XYZ_to_RGB.flatten()
+    tags = [
+        (254, "I", 1, 0),                            # NewSubfileType: the main image
+        (271, "s", 0, "SpektraMac"),                 # Make
+        (272, "s", 0, "Test Camera"),                # Model
+        (274, "H", 1, 1),                            # Orientation
+        (33421, "H", 2, (2, 2)),                     # CFARepeatPatternDim
+        (33422, "B", 4, (0, 1, 1, 2)),               # CFAPattern: RGGB
+        (50706, "B", 4, (1, 4, 0, 0)),               # DNGVersion
+        (50707, "B", 4, (1, 1, 0, 0)),               # DNGBackwardVersion
+        (50708, "s", 0, "SpektraMac Test Camera"),   # UniqueCameraModel
+        (50710, "B", 3, (0, 1, 2)),                  # CFAPlaneColor
+        (50711, "H", 1, 1),                          # CFALayout: rectangular
+        (50714, "H", 1, 0),                          # BlackLevel
+        (50717, "I", 1, 65535),                      # WhiteLevel
+        (50719, "I", 2, (0, 0)),                     # DefaultCropOrigin
+        (50720, "I", 2, (width, height)),            # DefaultCropSize
+        (50721, "2i", 9, srationals(xyz_to_srgb)),   # ColorMatrix1
+        (50728, "2I", 3, [10000, 10000] * 3),        # AsShotNeutral
+        (50730, "2i", 1, [0, 1]),                    # BaselineExposure
+        (50778, "H", 1, 21),                         # CalibrationIlluminant1: D65
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tifffile.imwrite(path, data, photometric="minisblack", metadata=None, software="SpektraMac",
+                     extratags=[(*tag, True) for tag in tags])
+    with tifffile.TiffFile(path) as tif:
+        offset = tif.pages[0].tags[262].valueoffset
+    with open(path, "r+b") as file:
+        file.seek(offset)
+        file.write(np.uint16(32803).tobytes())
 
 
 def run_all_taps(pipeline: SimulationPipeline, image: np.ndarray) -> dict[str, np.ndarray]:
@@ -407,7 +458,7 @@ def main():
     if installed != REFERENCE_VERSION:
         raise SystemExit(f"Need spektrafilm {REFERENCE_VERSION}, found {installed}")
 
-    inputs = {"chart": make_chart(), "photo": make_photo()}
+    inputs = {"chart": make_chart(), "photo": make_photo(), "preview": make_photo()}
     manifest = {
         "versions": {name: version(name) for name in
                      ("spektrafilm", "numpy", "scipy", "colour-science", "scikit-image")},
@@ -416,6 +467,8 @@ def main():
 
     for film, paper, scan_film in PAIRS:
         for input_name, image in inputs.items():
+            if input_name == "preview" and (film, paper, scan_film) != PAIRS[0]:
+                continue
             case = f"{input_name}-{film}-{'scan' if scan_film else paper}"
             params = params_for(film, paper, scan_film, input_name)
             pipeline = SimulationPipeline(params)
@@ -460,7 +513,7 @@ def main():
 
             (case_dir / "params.json").write_text(params_json(
                 params, film=film, print=None if scan_film else paper, input=input_name,
-                regime="lut_mode" if input_name == "chart" else "default", taps=list(taps),
+                regime={"chart": "lut_mode", "preview": "preview_mode"}.get(input_name, "default"), taps=list(taps),
                 pixel_size_um=pipeline._resize_service.pixel_size_um, autoexposure_ev=float(autoexposure_ev)))
 
             for path in sorted(case_dir.iterdir()):
@@ -510,6 +563,11 @@ def main():
         np.save(path, np.asarray(array, dtype=np.float32))
         manifest["files"][f"primitives/{path.name}"] = hashlib.sha256(path.read_bytes()).hexdigest()
     print(f"primitives: {len(list(primitives_dir.iterdir()))} arrays")
+
+    raw_path = OUT / "raw" / "patches.dng"
+    write_raw_patches(raw_path)
+    manifest["files"]["raw/patches.dng"] = hashlib.sha256(raw_path.read_bytes()).hexdigest()
+    print("raw: patches.dng")
 
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
 
