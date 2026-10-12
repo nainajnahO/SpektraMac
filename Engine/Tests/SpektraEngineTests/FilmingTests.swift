@@ -17,7 +17,7 @@ func preprocessMatchesRGBPre(caseName: String) throws {
     }
 
     let gpu = try GPU()
-    let simulation = try Simulation(parameters: golden.params, gpu: gpu, tables: tables)
+    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), gpu: gpu, tables: tables)
     let output = try gpu.run { simulation.encodePreprocess(rgbIn, on: $0) }
     let difference = Difference(gpu.download(output), reference.values, floor: 1e-3)
     print("\(caseName) rgb_pre: \(difference)")
@@ -66,4 +66,21 @@ func filmingLUTMatchesPython(caseName: String) throws {
     let difference = Difference(lut.flatMap { [$0.x, $0.y, $0.z] }, reference.values, floor: 1e-3)
     print("\(golden.film) compressed tc LUT: \(difference)")
     #expect(difference.maxRelative < 1e-6)
+}
+
+/// Per-pixel cases only: the photo's log_e_film also has halation and scatter (Day 13).
+@Test(arguments: goldenCases.filter { $0.hasPrefix("chart") })
+func exposeMatchesLogEFilm(caseName: String) throws {
+    let golden = try GoldenCase(caseName)
+    let gpu = try GPU()
+    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), gpu: gpu,
+                                    tables: Tables.load())
+    let rgbPre = try SpektraEngineTests.golden(caseName, "rgb_pre")
+    let input = gpu.upload(rgb: rgbPre.values, width: rgbPre.shape[1], height: rgbPre.shape[0])
+    let output = try gpu.run { simulation.encodeExpose(input, on: $0) }
+    let reference = try SpektraEngineTests.golden(caseName, "log_e_film")
+    // log10 exposure: absolute error is relative error of the exposure / ln 10.
+    let difference = Difference(gpu.download(output), reference.values, floor: 1)
+    print("\(caseName) log_e_film: \(difference)")
+    #expect(difference.maxAbsolute < 1e-4)
 }
