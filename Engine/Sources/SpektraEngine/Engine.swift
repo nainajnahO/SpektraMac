@@ -25,7 +25,7 @@ public actor Engine {
     }
 
     /// The simulation of `image`, as far as it is ported (PLAN.md): today the scanned print as
-    /// linear RGB in ``outputColorSpace``, before output gamut compression, sharpening and encoding.
+    /// linear RGB in ``outputColorSpace``, gamut-compressed, before sharpening and encoding.
     public func render(_ image: RGBImage) throws -> RGBImage {
         let output = try gpu.run { simulation.encode(image, on: $0) }
         return RGBImage(width: image.width, height: image.height, pixels: gpu.download(output))

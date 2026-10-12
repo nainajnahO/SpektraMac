@@ -30,7 +30,7 @@ func benchmark(width: Int, height: Int) throws {
     }
 
     let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: Tables.load())
-    lap("setup (tc LUT, print constants)")
+    lap("setup (tc LUT, print constants, C_max)")
     // A smooth gradient with texture: values span the exposure range like a photo.
     var pixels = [Float](repeating: 0, count: width * height * 3)
     for y in 0..<height {
@@ -53,7 +53,11 @@ func benchmark(width: Int, height: Int) throws {
     lap("log_e_film → cmy_film (couplers)")
     let logEPrint = try gpu.run { simulation.encodePrintExpose(cmyFilm, on: $0) }
     lap("cmy_film → log_e_print (81 bands)")
-    _ = try gpu.run { simulation.encodePrintDevelop(logEPrint, on: $0) }
+    let cmyPrint = try gpu.run { simulation.encodePrintDevelop(logEPrint, on: $0) }
     lap("log_e_print → cmy_print")
+    let scanned = try gpu.run { simulation.encodeScan(cmyPrint, on: $0) }
+    lap("cmy_print → scanned RGB (81 bands)")
+    _ = try gpu.run { simulation.encodeOutputCompression(scanned, on: $0) }
+    lap("output gamut compression (cam16ucs)")
     print("allocated on the GPU: \(gpu.device.currentAllocatedSize / 1_000_000) MB")
 }
