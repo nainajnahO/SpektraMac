@@ -27,19 +27,20 @@ final class PhotoModel {
     var controls = Controls() {
         didSet { scheduleRender() }
     }
-    /// The film. Choosing one also picks the paper it's meant to be printed on and, as
-    /// Spektrafilm's GUI does, views slides directly instead of printing them.
+    /// The film. Choosing one applies the defaults made for it, if any; otherwise it picks the
+    /// paper the film is meant to be printed on and, as Spektrafilm's GUI does, views slides
+    /// directly instead of printing them, keeping the other controls.
     var film: String {
         get { controls.film }
         set {
-            controls.film = newValue
-            guard let info = films.first(where: { $0.stock == newValue }) else { return }
-            if let paper = info.targetPrint {
-                controls.paper = paper
+            if let defaults = savedDefaults(for: newValue) {
+                controls = defaults
+            } else {
+                controls = factoryControls(for: newValue, from: controls)
             }
-            controls.scanFilm = info.type == .positive
         }
     }
+    var filmName: String { films.first { $0.stock == controls.film }?.name ?? controls.film }
     var films: [ProfileInfo] { engine?.films ?? [] }
     var papers: [ProfileInfo] { engine?.papers ?? [] }
     /// Display-sized rendering of the last simulation.
@@ -205,6 +206,84 @@ final class PhotoModel {
             isRenderingFullResolution = false
             note("Cancelled the full-resolution render")
         }
+    }
+
+    // MARK: Presets
+
+    var canUsePresets: Bool { engine != nil }
+
+    func savePreset() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "\(filmName).json"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try controls.preset().write(to: url, options: .atomic)
+            note("Saved preset \(url.lastPathComponent)")
+        } catch {
+            fail("Could not save the preset", error)
+        }
+    }
+
+    func openPreset() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let preset = try Controls(preset: Data(contentsOf: url))
+            guard films.contains(where: { $0.stock == preset.film }),
+                  papers.contains(where: { $0.stock == preset.paper }) else {
+                throw CocoaError(.fileReadCorruptFile, userInfo: [
+                    NSLocalizedDescriptionKey: "Unknown film or paper (\(preset.film), \(preset.paper))",
+                ])
+            }
+            controls = preset
+            note("Opened preset \(url.lastPathComponent)")
+        } catch {
+            fail("Could not open the preset", error)
+        }
+    }
+
+    /// Makes the current controls what choosing this film applies from now on.
+    func makeDefaultForFilm() {
+        do {
+            try UserDefaults.standard.set(controls.preset(), forKey: Self.defaultsKey(controls.film))
+            note("Made these settings the default for \(filmName)")
+        } catch {
+            fail("Could not save the default for \(filmName)", error)
+        }
+    }
+
+    /// Forgets the film's saved defaults and returns every control to the app's own.
+    func restoreFactoryDefaults() {
+        UserDefaults.standard.removeObject(forKey: Self.defaultsKey(controls.film))
+        controls = factoryControls(for: controls.film, from: Controls())
+        note("Restored the factory defaults for \(filmName)")
+    }
+
+    private static func defaultsKey(_ film: String) -> String { "filmDefaults.\(film)" }
+
+    private func savedDefaults(for film: String) -> Controls? {
+        guard let preset = UserDefaults.standard.data(forKey: Self.defaultsKey(film)) else { return nil }
+        do {
+            return try Controls(preset: preset)
+        } catch {
+            fail("Ignored the saved defaults for \(film)", error)
+            return nil
+        }
+    }
+
+    /// `controls` with `film`, its target paper (if it has one) and slides viewed directly.
+    private func factoryControls(for film: String, from controls: Controls) -> Controls {
+        var controls = controls
+        controls.film = film
+        guard let info = films.first(where: { $0.stock == film }) else { return controls }
+        if let paper = info.targetPrint {
+            controls.paper = paper
+        }
+        controls.scanFilm = info.type == .positive
+        return controls
     }
 
     // MARK: Helpers

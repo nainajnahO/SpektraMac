@@ -31,6 +31,18 @@ struct SpektraMacApp: App {
                     .keyboardShortcut("s", modifiers: .command)
                     .disabled(!model.canSave)
             }
+            CommandMenu("Preset") {
+                Group {
+                    Button("Open Preset…") { model.openPreset() }
+                        .keyboardShortcut("o", modifiers: [.command, .shift])
+                    Button("Save Preset…") { model.savePreset() }
+                        .keyboardShortcut("s", modifiers: [.command, .shift])
+                    Divider()
+                    Button("Make Default for \(model.filmName)") { model.makeDefaultForFilm() }
+                    Button("Restore Factory Defaults") { model.restoreFactoryDefaults() }
+                }
+                .disabled(!model.canUsePresets)
+            }
         }
     }
 }

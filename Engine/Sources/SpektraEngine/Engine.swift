@@ -1,9 +1,10 @@
 import CoreGraphics
 import Dispatch
+import Foundation
 
 /// What the app's controls set (PLAN.md, Day 31). Everything else stays at Spektrafilm's defaults
-/// for the film and paper.
-public struct Controls: Sendable, Equatable {
+/// for the film and paper. A preset is these values as JSON.
+public struct Controls: Codable, Sendable, Equatable {
     /// Stock names (`profiles/<stock>.json`).
     public var film = "kodak_portra_400"
     public var paper = "kodak_portra_endura"
@@ -20,6 +21,18 @@ public struct Controls: Sendable, Equatable {
     public var halation = true
 
     public init() {}
+
+    /// Reads a preset.
+    public init(preset: Data) throws {
+        self = try JSONDecoder().decode(Controls.self, from: preset)
+    }
+
+    /// The controls as a preset: JSON, readable and with sorted keys so presets diff cleanly.
+    public func preset() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(self)
+    }
 }
 
 /// What a render is for.
