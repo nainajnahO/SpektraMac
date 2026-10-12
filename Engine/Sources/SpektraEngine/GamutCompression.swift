@@ -82,7 +82,7 @@ func quadToTri(_ tc: SIMD2<Double>) -> SIMD2<Double> {
 /// (`compress_rgb_cam16ucs_chroma`): in CAM16-UCS around the output space's white, lightness above
 /// white rolls off toward it, then chroma is knee-compressed against the largest chroma the output
 /// RGB cube holds at that lightness and hue, C_max(J', h'), a table built once per space. The
-/// per-pixel part runs on the GPU (``GPU/encodeOutputCompression(_:maxChroma:on:input:)``).
+/// per-pixel part runs on the GPU (``GPU/encodeOutputCompression(_:maxChroma:on:rgb:)``).
 struct OutputGamutCompression {
     /// The table's J' grid, `np.linspace(1, 110, 64)`: J' ≈ 100 at white, a little headroom above.
     static let lightnessGrid = (0..<64).map { $0 == 63 ? 110 : Double($0) * (109.0 / 63) + 1 }
@@ -160,17 +160,16 @@ struct OutputCompressionConstants {
 }
 
 extension GPU {
-    /// The output gamut compression per pixel (kernel `compress_cam16ucs`); `maxChroma` holds
-    /// the compression's C_max table as floats.
+    /// The output gamut compression per pixel (kernel `compress_cam16ucs`), in place in `rgb`;
+    /// `maxChroma` holds the compression's C_max table as floats.
     func encodeOutputCompression(_ compression: OutputGamutCompression, maxChroma: any MTLBuffer,
-                                 on encoder: any MTLComputeCommandEncoder, input: any MTLTexture) -> any MTLTexture {
-        let output = makeTexture(width: input.width, height: input.height)
+                                 on encoder: Encoder, rgb: any MTLTexture) -> any MTLTexture {
         var constants = compression.kernelConstants
-        encode("compress_cam16ucs", on: encoder, textures: [input, output], grid: output.size) {
+        encode("compress_cam16ucs", on: encoder, textures: [rgb, rgb], grid: rgb.size) {
             $0.setBytes(&constants, length: MemoryLayout<OutputCompressionConstants>.stride, index: 0)
             $0.setBuffer(maxChroma, offset: 0, index: 1)
         }
-        return output
+        return rgb
     }
 }
 

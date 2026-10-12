@@ -31,10 +31,10 @@ import Testing
         let output = gpu.makeTexture(width: side, height: side)
         var parameters = SIMD4<Float>(lambda, n, p, sigma)
         try gpu.run { encoder in
-            encoder.setComputePipelineState(pipeline)
-            encoder.setTexture(output, index: 0)
-            encoder.setBytes(&parameters, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
-            encoder.dispatchThreads(output.size, threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
+            encoder.compute.setComputePipelineState(pipeline)
+            encoder.compute.setTexture(output, index: 0)
+            encoder.compute.setBytes(&parameters, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
+            encoder.compute.dispatchThreads(output.size, threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
         }
         var rgba = [Float](repeating: 0, count: side * side * 4)
         output.getBytes(&rgba, bytesPerRow: side * 16, from: MTLRegionMake2D(0, 0, side, side), mipmapLevel: 0)

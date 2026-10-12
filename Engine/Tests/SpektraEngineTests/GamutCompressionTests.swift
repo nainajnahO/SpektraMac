@@ -131,7 +131,7 @@ private func compressOnGPU(_ array: NPYArray, with compression: OutputGamutCompr
     let table = compression.maxChroma.map(Float.init)
     let maxChroma = gpu.device.makeBuffer(bytes: table, length: table.count * MemoryLayout<Float>.stride)!
     let input = gpu.upload(rgb: array.values, width: array.shape[1], height: array.shape[0])
-    return gpu.download(try gpu.run { gpu.encodeOutputCompression(compression, maxChroma: maxChroma, on: $0, input: input) })
+    return gpu.download(try gpu.run { gpu.encodeOutputCompression(compression, maxChroma: maxChroma, on: $0, rgb: input) })
 }
 
 private extension SIMD3<Double> {

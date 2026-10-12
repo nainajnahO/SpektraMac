@@ -6,26 +6,32 @@ extension GPU {
     /// Spektrafilm's `fast_gaussian_filter`: per channel, σ ≤ 0 leaves the channel alone, σ < 3
     /// runs a separable FIR (radius `Int(truncate·σ + 0.5)`, reflected edges), σ ≥ 3 the Young–van
     /// Vliet recursive filter (replicated edges). Channels on another path pass through unchanged.
-    public func encodeGaussianBlur(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
+    public func encodeGaussianBlur(on encoder: Encoder, input: any MTLTexture,
                                    output: any MTLTexture, sigma: SIMD3<Double>, truncate: Double = 3) {
         let onFIR = (0..<3).map { sigma[$0] > 0 && sigma[$0] < 3 }
         let onIIR = (0..<3).map { sigma[$0] >= 3 }
+        guard onFIR.contains(true) || onIIR.contains(true) else {
+            encodeScale(on: encoder, input: input, output: output, by: 1)
+            return
+        }
+        // One scratch texture for every pass, so `output` may be `input`: the FIR runs input →
+        // scratch → output, then the recursive filter output → scratch → output → scratch → output.
+        let scratch = makeTexture(width: input.width, height: input.height)
         var source = input
         if onFIR.contains(true) {
-            let firOutput = onIIR.contains(true) ? makeTexture(width: input.width, height: input.height) : output
-            encodeFIR(on: encoder, input: source, output: firOutput, sigma: sigma, channels: onFIR, truncate: truncate)
-            source = firOutput
+            encodeFIR(on: encoder, input: source, scratch: scratch, output: output, sigma: sigma, channels: onFIR,
+                      truncate: truncate)
+            source = output
         }
         if onIIR.contains(true) {
-            encodeYoungVanVliet(on: encoder, input: source, output: output, sigma: sigma, channels: onIIR)
-        } else if !onFIR.contains(true) {
-            encodeScale(on: encoder, input: input, output: output, by: 1)
+            encodeYoungVanVliet(on: encoder, input: source, scratch: scratch, output: output, sigma: sigma,
+                                channels: onIIR)
         }
     }
 
     /// Spektrafilm's `fast_exponential_filter` (3 Gaussians): approximates convolving each channel
     /// with exp(−r/λ)/(2πλ²) by a fixed mixture of Gaussians with σ_k = ratio_k · λ.
-    public func encodeExponentialBlur(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
+    public func encodeExponentialBlur(on encoder: Encoder, input: any MTLTexture,
                                       output: any MTLTexture, decay: SIMD3<Double>, truncate: Double = 3) {
         // (amplitude, σ/λ), copied from _EXPONENTIAL_GAUSSIAN_FITS[3]; amplitudes sum to 1.
         let mixture: [(amplitude: Double, ratio: Double)] = [(0.1633, 0.5360), (0.6496, 1.5236), (0.1870, 2.7684)]
@@ -46,7 +52,7 @@ extension GPU {
     }
 
     /// `accumulator + weight · input`, per channel.
-    public func encodeAddScaled(on encoder: any MTLComputeCommandEncoder, accumulator: any MTLTexture,
+    public func encodeAddScaled(on encoder: Encoder, accumulator: any MTLTexture,
                                 input: any MTLTexture, output: any MTLTexture, weight: SIMD3<Double>) {
         var weight = SIMD3<Float>(weight)
         encode("add_scaled", on: encoder, textures: [accumulator, input, output], grid: output.size) {
@@ -54,8 +60,8 @@ extension GPU {
         }
     }
 
-    private func encodeFIR(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture, output: any MTLTexture,
-                           sigma: SIMD3<Double>, channels: [Bool], truncate: Double) {
+    private func encodeFIR(on encoder: Encoder, input: any MTLTexture, scratch: any MTLTexture,
+                           output: any MTLTexture, sigma: SIMD3<Double>, channels: [Bool], truncate: Double) {
         // _gaussian_kernel_1d in f64; a channel off this path gets the identity (one tap of 1).
         let radii = (0..<3).map { channels[$0] ? Int(truncate * sigma[$0] + 0.5) : 0 }
         var radius = Int32(radii.max()!)
@@ -70,8 +76,7 @@ extension GPU {
                 taps[Int(radius) - r + index][channel] = Float(weight / total)
             }
         }
-        let vertical = makeTexture(width: input.width, height: input.height)
-        for (kernel, source, destination) in [("fir_vertical", input, vertical), ("fir_horizontal", vertical, output)] {
+        for (kernel, source, destination) in [("fir_vertical", input, scratch), ("fir_horizontal", scratch, output)] {
             encode(kernel, on: encoder, textures: [source, destination], grid: destination.size) {
                 $0.setBytes(taps, length: taps.count * MemoryLayout<SIMD4<Float>>.stride, index: 0)
                 $0.setBytes(&radius, length: 4, index: 1)
@@ -79,7 +84,7 @@ extension GPU {
         }
     }
 
-    private func encodeYoungVanVliet(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
+    private func encodeYoungVanVliet(on encoder: Encoder, input: any MTLTexture, scratch: any MTLTexture,
                                      output: any MTLTexture, sigma: SIMD3<Double>, channels: [Bool]) {
         // _yvv_coeffs in f64, split into float hi/lo pairs; a channel off this path gets
         // B = 1, B1 = B2 = B3 = 0, which copies it exactly.
@@ -102,10 +107,8 @@ extension GPU {
                 coefficients[2 * index + 1][channel] = Float(value - Double(hi))
             }
         }
-        let (a, b) = (makeTexture(width: input.width, height: input.height),
-                      makeTexture(width: input.width, height: input.height))
-        let sweeps = [("yvv_rows_forward", input, a, input.height), ("yvv_rows_backward", a, b, input.height),
-                      ("yvv_columns_forward", b, a, input.width), ("yvv_columns_backward", a, output, input.width)]
+        let sweeps = [("yvv_rows_forward", input, scratch, input.height), ("yvv_rows_backward", scratch, output, input.height),
+                      ("yvv_columns_forward", output, scratch, input.width), ("yvv_columns_backward", scratch, output, input.width)]
         for (kernel, source, destination, lines) in sweeps {
             encode(kernel, on: encoder, textures: [source, destination], grid: MTLSize(width: lines, height: 1, depth: 1)) {
                 $0.setBytes(coefficients, length: coefficients.count * MemoryLayout<SIMD4<Float>>.stride, index: 0)

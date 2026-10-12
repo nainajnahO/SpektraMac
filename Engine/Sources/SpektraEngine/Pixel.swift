@@ -6,7 +6,7 @@ import simd
 extension GPU {
     /// Per-channel linear interpolation through a curve (Spektrafilm's `fast_interp` with a K × 3
     /// axis): density curves, exposure curves. `axis` and `values` have one row per curve point.
-    public func encodeInterpolate(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
+    public func encodeInterpolate(on encoder: Encoder, input: any MTLTexture,
                                   output: any MTLTexture, axis: [SIMD3<Double>], values: [SIMD3<Double>]) {
         precondition(axis.count == values.count && axis.count >= 2)
         // Reciprocal steps in f64 like Python; a zero step gives 0, as fast_interp does.
@@ -25,19 +25,19 @@ extension GPU {
     }
 
     /// `a * b`, per channel.
-    public func encodeMultiply(on encoder: any MTLComputeCommandEncoder, a: any MTLTexture, b: any MTLTexture,
+    public func encodeMultiply(on encoder: Encoder, a: any MTLTexture, b: any MTLTexture,
                                output: any MTLTexture) {
         encode("multiply_rgb", on: encoder, textures: [a, b, output], grid: output.size)
     }
 
     /// `input * factor`.
-    public func encodeScale(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
+    public func encodeScale(on encoder: Encoder, input: any MTLTexture,
                             output: any MTLTexture, by factor: Double) {
         encodeScale(on: encoder, input: input, output: output, by: SIMD3(repeating: factor))
     }
 
     /// `input * factor`, per channel.
-    public func encodeScale(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
+    public func encodeScale(on encoder: Encoder, input: any MTLTexture,
                             output: any MTLTexture, by factor: SIMD3<Double>) {
         var factor = SIMD3<Float>(factor)
         encode("scale_rgb", on: encoder, textures: [input, output], grid: output.size) {
@@ -46,19 +46,19 @@ extension GPU {
     }
 
     /// `log10(max(input, 0) + 1e-10)`.
-    public func encodeLogExposure(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
+    public func encodeLogExposure(on encoder: Encoder, input: any MTLTexture,
                                   output: any MTLTexture) {
         encode("log_exposure", on: encoder, textures: [input, output], grid: output.size)
     }
 
     /// `10 ** input`.
-    public func encodeExp10(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
+    public func encodeExp10(on encoder: Encoder, input: any MTLTexture,
                             output: any MTLTexture) {
         encode("exp10_rgb", on: encoder, textures: [input, output], grid: output.size)
     }
 
     /// `matrix · rgb + offset` per pixel; `rows` is the matrix as NumPy writes it.
-    public func encodeMatrix(on encoder: any MTLComputeCommandEncoder, input: any MTLTexture,
+    public func encodeMatrix(on encoder: Encoder, input: any MTLTexture,
                              output: any MTLTexture, rows: [SIMD3<Double>], offset: SIMD3<Double> = .zero) {
         var matrix = simd_float3x3(rows: rows.map { SIMD3<Float>($0) })
         var offset = SIMD3<Float>(offset)
