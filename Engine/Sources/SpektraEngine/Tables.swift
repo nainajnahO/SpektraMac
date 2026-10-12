@@ -17,6 +17,8 @@ public struct Tables: Decodable, Sendable {
     /// Transmittance of the enlarger's analytic C, M, Y dichroic filters at full strength.
     public let dichroicFilters: [SIMD3<Double>]
     public let colourSpaces: [String: ColourSpace]
+    /// CIE 1931 2° spectral locus in xy, 380–700 nm at 5 nm, closed (first vertex repeated).
+    public let spectralLocus: [SIMD2<Double>]
     /// 3 × 3 cone-response matrices (rows) for von Kries adaptation: CAT02, CAT16, Bradford.
     public let chromaticAdaptation: [String: [SIMD3<Double>]]
 
@@ -28,6 +30,12 @@ public struct Tables: Decodable, Sendable {
         /// Transfer function: `sRGB`, `gamma`, `BT.2020`, `ROMM RGB` or `linear`.
         public let cctf: String
         public let gamma: Double?
+    }
+
+    /// xy chromaticity of an illuminant spectrum under the CMFs (`_illuminant_to_xy`).
+    public func chromaticity(of spectrum: [Double]) -> SIMD2<Double> {
+        let xyz = zip(spectrum, cmfs).reduce(SIMD3<Double>.zero) { $0 + $1.0 * $1.1 }
+        return SIMD2(xyz.x, xyz.y) / xyz.sum()
     }
 
     public static func load() throws -> Tables {

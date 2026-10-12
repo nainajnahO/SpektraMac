@@ -29,7 +29,9 @@ own error shows): curve interpolation (numba fast_interp) on a negative film's e
 a positive film's non-monotonic -density axis, log10(max(x, 0) + 1e-10), 10**x and a 3x3 matrix;
 and blurs (fast_gaussian_filter, fast_exponential_filter) with per-channel sigmas covering the FIR
 path, the IIR path, a mix, and an image smaller than the kernel, with `<name>_sigma` alongside; and each film's
-hanatos2025 tc LUT before input gamut compression (`tc_lut_raw_<film>`, 192x192x3).
+hanatos2025 tc LUT before input gamut compression (`tc_lut_raw_<film>`, 192x192x3); and on that LUT's
+own cell grid, the input gamut compression's normalised distance to the spectral locus around D55
+and T (`locus_dnorm_<illuminant>`) and matplotlib's inside/outside test (`locus_inside`).
 
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
@@ -54,7 +56,9 @@ from spektrafilm.profiles.io import load_profile
 from spektrafilm.runtime.pipeline import SimulationPipeline
 from spektrafilm.utils.fast_gaussian_filter import fast_exponential_filter, fast_gaussian_filter
 from spektrafilm.utils.fast_interp import fast_interp
-from spektrafilm.utils.spectral_upsampling import compute_hanatos2025_tc_lut
+from matplotlib.path import Path as MplPath
+from spektrafilm.utils.gamut_compression import _ray_polygon_distance, spectral_locus_xy
+from spektrafilm.utils.spectral_upsampling import _illuminant_to_xy, _quad2tri, compute_hanatos2025_tc_lut
 from spektrafilm.utils.autoexposure import measure_autoexposure_ev
 
 REFERENCE_VERSION = "0.3.4"
@@ -181,6 +185,19 @@ def primitives() -> dict[str, np.ndarray]:
         adaptation.apply_window, adaptation.apply_surface = True, False
         sensitivity = np.nan_to_num(10 ** profile.data.log_sensitivity)
         arrays[f"tc_lut_raw_{film}"] = compute_hanatos2025_tc_lut(sensitivity, adaptation, gamut_compress=None)
+
+    # remap_tc_lut_for_compression's cell grid, decoded to xy as it does.
+    cells = np.arange(192) / 191
+    xy = _quad2tri(np.stack(np.meshgrid(cells, cells, indexing="ij"), axis=-1))
+    locus = spectral_locus_xy()
+    for illuminant in ("D55", "T"):
+        white = _illuminant_to_xy(illuminant)
+        delta = xy - white
+        dist = np.linalg.norm(delta, axis=-1)
+        direction = delta / np.fmax(dist, 1e-12)[..., None]
+        boundary = _ray_polygon_distance(white, direction, locus)
+        arrays[f"locus_dnorm_{illuminant}"] = dist / np.fmax(boundary, 1e-12)
+    arrays["locus_inside"] = MplPath(locus).contains_points(xy.reshape(-1, 2)).reshape(192, 192)
     return arrays
 
 
