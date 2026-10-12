@@ -81,13 +81,14 @@ public final class GPU: Sendable {
         return rgb
     }
 
-    /// Encodes one kernel over every pixel of `grid`. `setArguments` binds anything beyond the
-    /// textures (constants with `setBytes`, buffers); textures bind at indices 0, 1, … in order.
+    /// Encodes one kernel over `grid` threads (usually a texture's ``MTLTexture/size``: one per
+    /// pixel). `setArguments` binds anything beyond the textures (constants with `setBytes`,
+    /// buffers); textures bind at indices 0, 1, … in order.
     public func encode(
         _ kernel: String,
         on encoder: any MTLComputeCommandEncoder,
         textures: [any MTLTexture],
-        grid: any MTLTexture,
+        grid: MTLSize,
         setArguments: (any MTLComputeCommandEncoder) -> Void = { _ in }
     ) {
         guard let pipeline = pipelines[kernel] else { preconditionFailure("No Metal kernel named \(kernel)") }
@@ -97,9 +98,8 @@ public final class GPU: Sendable {
         }
         setArguments(encoder)
         let width = pipeline.threadExecutionWidth
-        let height = pipeline.maxTotalThreadsPerThreadgroup / width
-        encoder.dispatchThreads(MTLSize(width: grid.width, height: grid.height, depth: 1),
-                                threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
+        let height = grid.height > 1 ? pipeline.maxTotalThreadsPerThreadgroup / width : 1
+        encoder.dispatchThreads(grid, threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
     }
 
     /// Runs `body` in one command buffer and waits for the GPU to finish.
@@ -112,4 +112,9 @@ public final class GPU: Sendable {
         commandBuffer.waitUntilCompleted()
         if let error = commandBuffer.error { throw error }
     }
+}
+
+extension MTLTexture {
+    /// One thread per pixel.
+    public var size: MTLSize { MTLSize(width: width, height: height, depth: 1) }
 }
