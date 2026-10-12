@@ -33,6 +33,8 @@ public struct Simulation {
     let printExposureFactor: Double
     /// Raw paper exposure from the preflash (zero without one).
     let preflashRaw: SIMD3<Double>
+    /// The paper's density curves the print develops on (`apply_print_curves_morph`).
+    let printDevelopCurves: [SIMD3<Double>]
 
     public struct UnknownColourSpace: Error, CustomStringConvertible {
         public let name: String
@@ -122,6 +124,10 @@ public struct Simulation {
         case (false, true): compensated / factor
         case (false, false): 1
         }
+
+        printDevelopCurves = printCurves(print.data.densityCurvesModel, logExposure: print.data.logExposure,
+                                         morph: parameters.printRender.densityCurvesMorph,
+                                         positive: print.info.type == .positive)
 
         if enlarger.preflashExposure > 0 {
             let preflashLight = enlargerLight(lamp, filters: enlarger.preflashFilters, dichroics: tables.dichroicFilters)
@@ -258,6 +264,17 @@ extension Simulation {
             $0.setBytes(&preflash, length: MemoryLayout<SIMD3<Float>>.size, index: 4)
         }
         return output
+    }
+}
+
+extension Simulation {
+    /// `log_e_print → cmy_print` (PrintingStage.develop, `develop_print_morph`): the paper's log
+    /// exposure → CMY dye density through its (optionally morphed) fitted curves.
+    public func encodePrintDevelop(_ logExposure: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        let density = gpu.makeTexture(width: logExposure.width, height: logExposure.height)
+        gpu.encodeInterpolate(on: encoder, input: logExposure, output: density,
+                              axis: print.data.logExposure.map { SIMD3(repeating: $0) }, values: printDevelopCurves)
+        return density
     }
 }
 

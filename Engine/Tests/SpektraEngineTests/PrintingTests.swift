@@ -66,3 +66,36 @@ func printExposeMatchesLogEPrint(caseName: String) throws {
     print("print variant log_e_print: \(difference)")
     #expect(difference.maxAbsolute < 1e-4)
 }
+
+@Test(arguments: ["kodak_portra_endura", "kodak_2383"])
+func printCurvesMatchPython(paper: String) throws {
+    let profile = try Profile.load(paper)
+    var morph = Parameters.PrintCurvesMorph()
+    func check(_ name: String) throws {
+        let curves = printCurves(profile.data.densityCurvesModel, logExposure: profile.data.logExposure, morph: morph,
+                                 positive: profile.info.type == .positive)
+        let difference = Difference(curves.flatMap { [$0.x, $0.y, $0.z] },
+                                    try golden("primitives", "\(name)_\(paper)").values, floor: 1e-3)
+        print("\(name) \(paper): \(difference)")
+        #expect(difference.maxRelative < 1e-6)
+    }
+    try check("print_curves")
+    morph = Parameters.PrintCurvesMorph(active: true, gammaFactor: 1.2, gammaFactorFast: 0.9, gammaFactorSlow: 1.1,
+                                        gammaFactorRed: 1.05, gammaFactorGreen: 0.97, gammaFactorBlue: 1.02,
+                                        developerExhaustion: 0.4)
+    try check("print_curves_morphed")
+}
+
+@Test(arguments: goldenCases.filter { !$0.hasSuffix("scan") })
+func printDevelopMatchesCMYPrint(caseName: String) throws {
+    let golden = try GoldenCase(caseName)
+    let gpu = try GPU()
+    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film),
+                                    print: golden.printProfile(), gpu: gpu, tables: Tables.load())
+    let logEPrint = try SpektraEngineTests.golden(caseName, "log_e_print")
+    let input = gpu.upload(rgb: logEPrint.values, width: logEPrint.shape[1], height: logEPrint.shape[0])
+    let output = try gpu.run { simulation.encodePrintDevelop(input, on: $0) }
+    let difference = Difference(gpu.download(output), try SpektraEngineTests.golden(caseName, "cmy_print").values, floor: 1)
+    print("\(caseName) cmy_print: \(difference)")
+    #expect(difference.maxAbsolute < 1e-4)
+}

@@ -7,6 +7,7 @@ public struct Parameters: Codable, Sendable {
     public var camera = Camera()
     public var filmRender = FilmRender()
     public var enlarger = Enlarger()
+    public var printRender = PrintRender()
     public var io = IO()
     public var settings = Settings()
 
@@ -51,6 +52,24 @@ extension Parameters {
         /// Not ported (0 by default).
         public var spectralGaussianBlur = 0.0
         public var neutralPrintFiltersFromDatabase = true
+    }
+
+    public struct PrintRender: Codable, Sendable {
+        public var densityCurvesMorph = PrintCurvesMorph()
+    }
+
+    /// Spektrafilm's `PrintCurvesMorphParams`: coupled-gamma reshaping of the paper's fitted
+    /// sub-layer curves (fast = lowest-threshold layer) plus developer exhaustion. Off by default.
+    public struct PrintCurvesMorph: Codable, Sendable {
+        public var active = false
+        public var gammaFactor = 1.0
+        public var gammaFactorFast = 1.0
+        public var gammaFactorSlow = 1.0
+        public var gammaFactorRed = 1.0
+        public var gammaFactorGreen = 1.0
+        public var gammaFactorBlue = 1.0
+        /// 0…1: blends every sub-layer toward a Gumbel-max CDF.
+        public var developerExhaustion = 0.0
     }
 
     /// Spektrafilm's `EnlargerParams`. Filter values are Kodak CC units (100 = density 1.0).
