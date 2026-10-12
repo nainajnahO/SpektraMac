@@ -35,6 +35,11 @@ struct GoldenCase: Decodable {
     let autoexposureEv: Double
     let params: Parameters
 
+    /// The print profile the run used (Portra Endura for direct film scans, as golden.py sets).
+    func printProfile() throws -> Profile {
+        try Profile.load(print ?? "kodak_portra_endura")
+    }
+
     init(_ name: String) throws {
         let url = goldenDirectory.appending(components: name, "params.json")
         guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {

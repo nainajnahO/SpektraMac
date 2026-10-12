@@ -1,5 +1,6 @@
 import Accelerate
 import Foundation
+import simd
 
 /// The tc LUT a film is exposed through (`SpectralLUTService.get_filming_tc_lut`): its raw
 /// response to the hanatos2025 spectra with the input gamut compression baked in.
@@ -56,4 +57,42 @@ private func erf4BandPass(_ params: [Double], wavelengths: [Double]) -> [Double]
         let edgeIR = 0.5 * (1 - erf((wavelength - cIR) / (sigmaIR * 2.0.squareRoot())))
         return edgeUV * edgeIR
     }
+}
+
+/// The f64 CPU twin of the `hanatos2025_raw` kernel for single colours (the mid-grey references):
+/// linear RGB → film-adapted XYZ → tc → Mitchell lookup in the tc LUT, × (X + Y + Z).
+func hanatos2025Raw(_ rgb: SIMD3<Double>, toXYZ: simd_double3x3, lut: [SIMD3<Double>], size: Int) -> SIMD3<Double> {
+    let xyz = toXYZ * rgb
+    let b = xyz.sum()
+    let tc = triToQuad(SIMD2(xyz.x, xyz.y) / max(b, 1e-10))
+    return cubicLookup(lut, size: size, at: tc * Double(size - 1)) * (b.isNaN ? 0 : b)
+}
+
+/// `_cubic_interp_lut_at_2d`: Mitchell–Netravali (B = C = 1/3) over 4 × 4 entries around the
+/// clamped coordinate, reflected indices, normalised by the weight sum.
+func cubicLookup(_ lut: [SIMD3<Double>], size: Int, at coordinate: SIMD2<Double>) -> SIMD3<Double> {
+    func mitchell(_ t: Double) -> Double {
+        let (b, c, x) = (1.0 / 3, 1.0 / 3, abs(t))
+        if x < 1 { return ((12 - 9 * b - 6 * c) * x * x * x + (-18 + 12 * b + 6 * c) * x * x + (6 - 2 * b)) / 6 }
+        if x < 2 { return ((-b - 6 * c) * x * x * x + (6 * b + 30 * c) * x * x + (-12 * b - 48 * c) * x + (8 * b + 24 * c)) / 6 }
+        return 0
+    }
+    func baseAndFraction(_ value: Double) -> (Int, Double) {
+        let c = min(max(value, 0), Double(size - 1))
+        return c >= Double(size - 1) ? (size - 2, 1) : (Int(c.rounded(.down)), c - c.rounded(.down))
+    }
+    func reflect(_ i: Int) -> Int { i < 0 ? -i : (i >= size ? 2 * (size - 1) - i : i) }
+    let (xBase, xFraction) = baseAndFraction(coordinate.x)
+    let (yBase, yFraction) = baseAndFraction(coordinate.y)
+    var sum = SIMD3<Double>.zero, weightSum = 0.0
+    for i in 0..<4 {
+        let wx = mitchell(xFraction + 1 - Double(i))
+        let xi = reflect(xBase - 1 + i)
+        for j in 0..<4 {
+            let weight = wx * mitchell(yFraction + 1 - Double(j))
+            weightSum += weight
+            sum += weight * lut[xi * size + reflect(yBase - 1 + j)]
+        }
+    }
+    return weightSum != 0 ? sum / weightSum : sum
 }

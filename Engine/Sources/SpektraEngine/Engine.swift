@@ -12,10 +12,12 @@ public actor Engine {
     public init() throws {
         gpu = try GPU()
         let film = try Profile.load("kodak_portra_400")
+        let print = try Profile.load("kodak_portra_endura")
         var parameters = Parameters()
         parameters.io.inputColorSpace = "ITU-R BT.2020"  // RGBImage's working space, linear
+        parameters.applyNeutralPrintFilters(film: film, print: print, database: try Tables.loadNeutralPrintFilters())
         parameters.applyFilmSpecifics(film)
-        simulation = try Simulation(parameters: parameters, film: film, gpu: gpu, tables: Tables.load())
+        simulation = try Simulation(parameters: parameters, film: film, print: print, gpu: gpu, tables: Tables.load())
     }
 
     /// The simulation of `image`, as far as it is ported (PLAN.md): today the developed negative,

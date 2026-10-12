@@ -9,6 +9,8 @@ import simd
 public struct Simulation {
     public let parameters: Parameters
     public let film: Profile
+    /// The paper (or print film). Required like in Python, unused when scanning the film directly.
+    public let print: Profile
     let gpu: GPU
     let tables: Tables
     let inputColourSpace: Tables.ColourSpace
@@ -22,18 +24,28 @@ public struct Simulation {
     /// The curves before DIR couplers act, such that development with couplers reproduces
     /// `filmCurves` on a uniform grey (`compute_density_curves_before_dir_couplers`).
     let filmCurvesBeforeCouplers: [SIMD3<Double>]
+    /// Per spectral band, film dye densities (xyz) and base density (w); bands where the film
+    /// data is missing transmit nothing and are left out.
+    let printFilmBands: [SIMD4<Float>]
+    /// Per band, enlarger light × the paper's sensitivity, matching `printFilmBands`.
+    let printPaperBands: [SIMD4<Float>]
+    /// Mid-grey normalisation of the print exposure (`_compute_exposure_factor_midgray`).
+    let printExposureFactor: Double
+    /// Raw paper exposure from the preflash (zero without one).
+    let preflashRaw: SIMD3<Double>
 
     public struct UnknownColourSpace: Error, CustomStringConvertible {
         public let name: String
         public var description: String { "Unknown colour space \(name)" }
     }
 
-    public init(parameters: Parameters, film: Profile, gpu: GPU, tables: Tables) throws {
+    public init(parameters: Parameters, film: Profile, print: Profile, gpu: GPU, tables: Tables) throws {
         guard let inputColourSpace = tables.colourSpaces[parameters.io.inputColorSpace] else {
             throw UnknownColourSpace(name: parameters.io.inputColorSpace)
         }
         self.parameters = parameters
         self.film = film
+        self.print = print
         self.gpu = gpu
         self.tables = tables
         self.inputColourSpace = inputColourSpace
@@ -50,9 +62,73 @@ public struct Simulation {
             couplers: parameters.filmRender.dirCouplers.matrix, positive: film.info.type == .positive)
 
         let white = tables.chromaticity(of: tables.illuminants[film.info.referenceIlluminant]!)
-        inputToXYZ = vonKries(from: inputColourSpace.whitepoint, to: white,
-                              transform: tables.chromaticAdaptation["CAT16"]!)
-            * simd_double3x3(rows: inputColourSpace.rgbToXYZ)
+        func toFilmXYZ(_ space: Tables.ColourSpace) -> simd_double3x3 {
+            vonKries(from: space.whitepoint, to: white, transform: tables.chromaticAdaptation["CAT16"]!)
+                * simd_double3x3(rows: space.rgbToXYZ)
+        }
+        inputToXYZ = toFilmXYZ(inputColourSpace)
+
+        // Printing constants (PrintingStage._film_cmy_to_print_log_raw).
+        let sensitivity = print.data.logSensitivity.map { log in
+            let linear = SIMD3(pow(10, log.x), pow(10, log.y), pow(10, log.z))
+            return linear.replacing(with: 0, where: .!(linear .== linear))  // np.nan_to_num
+        }
+        let lamp = tables.illuminants[parameters.enlarger.illuminant]!
+        let light = enlargerLight(lamp, filters: parameters.enlarger.printFilters, dichroics: tables.dichroicFilters)
+        let valid = (0..<lamp.count).filter { band in
+            let density = film.data.channelDensity[band]
+            return !(density.x.isNaN || density.y.isNaN || density.z.isNaN || film.data.baseDensity[band].isNaN)
+        }
+        printFilmBands = valid.map { band in
+            let density = SIMD3<Float>(film.data.channelDensity[band])
+            return SIMD4(density, Float(film.data.baseDensity[band]))
+        }
+        printPaperBands = valid.map { SIMD4(SIMD3<Float>(light[$0] * sensitivity[$0]), 0) }
+
+        // Raw paper exposure of a film density spectrum: Σ_λ 10^−D(λ) · light(λ) · sensitivity(λ),
+        // NaN light counting as none (density_to_light).
+        func paperRaw(_ spectrum: [Double], light: [Double]) -> SIMD3<Double> {
+            (0..<spectrum.count).reduce(SIMD3<Double>.zero) { sum, band in
+                let transmitted = pow(10, -spectrum[band]) * light[band]
+                return transmitted.isNaN ? sum : sum + transmitted * sensitivity[band]
+            }
+        }
+        // The film density spectrum of an sRGB grey, developed on the stock curves
+        // (FilmingStage._simple_rgb_to_density_spectral).
+        let srgbToFilmXYZ = toFilmXYZ(tables.colourSpaces["sRGB"]!)
+        let gamma = parameters.filmRender.densityCurveGamma
+        let exposureAxis = film.data.logExposure.map { $0 / gamma }
+        func densitySpectrum(grey: Double) -> [Double] {
+            let raw = hanatos2025Raw(SIMD3(repeating: grey), toXYZ: srgbToFilmXYZ, lut: lut, size: size)
+            var cmy = SIMD3<Double>.zero
+            for channel in 0..<3 {
+                cmy[channel] = interp(log10(raw[channel] + 1e-10), exposureAxis,
+                                      film.data.densityCurves.map { $0[channel] })
+            }
+            return zip(film.data.channelDensity, film.data.baseDensity).map { (cmy * $0).sum() + $1 }
+        }
+        // 1 / geometric mean of the paper's raw exposure to a negative of that grey.
+        func midgrayFactor(_ spectrum: [Double]) -> Double {
+            let raw = pointwiseMax(paperRaw(spectrum, light: light), SIMD3(repeating: 1e-10))
+            return 1 / exp((log(raw.x) + log(raw.y) + log(raw.z)) / 3)
+        }
+        let enlarger = parameters.enlarger
+        let factor = midgrayFactor(densitySpectrum(grey: 0.184))
+        let compensated = enlarger.printExposureCompensation
+            ? midgrayFactor(densitySpectrum(grey: 0.184 * pow(2, parameters.camera.exposureCompensationEv))) : 1
+        printExposureFactor = switch (enlarger.normalizePrintExposure, enlarger.printExposureCompensation) {
+        case (true, true): compensated
+        case (true, false): factor
+        case (false, true): compensated / factor
+        case (false, false): 1
+        }
+
+        if enlarger.preflashExposure > 0 {
+            let preflashLight = enlargerLight(lamp, filters: enlarger.preflashFilters, dichroics: tables.dichroicFilters)
+            preflashRaw = paperRaw(film.data.baseDensity, light: preflashLight) * enlarger.preflashExposure
+        } else {
+            preflashRaw = .zero
+        }
     }
 
     /// `rgb_in → rgb_pre`: uploads the image and applies auto-exposure. (Python's preprocess
@@ -158,6 +234,30 @@ public struct Simulation {
         let developed = gpu.makeTexture(width: width, height: height)
         gpu.encodeInterpolate(on: encoder, input: corrected, output: developed, axis: axis, values: filmCurvesBeforeCouplers)
         return developed
+    }
+}
+
+extension Simulation {
+    /// `cmy_film → log_e_print` (PrintingStage.expose): the enlarger light through the negative's
+    /// dye densities and base, integrated against the paper's spectral sensitivity over 81 bands,
+    /// normalised so a mid-grey negative gives the paper a unit exposure, plus preflash, × print
+    /// exposure, as log10.
+    ///
+    /// Not ported: the enlarger diffusion filter (off by default, backlog) and the scanner's
+    /// black/white correction (factor 1 unless on; off by default).
+    public func encodePrintExpose(_ cmy: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
+        let output = gpu.makeTexture(width: cmy.width, height: cmy.height)
+        var bandCount = UInt32(printFilmBands.count)
+        var factors = SIMD2<Float>(Float(printExposureFactor), Float(parameters.enlarger.printExposure))
+        var preflash = SIMD3<Float>(preflashRaw)
+        gpu.encode("print_exposure", on: encoder, textures: [cmy, output], grid: output.size) {
+            $0.setBytes(printFilmBands, length: printFilmBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 0)
+            $0.setBytes(printPaperBands, length: printPaperBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 1)
+            $0.setBytes(&bandCount, length: 4, index: 2)
+            $0.setBytes(&factors, length: MemoryLayout<SIMD2<Float>>.size, index: 3)
+            $0.setBytes(&preflash, length: MemoryLayout<SIMD3<Float>>.size, index: 4)
+        }
+        return output
     }
 }
 
