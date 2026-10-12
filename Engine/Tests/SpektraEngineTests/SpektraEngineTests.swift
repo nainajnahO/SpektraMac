@@ -12,10 +12,7 @@ import Testing
     for factor: Float in [1, 2] {
         let output = gpu.makeTexture(width: width, height: height)
         try gpu.run { encoder in
-            gpu.encode("scale_rgb", on: encoder, textures: [texture, output], grid: output) {
-                var factor = factor
-                $0.setBytes(&factor, length: MemoryLayout<Float>.size, index: 0)
-            }
+            gpu.encodeScale(on: encoder, input: texture, output: output, by: Double(factor))
         }
         #expect(gpu.download(output) == image.values.map { $0 * factor })
     }

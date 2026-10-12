@@ -49,7 +49,22 @@
   "photo-kodak_vision3_500t-kodak_2383/rgb_in.npy": "fe51862d9596dfd08cf18e4b36c6d851bb95469974692ed3fc9eeb3e8db10e1e",
   "photo-kodak_vision3_500t-kodak_2383/rgb_out.npy": "89fdfccb07f21d36dbce8abad30945d66e734851cba912a99c90beff695dfdfa",
   "photo-kodak_vision3_500t-kodak_2383/rgb_pre.npy": "756639947bb4cf5c51694ef49339a6284f48e6b906ed80aac3646ce98d6376a5",
-  "photo-kodak_vision3_500t-kodak_2383/tc_lut.npy": "55a26a23422af11baf4a7c810eb9d4cb6224c8bba1dc8e2629394339b332f452"
+  "photo-kodak_vision3_500t-kodak_2383/tc_lut.npy": "55a26a23422af11baf4a7c810eb9d4cb6224c8bba1dc8e2629394339b332f452",
+  "primitives/interp_negative_axis.npy": "d71070ffc51e728fd2ef84ce4215610db659f01446c35a7467ae6ebee0467f01",
+  "primitives/interp_negative_out.npy": "3b42af15ea5781cd9343c63109652d4f23452c685f79b5928ecab4cf06770779",
+  "primitives/interp_negative_values.npy": "302e29359ced8ef49f662a72fc3c3a9b110c6d3eb3a25a8efadbb3cebdb043bb",
+  "primitives/interp_negative_x.npy": "3448589e83a4d8dd23ec85c4658729c26f416179af146a439b31f4f49f5cfb35",
+  "primitives/interp_positive_axis.npy": "5f6cec9bfa1b9fe66cacf028c17a65b63f4da916c996bfce8ac738323f1f5cc2",
+  "primitives/interp_positive_out.npy": "fbc3d687fef7ebf2b6a8f3710c7dc094a7ed5f179a7cc46a04f5c67a49816952",
+  "primitives/interp_positive_values.npy": "d71070ffc51e728fd2ef84ce4215610db659f01446c35a7467ae6ebee0467f01",
+  "primitives/interp_positive_x.npy": "45c2b4b2030bdd0fee8709a2c61f43fb08ec503e6817f70348c6c493c1f258ba",
+  "primitives/log10_out.npy": "c37d88a9ec9c3d0d7210b4052b2f0adde4df129e1143d00ecf43784af6b1b380",
+  "primitives/log10_x.npy": "1f160b938af72fb54e639a7f0bca1a6f9fcaaed8166693b57cb02915da7772f6",
+  "primitives/matmul_matrix.npy": "0013dfcb1810b012089b15edce7a1f2aea829344cadaab65ec564a11daebe1d1",
+  "primitives/matmul_out.npy": "829d8a85aeabf0cbadd50efb4f9773e1d23606a04436abe4eb00b5fcc8cb3282",
+  "primitives/matmul_x.npy": "8947a37c29db3db39f40b51092ec2568bda01e029e67f2ab9bdde14085aa9d54",
+  "primitives/pow10_out.npy": "295f118c36f80be6739f679d9b53b6106240735158892f7c32411c84dbe30aa1",
+  "primitives/pow10_x.npy": "d7fccc11515afa1507d41fee148d73b150456030e6bb69b364ce856ad42cccc6"
  },
  "versions": {
   "colour-science": "0.4.7",
