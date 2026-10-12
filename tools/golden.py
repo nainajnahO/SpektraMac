@@ -37,7 +37,9 @@ boost (`boost`: boost_ev 2, range 0.3, protect 1) and Portra 400's digested hala
 enlarger light at the digested neutral filters (`enlarger_<film>`), with M +12 / Y -7 shifts
 (`enlarger_shifted_<film>`) and the preflash light with M +5 / Y -3 (`preflash_<film>`); and the
 Portra chart re-run with print exposure 1.3, exposure compensation +0.7 EV balanced at the
-enlarger, and a 0.3 preflash with M +5 / Y -3 (`print_variant_cmy_film`, `print_variant_log_e_print`).
+enlarger, and a 0.3 preflash with M +5 / Y -3 (`print_variant_cmy_film`, `print_variant_log_e_print`);
+and each paper's print curves from its fitted model, plain (`print_curves_<paper>`) and with every
+morph control moved, developer exhaustion 0.4 included (`print_curves_morphed_<paper>`).
 
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
@@ -68,6 +70,7 @@ from spektrafilm.model.diffusion import apply_halation_um
 from spektrafilm.utils.numba_boost_hightlights import boost_highlights
 from spektrafilm.utils.fast_gaussian_filter import fast_exponential_filter, fast_gaussian_filter
 from spektrafilm.utils.fast_interp import fast_interp
+from spektrafilm.utils.morph_curves import PrintCurvesMorphParams, apply_print_curves_morph
 from matplotlib.path import Path as MplPath
 from spektrafilm.utils.gamut_compression import _ray_polygon_distance, spectral_locus_xy
 from spektrafilm.utils.spectral_upsampling import _illuminant_to_xy, _quad2tri, compute_hanatos2025_tc_lut
@@ -236,6 +239,15 @@ def primitives() -> dict[str, np.ndarray]:
     params.enlarger.preflash_m_filter_shift, params.enlarger.preflash_y_filter_shift = 5.0, -3.0
     taps = run_all_taps(SimulationPipeline(params), make_chart())
     arrays.update(print_variant_cmy_film=taps["cmy_film"], print_variant_log_e_print=taps["log_e_print"])
+
+    morph = PrintCurvesMorphParams(active=True, gamma_factor=1.2, gamma_factor_fast=0.9, gamma_factor_slow=1.1,
+                                   gamma_factor_red=1.05, gamma_factor_green=0.97, gamma_factor_blue=1.02,
+                                   developer_exhaustion=0.4)
+    for paper in ("kodak_portra_endura", "kodak_2383"):
+        data, kind = load_profile(paper).data, load_profile(paper).info.type
+        for name, params in (("print_curves", PrintCurvesMorphParams(active=False)), ("print_curves_morphed", morph)):
+            arrays[f"{name}_{paper}"] = apply_print_curves_morph(
+                data.log_exposure, data.density_curves_model, params, profile_type=kind)
     return arrays
 
 
