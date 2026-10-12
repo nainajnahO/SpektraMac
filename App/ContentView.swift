@@ -30,11 +30,6 @@ struct ContentView: View {
                         Button("Open…", systemImage: "folder") { model.isImporting = true }
                         if model.canCancel {
                             Button("Cancel", systemImage: "xmark.circle") { model.cancel() }
-                        } else {
-                            Button("Preview", systemImage: "eye") { model.renderPreview() }
-                                .disabled(!model.canRender)
-                            Button("Render", systemImage: "camera.aperture") { model.renderFullResolution() }
-                                .disabled(!model.canRender)
                         }
                         Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
                             .disabled(!model.canSave)

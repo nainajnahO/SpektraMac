@@ -63,8 +63,9 @@ public actor Engine {
     private let cache = SimulationCache()
     /// The last render's simulation, rebuilt when a render needs other parameters or profiles.
     private var simulation: Simulation?
-    /// Spektrafilm's `preview_max_size`.
-    private nonisolated let previewMaxSize = Parameters().settings.previewMaxSize
+    /// The live preview's long side. Larger than Spektrafilm's `preview_max_size` (640), which is
+    /// soft on a Retina display: about 0.1 s per change on an M1 Pro, preview mode and display.
+    private nonisolated let previewMaxSize = 1600
 
     /// The colour space of preview and full renders: linear sRGB, Spektrafilm's default output
     /// space, for the colour-managed display.

@@ -16,7 +16,7 @@ final class PhotoModel {
 
     /// The opened photo at full resolution, in the engine's working space.
     private(set) var source: RGBImage?
-    /// `source` down-sized: every change re-renders it.
+    /// `source` down-sized: every change re-renders it at once, before the full render.
     private(set) var preview: RGBImage? {
         didSet { scheduleRender() }
     }
@@ -105,51 +105,39 @@ final class PhotoModel {
 
     // MARK: Rendering
 
-    var canRender: Bool { source != nil && engine != nil }
+    /// How long the controls stay still before the whole photo renders.
+    private static let fullRenderDelay = Duration.milliseconds(500)
 
-    /// Renders the preview again, in place of a full-resolution render on screen.
-    func renderPreview() {
-        render(fullResolution: false)
-    }
-
-    /// Renders the whole photo at full resolution, with the blurs and grain the preview leaves out.
-    func renderFullResolution() {
-        render(fullResolution: true)
-    }
-
-    /// Renders the preview once per main-actor turn, however many settings changed in it, and
-    /// cancels a render that a newer change has made stale.
+    /// Renders once per main-actor turn, however many settings changed in it.
     private func scheduleRender() {
         guard !renderScheduled else { return }
         renderScheduled = true
         Task { @MainActor in
             renderScheduled = false
-            renderPreview()
+            render()
         }
     }
 
-    private func render(fullResolution: Bool) {
+    /// Renders the preview, then, once the controls have been still for `fullRenderDelay`, the
+    /// whole photo with the blurs and grain the preview leaves out. A newer change cancels both.
+    private func render() {
         renderTask?.cancel()
-        guard let image = fullResolution ? source : preview, let engine else {
+        isRenderingFullResolution = false
+        guard let source, let preview, let engine else {
             displayImage = nil
             isRendering = false
             return
         }
         isRendering = true
-        isRenderingFullResolution = fullResolution
         let controls = controls
         renderTask = Task {
-            let start = ContinuousClock.now
             do {
-                let output = try await engine.render(image, controls: controls, mode: fullResolution ? .full : .preview)
-                let display = await Task.detached(priority: .userInitiated) {
-                    output.displayImage(in: Engine.outputColorSpace)
-                }.value
-                guard !Task.isCancelled else { return }
-                displayImage = display
-                showsFullResolution = fullResolution
-                let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
-                note("Rendered \(fullResolution ? "full resolution" : "preview") (\(image.width) × \(image.height)) in \(elapsed)")
+                try await show(preview, controls: controls, mode: .preview, engine: engine)
+                isRendering = false
+                try await Task.sleep(for: Self.fullRenderDelay)
+                isRendering = true
+                isRenderingFullResolution = true
+                try await show(source, controls: controls, mode: .full, engine: engine)
             } catch {
                 guard !Task.isCancelled else { return }
                 fail("Could not render", error)
@@ -159,10 +147,24 @@ final class PhotoModel {
         }
     }
 
+    /// Renders `image` and puts it on screen, unless a newer change has made it stale.
+    private func show(_ image: RGBImage, controls: Controls, mode: RenderMode, engine: Engine) async throws {
+        let start = ContinuousClock.now
+        let output = try await engine.render(image, controls: controls, mode: mode)
+        let display = await Task.detached(priority: .userInitiated) {
+            output.displayImage(in: Engine.outputColorSpace)
+        }.value
+        try Task.checkCancellation()
+        displayImage = display
+        showsFullResolution = mode == .full
+        let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
+        note("Rendered \(mode == .full ? "full resolution" : "preview") (\(image.width) × \(image.height)) in \(elapsed)")
+    }
+
     // MARK: Saving and cancelling
 
-    var canSave: Bool { canRender && savePhase == nil }
-    var canCancel: Bool { isRenderingFullResolution || savePhase != nil }
+    var canSave: Bool { source != nil && engine != nil && savePhase == nil }
+    var canCancel: Bool { savePhase != nil }
 
     /// Renders the photo at full resolution, sRGB-encoded, and writes it where the Save panel says:
     /// 16-bit TIFF or PNG, or JPEG, by the name's extension.
@@ -196,16 +198,9 @@ final class PhotoModel {
         }
     }
 
-    /// Stops a full-resolution render or a save; the GPU stops at its next memory flush.
+    /// Stops a save; the GPU stops at its next memory flush.
     func cancel() {
-        if let saveTask {
-            saveTask.cancel()
-        } else if isRenderingFullResolution {
-            renderTask?.cancel()
-            isRendering = false
-            isRenderingFullResolution = false
-            note("Cancelled the full-resolution render")
-        }
+        saveTask?.cancel()
     }
 
     // MARK: Presets

@@ -57,7 +57,7 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
 }
 
 /// The preview's parameters are Python's `digest_params` with `preview_mode`, and its image is
-/// down-sized to Spektrafilm's `preview_max_size` on the long side.
+/// down-sized to the app's preview size, 1600 px on the long side.
 @Test func previewMatchesPython() async throws {
     var parameters = try GoldenCase("photo-kodak_portra_400-kodak_portra_endura").params
     parameters.applyPreviewMode()
@@ -65,12 +65,12 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
 
     let engine = try Engine()
     let preview = engine.preview(of: RGBImage(width: 3000, height: 2000, pixels: [Float](repeating: 0.18, count: 3000 * 2000 * 3)))
-    #expect(preview.width == 640 && preview.height == 427)
+    #expect(preview.width == 1600 && preview.height == 1067)
     #expect(preview.pixels.allSatisfy { abs($0 - 0.18) < 1e-5 })
     var controls = Controls()
     controls.scanFilm = true
     let rendered = try await engine.render(preview, controls: controls, mode: .preview)
-    #expect(rendered.width == 640 && rendered.height == 427)
+    #expect(rendered.width == 1600 && rendered.height == 1067)
 }
 
 /// The app's export parameters for each golden photo case's film and paper, and its preview
