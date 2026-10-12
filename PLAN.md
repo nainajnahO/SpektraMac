@@ -58,7 +58,7 @@ SwiftUI only — no custom theme or tokens, SF Symbols, system materials, automa
 
 ```
 +-------------------------------------------------------------------------------+
-| [sidebar]  Photo name | [Film | Negative] segmented | Preview  Render  Save…  Log |
+| [sidebar]  Photo name | [Film | Negative] segmented |           Open…  Save…  Log |
 +------------------+----------------------------------------------+-------------+
 | Form(.grouped)   |  ImageCanvas (fitted CGImage, letterboxed,   | .inspector  |
 |  Simulation      |   ContentUnavailableView "Drop a photo")     |  (log)      |
@@ -69,8 +69,8 @@ SwiftUI only — no custom theme or tokens, SF Symbols, system materials, automa
 ```
 
 Reuse as-is or near as-is:
-- `Window` scene with `.defaultSize(1100×760)`, `.commands` (Open ⌘O, Render ⌘R, Cancel ⌘.,
-  Save ⌘S), `@NSApplicationDelegateAdaptor` AppDelegate owning the model.
+- `Window` scene with `.defaultSize(1100×760)`, `.commands` (Open ⌘O, Save ⌘S, Cancel ⌘.),
+  `@NSApplicationDelegateAdaptor` AppDelegate owning the model.
 - `NavigationSplitView`: sidebar `Form { Section … }.formStyle(.grouped)` at 280/320/420; toolbar,
   `.inspector` and `.safeAreaInset(edge: .bottom) { StatusBar() }` attached to the **detail** column;
   `.toolbarBackgroundVisibility(.hidden, for: .windowToolbar)`.
