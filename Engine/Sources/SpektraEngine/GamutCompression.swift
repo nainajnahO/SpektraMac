@@ -29,16 +29,7 @@ enum InputGamutCompression {
     static func compress(_ xy: SIMD2<Double>, white: SIMD2<Double>, knee: [Double], locus: [SIMD2<Double>]) -> SIMD2<Double> {
         let ray = normalizedDistance(of: xy, white: white, locus: locus)
         guard ray.distance >= 1e-9 else { return xy }
-        let compressed = reinhardKnee(ray.normalized, threshold: knee[0], limit: knee[1], power: knee[2])
-        return white + ray.direction * (compressed * ray.boundary)
-    }
-
-    /// `reinhard_knee`: identity up to `threshold`, then a smooth approach to `limit`.
-    static func reinhardKnee(_ d: Double, threshold: Double, limit: Double, power: Double) -> Double {
-        guard d > threshold else { return d }
-        let scale = limit - threshold
-        let x = (d - threshold) / scale
-        return threshold + scale * (x / pow(1 + pow(x, power), 1 / power))
+        return white + ray.direction * (reinhardKnee(ray.normalized, knee) * ray.boundary)
     }
 
     /// `_ray_polygon_distance`: how far from `origin` along the unit `direction` the ray first
@@ -86,6 +77,102 @@ func quadToTri(_ tc: SIMD2<Double>) -> SIMD2<Double> {
     return SIMD2(1 - root, tc.y * root)
 }
 
+/// Spektrafilm's output gamut compression, default `"cam16ucs"` algorithm
+/// (`compress_rgb_cam16ucs_chroma`): in CAM16-UCS around the output space's white, lightness above
+/// white rolls off toward it, then chroma is knee-compressed against the largest chroma the output
+/// RGB cube holds at that lightness and hue, C_max(J', h'), a table built once per space.
+struct OutputGamutCompression {
+    /// The table's J' grid, `np.linspace(1, 110, 64)`: J' ≈ 100 at white, a little headroom above.
+    static let lightnessGrid = (0..<64).map { $0 == 63 ? 110 : Double($0) * (109.0 / 63) + 1 }
+    /// The table's h' grid in radians, `np.linspace(-π, π, 720, endpoint=False)`.
+    static let hueGrid = (0..<720).map { Double($0) * (2 * .pi / 720) - .pi }
+
+    let spec: Parameters.OutputGamutCompressSpec
+    let model: CAM16UCS
+    // colour's RGB↔XYZ around the space's own white also applies a CAT02 adaptation from that
+    // white to itself: the identity up to rounding, so left out.
+    let rgbToXYZ: simd_double3x3
+    let xyzToRGB: simd_double3x3
+    /// J' of the output white, which the lightness knee is relative to.
+    let whiteLightness: Double
+    /// C_max over ``lightnessGrid`` × ``hueGrid``, row-major.
+    let maxChroma: [Double]
+
+    init(spec: Parameters.OutputGamutCompressSpec, space: Tables.ColourSpace, cat16: [SIMD3<Double>]) {
+        self.spec = spec
+        model = CAM16UCS(white: space.whitepoint, cat16: cat16)
+        rgbToXYZ = simd_double3x3(rows: space.rgbToXYZ)
+        xyzToRGB = simd_double3x3(rows: space.xyzToRGB)
+        whiteLightness = model.jab(fromXYZ: model.white).x
+
+        // `_build_polar_perceptual_c_max_table`: 18 bisection steps on [0, 150] per cell for the
+        // largest chroma whose RGB stays within [0, 1] (± 1e-6 of slack). Rows in parallel.
+        let (model, xyzToRGB) = (model, xyzToRGB)
+        var table = [Double](repeating: 0, count: 64 * 720)
+        table.withUnsafeMutableBufferPointer { table in
+            // Each iteration writes only its own row.
+            nonisolated(unsafe) let table = table
+            DispatchQueue.concurrentPerform(iterations: 64) { row in
+                let lightness = Self.lightnessGrid[row]
+                for (column, hue) in Self.hueGrid.enumerated() {
+                    var (low, high) = (0.0, 150.0)
+                    for _ in 0..<18 {
+                        let middle = (low + high) * 0.5
+                        let rgb = xyzToRGB * model.xyz(fromJab: SIMD3(lightness, middle * cos(hue), middle * sin(hue)))
+                        let inGamut = all((rgb .>= -1e-6) .& (rgb .<= 1 + 1e-6))
+                        if inGamut { low = middle } else { high = middle }
+                    }
+                    table[row * 720 + column] = low
+                }
+            }
+        }
+        maxChroma = table
+    }
+
+    /// `compress_rgb_cam16ucs_chroma` on one linear RGB value of the output space.
+    func compress(_ rgb: SIMD3<Double>) -> SIMD3<Double> {
+        let jab = model.jab(fromXYZ: rgbToXYZ * rgb)
+        var lightness = jab.x
+        if let knee = spec.lightnessCompression {
+            lightness = reinhardKnee(lightness / whiteLightness, knee) * whiteLightness
+        }
+        let (chroma, hue) = (hypot(jab.y, jab.z), atan2(jab.z, jab.y))
+        // fmax: a NaN lookup gives the floor, as in Python.
+        let limit = Double.maximum(maxChroma(lightness: lightness, hue: hue), 1e-9)
+        let compressed = reinhardKnee(chroma / limit, spec.knee) * limit
+        return xyzToRGB * model.xyz(fromJab: SIMD3(lightness, compressed * cos(hue), compressed * sin(hue)))
+    }
+
+    /// `_c_max_lookup`: bilinear in the table, J' clamped to the grid, h' wrapping around.
+    func maxChroma(lightness: Double, hue: Double) -> Double {
+        guard !lightness.isNaN, !hue.isNaN else { return .nan }
+        let (lightnessGrid, hueGrid) = (Self.lightnessGrid, Self.hueGrid)
+        let clamped = min(max(lightness, lightnessGrid[0]), lightnessGrid[63])
+        let hueIndex = (hue - hueGrid[0]) / (hueGrid[1] - hueGrid[0])
+        let hueLow = (Int(hueIndex.rounded(.down)) % 720 + 720) % 720
+        let hueHigh = (hueLow + 1) % 720
+        let hueFraction = hueIndex - hueIndex.rounded(.down)
+        let lightnessIndex = (clamped - lightnessGrid[0]) / (lightnessGrid[63] - lightnessGrid[0]) * 63
+        let lightnessLow = min(max(Int(lightnessIndex.rounded(.down)), 0), 62)
+        let lightnessFraction = lightnessIndex - Double(lightnessLow)
+        func value(_ i: Int, _ j: Int) -> Double { maxChroma[i * 720 + j] }
+        return value(lightnessLow, hueLow) * (1 - lightnessFraction) * (1 - hueFraction)
+            + value(lightnessLow, hueHigh) * (1 - lightnessFraction) * hueFraction
+            + value(lightnessLow + 1, hueLow) * lightnessFraction * (1 - hueFraction)
+            + value(lightnessLow + 1, hueHigh) * lightnessFraction * hueFraction
+    }
+}
+
+/// `reinhard_knee` with `knee` = (threshold, limit, power): identity up to the threshold, then a
+/// smooth approach to the limit.
+func reinhardKnee(_ d: Double, _ knee: [Double]) -> Double {
+    let (threshold, limit, power) = (knee[0], knee[1], knee[2])
+    guard d > threshold else { return d }
+    let scale = limit - threshold
+    let x = (d - threshold) / scale
+    return threshold + scale * (x / pow(1 + pow(x, power), 1 / power))
+}
+
 /// CIECAM16-UCS (Li et al. 2017) under the output gamut compression's fixed viewing conditions
 /// (`compress_rgb_cam16ucs_chroma`): adapting luminance 64 cd/m², background Y_b 20, Average
 /// surround, adapting white the output space's white at Y = 1. A step-for-step port of
@@ -97,6 +184,8 @@ struct CAM16UCS {
     private static let c1 = 0.007, c2 = 0.0228
     private static let adaptingLuminance = 64.0, background = 20.0
 
+    /// The adapting white's XYZ at Y = 1 (`_output_cs_whitepoint_xyz`).
+    let white: SIMD3<Double>
     private let m16: simd_double3x3
     private let m16Inverse: simd_double3x3
     private let dRGB: SIMD3<Double>
@@ -111,9 +200,10 @@ struct CAM16UCS {
     init(white: SIMD2<Double>, cat16: [SIMD3<Double>]) {
         m16 = simd_double3x3(rows: cat16)
         m16Inverse = m16.inverse
-        // `_output_cs_whitepoint_xyz`, then ×100 into colour's reference domain.
         let y = max(white.y, 1e-12)
-        let whiteXYZ = SIMD3(white.x / y, 1, (1 - white.x - white.y) / y) * 100
+        self.white = SIMD3(white.x / y, 1, (1 - white.x - white.y) / y)
+        // ×100: colour's reference domain.
+        let whiteXYZ = self.white * 100
         let whiteRGB = m16 * whiteXYZ
         let luminance = Self.adaptingLuminance
         let d = min(max(Self.surroundF * (1 - (1 / 3.6) * exp((-luminance - 42) / 92)), 0), 1)

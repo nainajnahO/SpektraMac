@@ -33,6 +33,7 @@ public struct Parameters: Codable, Sendable {
         /// A key of ``Tables/colourSpaces``.
         public var outputColorSpace = "sRGB"
         public var outputCctfEncoding = true
+        public var outputGamutCompress = OutputGamutCompressSpec()
         /// Scan the developed film itself (slides, or viewing the negative) instead of a print.
         public var scanFilm = false
     }
@@ -44,6 +45,16 @@ public struct Parameters: Codable, Sendable {
         public var algorithm = "xy"
         /// Reinhard knee (threshold, limit, power).
         public var knee = [0.0, 1.0, 6.0]
+    }
+
+    /// Spektrafilm's `OutputGamutCompressSpec`.
+    public struct OutputGamutCompressSpec: Codable, Sendable, Equatable {
+        /// Only `cam16ucs` and `off` are ported.
+        public var algorithm = "cam16ucs"
+        /// Reinhard knee on chroma / C_max (threshold, limit, power).
+        public var knee = [0.0, 1.0, 6.0]
+        /// One-sided Reinhard knee on lightness / the white's lightness, or `nil` for none.
+        public var lightnessCompression: [Double]? = [0.7, 1.0, 2.2]
     }
 }
 
