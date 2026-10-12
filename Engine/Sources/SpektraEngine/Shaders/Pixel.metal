@@ -66,3 +66,10 @@ kernel void matrix_rgb(texture2d<float, access::read> input [[texture(0)]],
                        uint2 gid [[thread_position_in_grid]]) {
     output.write(float4(matrix * input.read(gid).rgb + offset, 1.0), gid);
 }
+
+kernel void multiply_rgb(texture2d<float, access::read> a [[texture(0)]],
+                         texture2d<float, access::read> b [[texture(1)]],
+                         texture2d<float, access::write> output [[texture(2)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    output.write(float4(a.read(gid).rgb * b.read(gid).rgb, 1.0), gid);
+}

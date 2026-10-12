@@ -55,7 +55,11 @@ on a 512x512 frame, blurred (`glare_amount`) and not (`glare_amount_unblurred`),
 generator seeded 20260515 in place of numba's; and grain's particle model (`apply_grain` with the
 dye-cloud blur, micro-structure and final blur off) at 5 um pixels on 8 uniform density patches of
 128x128 (2 % to 98 % of each channel's maximum) for Portra 400 and Velvia 100 (`grain_x_<film>`,
-`grain_out_<film>`), drawn with Python's own fixed seeds.
+`grain_out_<film>`), drawn with Python's own fixed seeds; and grain complete with the default
+parameters: 4 uniform patches of 256x256 at 10/35/60/90 % at 5 um for both films
+(`grain_full_x/out_<film>`), for Portra a 512x512 field at 50 % (`grain_field_x/out_<film>`, for
+the power spectrum) and a 256x256 one at 0.4 um pixels where the micro-structure is on
+(`grain_micro_x/out_<film>`), its lognormal draws from NumPy's generator seeded 20260515.
 
 qa-<film>-<paper>/ holds the LUT creator's QA oracle (spektrafilm_lut_creator.qa.reference, the 50k
 random sRGB samples of seed 20260515 through the pipeline in lut_mode, linear in and out) for each
@@ -77,6 +81,7 @@ pixel_size_um, the measured auto-exposure EV and the tap list.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import dataclasses
 import hashlib
@@ -98,6 +103,7 @@ from spektrafilm.model.illuminants import standard_illuminant
 from spektrafilm.runtime.pipeline import SimulationPipeline
 from spektrafilm.runtime.services import EnlargerService
 from spektrafilm.model import glare as glare_module
+from spektrafilm.model import grain as grain_module
 from spektrafilm.model.diffusion import apply_halation_um
 from spektrafilm.model.grain import apply_grain
 from spektrafilm.runtime.params_schema import GlareParams, GrainParams
@@ -191,6 +197,22 @@ def to_jsonable(value):
     if isinstance(value, (tuple, list)):
         return [to_jsonable(v) for v in value]
     return value
+
+
+@contextlib.contextmanager
+def lognormal_from_numpy():
+    """Python's lognormal draws (glare, grain micro-structure) from NumPy's global generator, which
+    np.random.seed reaches, instead of numba's per-thread one, which it doesn't: reproducible."""
+    saved = (glare_module.fast_lognormal_from_mean_std, grain_module.fast_lognormal_from_mean_std,
+             fast_stats.fast_lognormal)
+    glare_module.fast_lognormal_from_mean_std = fast_stats.fast_lognormal_from_mean_std.py_func
+    grain_module.fast_lognormal_from_mean_std = fast_stats.fast_lognormal_from_mean_std.py_func
+    fast_stats.fast_lognormal = fast_stats.fast_lognormal.py_func
+    try:
+        yield
+    finally:
+        (glare_module.fast_lognormal_from_mean_std, grain_module.fast_lognormal_from_mean_std,
+         fast_stats.fast_lognormal) = saved
 
 
 def params_json(params, **info) -> str:
@@ -325,20 +347,13 @@ def primitives() -> dict[str, np.ndarray]:
                        f"cam16ucs_inverse_jab_{suffix}": inverse_jab,
                        f"cam16ucs_inverse_xyz_{suffix}": colour.CAM16UCS_to_XYZ(inverse_jab, **cam16)})
 
-    # Python's glare with its numba RNG (per-thread, not seedable from here) swapped for NumPy's
-    # seeded one, so the field is reproducible.
     glare = GlareParams()
-    saved = glare_module.fast_lognormal_from_mean_std, fast_stats.fast_lognormal
-    glare_module.fast_lognormal_from_mean_std = fast_stats.fast_lognormal_from_mean_std.py_func
-    fast_stats.fast_lognormal = fast_stats.fast_lognormal.py_func
-    try:
+    with lognormal_from_numpy():
         np.random.seed(20260515)
         arrays["glare_amount"] = glare_module.compute_random_glare_amount(
             glare.percent, glare.roughness, glare.blur, (512, 512))
         arrays["glare_amount_unblurred"] = glare_module.compute_random_glare_amount(
             glare.percent, glare.roughness, 0.0, (512, 512))
-    finally:
-        glare_module.fast_lognormal_from_mean_std, fast_stats.fast_lognormal = saved
 
     # Grain's particle model (apply_grain, sub-layer model, with Python's own fixed seeds) on uniform
     # patches: 8 density levels from 2 % to 98 % of each channel's maximum, 128 x 128 each, at
@@ -353,6 +368,25 @@ def primitives() -> dict[str, np.ndarray]:
         arrays[f"grain_x_{film}"] = x
         arrays[f"grain_out_{film}"] = apply_grain(x.copy(), 5.0, particles_only, curves,
                                                   profile.data.density_curves_layers, profile.info.type)
+
+    # Grain complete, default parameters: 4 uniform patches of 256 x 256 (10 %, 35 %, 60 %, 90 % of
+    # each channel's maximum) at 5 um pixels for both films; for Portra also a 512 x 512 field at
+    # 50 % (power spectrum) and a 256 x 256 one at 0.4 um pixels, where the micro-structure is on.
+    with lognormal_from_numpy():
+        np.random.seed(20260515)
+        for film in ("kodak_portra_400", "fujifilm_velvia_100"):
+            profile = load_profile(film)
+            curves = profile.data.density_curves - np.nanmin(profile.data.density_curves, axis=0)
+            maximum = np.nanmax(curves, axis=0)
+            fields = {"full": (np.repeat([0.1, 0.35, 0.6, 0.9], 256), 256, 5.0)}
+            if film == "kodak_portra_400":
+                fields |= {"field": (np.full(512, 0.5), 512, 5.0), "micro": (np.full(256, 0.5), 256, 0.4)}
+            for name, (fractions, rows, pixel_size_um) in fields.items():
+                x = np.tile((fractions[:, None] * maximum)[None], (rows, 1, 1)).astype(np.float32).astype(np.float64)
+                arrays[f"grain_{name}_x_{film}"] = x
+                arrays[f"grain_{name}_out_{film}"] = apply_grain(
+                    x.copy(), pixel_size_um, GrainParams(), curves, profile.data.density_curves_layers,
+                    profile.info.type)
 
     # Output gamut compression (cam16ucs): the C_max(J', h') table and compressed samples.
     for space in ("sRGB", "ProPhoto RGB"):
