@@ -81,6 +81,19 @@ extension Parameters {
 
     public struct PrintRender: Codable, Sendable {
         public var densityCurvesMorph = PrintCurvesMorph()
+        public var glare = Glare()
+    }
+
+    /// Spektrafilm's `GlareParams`: flare in the print viewing, as a random field of the viewing
+    /// illuminant added to the scanned XYZ.
+    public struct Glare: Codable, Sendable {
+        public var active = true
+        /// Mean, in percent of the illuminant.
+        public var percent = 0.03
+        /// Standard deviation relative to the mean.
+        public var roughness = 0.7
+        /// Gaussian σ of the field, in pixels.
+        public var blur = 0.5
     }
 
     /// Spektrafilm's `PrintCurvesMorphParams`: coupled-gamma reshaping of the paper's fitted

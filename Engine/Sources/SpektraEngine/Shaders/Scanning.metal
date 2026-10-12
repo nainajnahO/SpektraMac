@@ -1,20 +1,28 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// ScanningStage._density_to_rgb up to output gamut compression: the dye densities viewed under
-// the scan illuminant, integrated against the CIE 1931 CMFs (cmf_bands: illuminant × CMF /
-// Σ illuminant·ȳ) to XYZ — floored as Python's log10/10^ round trip does — then one matrix:
-// CAT02 from the illuminant's white to the output space's, and XYZ → RGB.
-kernel void scan_rgb(texture2d<float, access::read> cmy [[texture(0)]],
+// ScanningStage._density_to_rgb up to glare: the dye densities viewed under the scan
+// illuminant, integrated against the CIE 1931 CMFs (cmf_bands: illuminant × CMF /
+// Σ illuminant·ȳ) to XYZ, floored as Python's log10/10^ round trip does.
+kernel void scan_xyz(texture2d<float, access::read> cmy [[texture(0)]],
                      texture2d<float, access::write> output [[texture(1)]],
                      constant float4 *dye_bands [[buffer(0)]],
                      constant float4 *cmf_bands [[buffer(1)]],
                      constant uint &band_count [[buffer(2)]],
-                     constant float3x3 &xyz_to_rgb [[buffer(3)]],
                      uint2 gid [[thread_position_in_grid]]) {
     float3 xyz = spectral_transmission(cmy.read(gid).rgb, dye_bands, cmf_bands, band_count);
-    xyz = fmax(xyz, 0.0f) + 1e-10f;
-    output.write(float4(xyz_to_rgb * xyz, 1.0f), gid);
+    output.write(float4(fmax(xyz, 0.0f) + 1e-10f, 1.0f), gid);
+}
+
+// compute_random_glare_amount before its blur: per pixel a lognormal sample exp(μ + σ z)
+// (fast_lognormal) / 100, in all three channels.
+kernel void glare_lognormal(texture2d<float, access::write> output [[texture(0)]],
+                            constant uint &seed [[buffer(0)]],
+                            constant float2 &mu_sigma [[buffer(1)]],
+                            uint2 gid [[thread_position_in_grid]]) {
+    Random random(seed, 1, gid);
+    float amount = exp(mu_sigma.x + mu_sigma.y * random.normal()) / 100.0f;
+    output.write(float4(float3(amount), 1.0f), gid);
 }
 
 // colour-science's cctf_encoding (linear → encoded), the inverse of decode_channel (Filming.metal),

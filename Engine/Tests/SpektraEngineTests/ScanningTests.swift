@@ -82,3 +82,38 @@ func qaOracleDeltaE(pair: String) throws {
     print("QA oracle \(pair), \(deltaEs.count) samples: ΔE2000 max \(sorted.last!), p99 \(sorted[sorted.count * 99 / 100]), mean \(deltaEs.reduce(0, +) / Double(deltaEs.count))")
     #expect(sorted.last! <= 0.5)
 }
+
+/// Print glare's random field against Python's: both are random, so their statistics compare,
+/// with and without the blur. Before the blur, neighbouring pixels must also be uncorrelated.
+@Test func glareMatchesPythonStatistics() throws {
+    let gpu = try GPU()
+    func meanAndDeviation(_ values: [Double]) -> (mean: Double, deviation: Double) {
+        let mean = values.reduce(0, +) / Double(values.count)
+        return (mean, (values.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(values.count)).squareRoot())
+    }
+    for (name, blur) in [("glare_amount", Parameters.Glare().blur), ("glare_amount_unblurred", 0.0)] {
+        var glare = Parameters.Glare()
+        glare.blur = blur
+        let field = gpu.download(try gpu.run {
+            gpu.encodeGlareAmount(on: $0, width: 512, height: 512, glare: glare, seed: Simulation.seed)
+        })
+        let ours = stride(from: 0, to: field.count, by: 3).map { Double(field[$0]) }
+        let (mean, deviation) = meanAndDeviation(ours)
+        let python = meanAndDeviation(try golden("primitives", name).values.map(Double.init))
+        print("\(name): mean \(mean) vs Python \(python.mean), std \(deviation) vs \(python.deviation)")
+        #expect(abs(mean / python.mean - 1) < 0.05)
+        #expect(abs(deviation / python.deviation - 1) < 0.05)
+        if blur == 0 {
+            var covariance = 0.0
+            for y in 0..<512 {
+                for x in 0..<511 {
+                    let (left, right) = (ours[y * 512 + x], ours[y * 512 + x + 1])
+                    covariance += (left - mean) * (right - mean)
+                }
+            }
+            let correlation = covariance / Double(512 * 511) / (deviation * deviation)
+            print("neighbour correlation before the blur: \(correlation)")
+            #expect(abs(correlation) < 0.01)
+        }
+    }
+}

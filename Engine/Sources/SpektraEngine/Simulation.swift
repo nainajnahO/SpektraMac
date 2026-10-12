@@ -7,6 +7,9 @@ import simd
 /// the GPU. Grows stage by stage as the port proceeds (PLAN.md).
 /// Holds GPU resources (the film's LUT texture), so it is not Sendable: the Engine actor owns one.
 public struct Simulation {
+    /// Seed of the stochastic kernels: fixed, so rendering the same image again draws the same noise.
+    static let seed: UInt32 = 20260515
+
     public let parameters: Parameters
     public let film: Profile
     /// The paper (or print film). Required like in Python, unused when scanning the film directly.
@@ -41,6 +44,8 @@ public struct Simulation {
     let scanCMFBands: [SIMD4<Float>]
     /// Scan XYZ → output RGB: CAT02 from the scan illuminant's white, then the space's matrix.
     let scanToOutput: simd_double3x3
+    /// The scan illuminant's XYZ, Y = 1: what glare adds, scaled by its random field.
+    let scanWhite: SIMD3<Double>
     /// The output gamut compression and its C_max table on the GPU; nil when it's off.
     let outputCompression: (model: OutputGamutCompression, maxChroma: any MTLBuffer)?
     let outputColourSpace: Tables.ColourSpace
@@ -152,7 +157,7 @@ public struct Simulation {
         let scanBands = validBands(scanned)
         scanDyeBands = scanBands.map { SIMD4(SIMD3<Float>(scanned.data.channelDensity[$0]), Float(scanned.data.baseDensity[$0])) }
         scanCMFBands = scanBands.map { SIMD4(SIMD3<Float>(scanLight[$0] * tables.cmfs[$0] / normalization), 0) }
-        let scanWhite = zip(scanLight, tables.cmfs).reduce(SIMD3<Double>.zero) { $0 + $1.0 * $1.1 } / normalization
+        scanWhite = zip(scanLight, tables.cmfs).reduce(SIMD3<Double>.zero) { $0 + $1.0 * $1.1 } / normalization
         outputColourSpace = outputSpace
         scanToOutput = simd_double3x3(rows: outputSpace.xyzToRGB)
             * vonKries(from: SIMD2(scanWhite.x, scanWhite.y) / scanWhite.sum(), to: outputSpace.whitepoint,
@@ -333,20 +338,29 @@ extension Simulation {
 
     /// `cmy_print` (or `cmy_film` when scanning film) → linear RGB in the output colour space
     /// (ScanningStage._density_to_rgb before output gamut compression): the dyes viewed under the
-    /// profile's viewing illuminant, integrated to XYZ, adapted (CAT02) and converted to RGB.
+    /// profile's viewing illuminant, integrated to XYZ, plus print glare, adapted (CAT02) and
+    /// converted to RGB.
     ///
-    /// Not ported yet: glare (stochastic; off in the golden runs), the scanner's black/white
-    /// correction (off by default).
+    /// Not ported: the scanner's black/white correction (off by default).
     public func encodeDensityToRGB(_ cmy: any MTLTexture, on encoder: any MTLComputeCommandEncoder) -> any MTLTexture {
-        let output = gpu.makeTexture(width: cmy.width, height: cmy.height)
+        var xyz = gpu.makeTexture(width: cmy.width, height: cmy.height)
         var bandCount = UInt32(scanDyeBands.count)
-        var matrix = simd_float3x3(scanToOutput)
-        gpu.encode("scan_rgb", on: encoder, textures: [cmy, output], grid: output.size) {
+        gpu.encode("scan_xyz", on: encoder, textures: [cmy, xyz], grid: xyz.size) {
             $0.setBytes(scanDyeBands, length: scanDyeBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 0)
             $0.setBytes(scanCMFBands, length: scanCMFBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 1)
             $0.setBytes(&bandCount, length: 4, index: 2)
-            $0.setBytes(&matrix, length: MemoryLayout<simd_float3x3>.size, index: 3)
         }
+        // add_glare: only on prints (Python passes no glare when scanning film).
+        let glare = parameters.printRender.glare
+        if !parameters.io.scanFilm && glare.active && glare.percent > 0 {
+            let amount = gpu.encodeGlareAmount(on: encoder, width: cmy.width, height: cmy.height, glare: glare,
+                                               seed: Self.seed)
+            let withGlare = gpu.makeTexture(width: cmy.width, height: cmy.height)
+            gpu.encodeAddScaled(on: encoder, accumulator: xyz, input: amount, output: withGlare, weight: scanWhite)
+            xyz = withGlare
+        }
+        let output = gpu.makeTexture(width: cmy.width, height: cmy.height)
+        gpu.encodeMatrix(on: encoder, input: xyz, output: output, rows: (0..<3).map { scanToOutput.transpose[$0] })
         return output
     }
 
@@ -431,4 +445,26 @@ func vonKries(from source: SIMD2<Double>, to destination: SIMD2<Double>, transfo
     let m = simd_double3x3(rows: rows)
     let gain = (m * xyz(destination)) / (m * xyz(source))
     return m.inverse * simd_double3x3(diagonal: gain) * m
+}
+
+extension GPU {
+    /// `compute_random_glare_amount`: per pixel a lognormal amount with mean `percent` / 100 and
+    /// standard deviation `roughness · percent` / 100 (`fast_lognormal_from_mean_std`), blurred by
+    /// `blur` pixels; the same value in all three channels.
+    func encodeGlareAmount(on encoder: any MTLComputeCommandEncoder, width: Int, height: Int,
+                           glare: Parameters.Glare, seed: UInt32) -> any MTLTexture {
+        let (mean, deviation) = (glare.percent, glare.roughness * glare.percent)
+        let sigma2 = log(1 + deviation * deviation / (mean * mean))
+        var muSigma = SIMD2<Float>(Float(log(mean) - sigma2 / 2), Float(sigma2.squareRoot()))
+        var seed = seed
+        let amount = makeTexture(width: width, height: height)
+        encode("glare_lognormal", on: encoder, textures: [amount], grid: amount.size) {
+            $0.setBytes(&seed, length: 4, index: 0)
+            $0.setBytes(&muSigma, length: MemoryLayout<SIMD2<Float>>.size, index: 1)
+        }
+        guard glare.blur > 0 else { return amount }
+        let blurred = makeTexture(width: width, height: height)
+        encodeGaussianBlur(on: encoder, input: amount, output: blurred, sigma: SIMD3(repeating: glare.blur))
+        return blurred
+    }
 }
