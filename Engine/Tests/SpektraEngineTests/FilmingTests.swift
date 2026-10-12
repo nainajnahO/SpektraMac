@@ -43,3 +43,21 @@ func preprocessMatchesRGBPre(caseName: String) throws {
         #expect(Difference(encoded.map(space.decode), linear, floor: 1e-6).maxRelative < 1e-12, "\(name)")
     }
 }
+
+@Test(arguments: ["kodak_portra_400", "kodak_vision3_500t", "fujifilm_velvia_100"])
+func rawLUTMatchesPython(film: String) throws {
+    let tables = try Tables.load()
+    let profile = try Profile.load(film)
+    let sensitivity = profile.data.logSensitivity.map { log in
+        let linear = SIMD3(pow(10, log.x), pow(10, log.y), pow(10, log.z))
+        return linear.replacing(with: 0, where: .!(linear .== linear))
+    }
+    let lut = hanatos2025RawLUT(spectra: try Tables.loadSpectraLUT(), sensitivity: sensitivity,
+                                windowParams: profile.data.hanatos2025AdaptationWindowParams,
+                                referenceIlluminant: tables.illuminants[profile.info.referenceIlluminant]!,
+                                wavelengths: tables.wavelengths)
+    let reference = try golden("primitives", "tc_lut_raw_\(film)")
+    let difference = Difference(lut.flatMap { [$0.x, $0.y, $0.z] }, reference.values, floor: 1e-3)
+    print("\(film) raw tc LUT: \(difference)")
+    #expect(difference.maxRelative < 1e-6)
+}

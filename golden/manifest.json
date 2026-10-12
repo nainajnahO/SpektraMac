@@ -82,7 +82,10 @@
   "primitives/matmul_out.npy": "829d8a85aeabf0cbadd50efb4f9773e1d23606a04436abe4eb00b5fcc8cb3282",
   "primitives/matmul_x.npy": "8947a37c29db3db39f40b51092ec2568bda01e029e67f2ab9bdde14085aa9d54",
   "primitives/pow10_out.npy": "295f118c36f80be6739f679d9b53b6106240735158892f7c32411c84dbe30aa1",
-  "primitives/pow10_x.npy": "d7fccc11515afa1507d41fee148d73b150456030e6bb69b364ce856ad42cccc6"
+  "primitives/pow10_x.npy": "d7fccc11515afa1507d41fee148d73b150456030e6bb69b364ce856ad42cccc6",
+  "primitives/tc_lut_raw_fujifilm_velvia_100.npy": "568c5ee66f6c8b7aa1c2b496789af329d29cf8c4f6187c789666bfe7450780bc",
+  "primitives/tc_lut_raw_kodak_portra_400.npy": "3e3829b074b4bc7c97043c3c747a6c2df252d2e47e57343e6885d1a57ac16274",
+  "primitives/tc_lut_raw_kodak_vision3_500t.npy": "64c8687f10204f04efdaa4081fc7765f1523236bd1e5a0f8e7f7633ed62e100e"
  },
  "versions": {
   "colour-science": "0.4.7",
