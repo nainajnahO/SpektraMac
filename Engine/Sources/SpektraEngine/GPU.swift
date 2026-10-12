@@ -102,15 +102,17 @@ public final class GPU: Sendable {
         encoder.dispatchThreads(grid, threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
     }
 
-    /// Runs `body` in one command buffer and waits for the GPU to finish.
-    public func run(_ body: (any MTLComputeCommandEncoder) -> Void) throws {
+    /// Runs what `body` encodes in one command buffer, waits for the GPU to finish and returns
+    /// `body`'s result (typically the output texture, complete by then).
+    public func run<Result>(_ body: (any MTLComputeCommandEncoder) -> Result) throws -> Result {
         let commandBuffer = queue.makeCommandBuffer()!
         let encoder = commandBuffer.makeComputeCommandEncoder()!
-        body(encoder)
+        let result = body(encoder)
         encoder.endEncoding()
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
         if let error = commandBuffer.error { throw error }
+        return result
     }
 }
 

@@ -45,3 +45,27 @@ public struct Tables: Decodable, Sendable {
         try NPYArray(contentsOf: resources.appending(component: "irradiance_xy_tc.npy"))
     }
 }
+
+extension Tables.ColourSpace {
+    /// colour-science's `cctf_decoding` for this space: encoded value → linear, in f64.
+    public func decode(_ value: Double) -> Double {
+        // colour's spow: the power applied to |x| with the sign kept.
+        func spow(_ x: Double, _ p: Double) -> Double { x < 0 ? -pow(-x, p) : pow(x, p) }
+        switch cctf {
+        case "sRGB":
+            return 0.0031308 * 12.92 >= value ? value / 12.92 : spow((value + 0.055) / 1.055, 2.4)
+        case "gamma":
+            // "Indeterminate" negatives: NaN, as numpy's power gives.
+            return pow(value, gamma!)
+        case "BT.2020":
+            let (alpha, beta) = (1.099, 0.018)
+            let threshold = alpha * spow(beta, 0.45) - (alpha - 1)
+            return value < threshold ? value / 4.5 : spow((value + (alpha - 1)) / alpha, 1 / 0.45)
+        case "ROMM RGB":
+            let threshold = 16 * pow(16, 1.8 / (1 - 1.8))
+            return value < threshold ? value / 16 : spow(value, 1.8)
+        default:
+            return value
+        }
+    }
+}
