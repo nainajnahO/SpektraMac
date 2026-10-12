@@ -19,7 +19,8 @@ Swift with the image pipeline on the GPU via Metal.
 |---|---|
 | `App/` | SwiftUI app |
 | `Engine/` | `SpektraEngine` Swift package (Metal shaders, host code, tests) and the `spektra-cli` tool |
-| `tools/` | Python scripts that generate reference data from the original Spektrafilm |
+| `Engine/Sources/SpektraEngine/Resources/` | Film/paper profiles and spectral tables exported from Spektrafilm by `tools/export_tables.py` |
+| `tools/` | Python scripts that export data and generate reference data from the original Spektrafilm |
 
 Requires macOS 26.5 or newer and Xcode 27.
 
