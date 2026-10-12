@@ -22,7 +22,6 @@ public final class GPU: Sendable {
 
         // Compiled at runtime from the bundled sources: `swift build` doesn't compile .metal files.
         // IEEE-safe maths and precise functions so results track the f64 Python reference.
-        let shaders = Bundle.module.resourceURL!.appending(component: "Shaders")
         let source = try FileManager.default.contentsOfDirectory(at: shaders, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "metal" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
@@ -115,6 +114,9 @@ public final class GPU: Sendable {
         return result
     }
 }
+
+/// The bundled Metal sources (`Shaders/`), concatenated in file-name order into one library.
+let shaders = Bundle.module.resourceURL!.appending(component: "Shaders")
 
 extension MTLTexture {
     /// One thread per pixel.
