@@ -35,7 +35,9 @@ and T (`locus_dnorm_<illuminant>`) and matplotlib's inside/outside test (`locus_
 boost (`boost`: boost_ev 2, range 0.3, protect 1) and Portra 400's digested halation + scatter at a
 5 um pixel (`halation`, 24 MP scale, so the blurs take the IIR path too); and per printed film the
 enlarger light at the digested neutral filters (`enlarger_<film>`), with M +12 / Y -7 shifts
-(`enlarger_shifted_<film>`) and the preflash light with M +5 / Y -3 (`preflash_<film>`).
+(`enlarger_shifted_<film>`) and the preflash light with M +5 / Y -3 (`preflash_<film>`); and the
+Portra chart re-run with print exposure 1.3, exposure compensation +0.7 EV balanced at the
+enlarger, and a 0.3 preflash with M +5 / Y -3 (`print_variant_cmy_film`, `print_variant_log_e_print`).
 
 Each case directory holds one float32 .npy per pipeline tap that exists for it (rgb_in, rgb_pre,
 log_e_film, cmy_film, [log_e_print, cmy_print,] rgb_out), the filming tc LUT the run used
@@ -225,6 +227,15 @@ def primitives() -> dict[str, np.ndarray]:
         enlarger.preflash_m_filter_shift, enlarger.preflash_y_filter_shift = 5.0, -3.0
         arrays[f"enlarger_shifted_{film}"] = EnlargerService(enlarger).enlarger_filtered_illuminant(light)
         arrays[f"preflash_{film}"] = EnlargerService(enlarger).preflash_filtered_illuminant(light)
+
+    params = params_for("kodak_portra_400", "kodak_portra_endura", False, "chart")
+    params.enlarger.print_exposure = 1.3
+    params.enlarger.print_exposure_compensation = True
+    params.camera.exposure_compensation_ev = 0.7
+    params.enlarger.preflash_exposure = 0.3
+    params.enlarger.preflash_m_filter_shift, params.enlarger.preflash_y_filter_shift = 5.0, -3.0
+    taps = run_all_taps(SimulationPipeline(params), make_chart())
+    arrays.update(print_variant_cmy_film=taps["cmy_film"], print_variant_log_e_print=taps["log_e_print"])
     return arrays
 
 

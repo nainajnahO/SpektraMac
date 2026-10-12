@@ -17,7 +17,7 @@ func preprocessMatchesRGBPre(caseName: String) throws {
     }
 
     let gpu = try GPU()
-    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), gpu: gpu, tables: tables)
+    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), print: golden.printProfile(), gpu: gpu, tables: tables)
     let output = try gpu.run { simulation.encodePreprocess(rgbIn, on: $0) }
     let difference = Difference(gpu.download(output), reference.values, floor: 1e-3)
     print("\(caseName) rgb_pre: \(difference)")
@@ -73,7 +73,7 @@ func filmingLUTMatchesPython(caseName: String) throws {
 func exposeMatchesLogEFilm(caseName: String) throws {
     let golden = try GoldenCase(caseName)
     let gpu = try GPU()
-    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), gpu: gpu,
+    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), print: golden.printProfile(), gpu: gpu,
                                     tables: Tables.load())
     let rgbPre = try SpektraEngineTests.golden(caseName, "rgb_pre")
     let input = gpu.upload(rgb: rgbPre.values, width: rgbPre.shape[1], height: rgbPre.shape[0])
@@ -124,7 +124,7 @@ func developMatchesPythonWithoutCouplers(caseName: String) throws {
     let gpu = try GPU()
     var parameters = golden.params
     parameters.filmRender.dirCouplers.active = false
-    let simulation = try Simulation(parameters: parameters, film: Profile.load(golden.film), gpu: gpu,
+    let simulation = try Simulation(parameters: parameters, film: Profile.load(golden.film), print: golden.printProfile(), gpu: gpu,
                                     tables: Tables.load())
     let logEFilm = try SpektraEngineTests.golden(caseName, "log_e_film")
     let input = gpu.upload(rgb: logEFilm.values, width: logEFilm.shape[1], height: logEFilm.shape[0])
@@ -140,7 +140,7 @@ func developMatchesPythonWithoutCouplers(caseName: String) throws {
 func developMatchesCMYFilm(caseName: String) throws {
     let golden = try GoldenCase(caseName)
     let gpu = try GPU()
-    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), gpu: gpu,
+    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), print: golden.printProfile(), gpu: gpu,
                                     tables: Tables.load())
     let logEFilm = try SpektraEngineTests.golden(caseName, "log_e_film")
     let input = gpu.upload(rgb: logEFilm.values, width: logEFilm.shape[1], height: logEFilm.shape[0])
@@ -168,7 +168,7 @@ func couplerSettingsMatchDigest(caseName: String) throws {
 func filmingChainMatchesCMYFilm(caseName: String) throws {
     let golden = try GoldenCase(caseName)
     let gpu = try GPU()
-    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), gpu: gpu,
+    let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film), print: golden.printProfile(), gpu: gpu,
                                     tables: Tables.load())
     let rgbIn = try SpektraEngineTests.golden(caseName, "rgb_in").image
     let output = try gpu.run { encoder in

@@ -102,6 +102,8 @@
   "primitives/pow10_x.npy": "d7fccc11515afa1507d41fee148d73b150456030e6bb69b364ce856ad42cccc6",
   "primitives/preflash_kodak_portra_400.npy": "bf234bd621a32bdc00fe67afcb3a7a098e0cc1f5f35f855f9cfffa251e22f3bd",
   "primitives/preflash_kodak_vision3_500t.npy": "b9a9d30ff39725bab97d6a117f3019095c76bcfd8aa75674aa694a87b56935bc",
+  "primitives/print_variant_cmy_film.npy": "86acc4e8a4c2f2803b0375b78652b580d5ebe93e1a29e3924a9ae937d0432ff0",
+  "primitives/print_variant_log_e_print.npy": "5f38424f03481eb3806e6ae8ba4b614d05f6241540d055cd48e0aa11b6ff4cf0",
   "primitives/tc_lut_raw_fujifilm_velvia_100.npy": "568c5ee66f6c8b7aa1c2b496789af329d29cf8c4f6187c789666bfe7450780bc",
   "primitives/tc_lut_raw_kodak_portra_400.npy": "3e3829b074b4bc7c97043c3c747a6c2df252d2e47e57343e6885d1a57ac16274",
   "primitives/tc_lut_raw_kodak_vision3_500t.npy": "64c8687f10204f04efdaa4081fc7765f1523236bd1e5a0f8e7f7633ed62e100e"
