@@ -1,3 +1,4 @@
+import Metal
 import simd
 import Testing
 @testable import SpektraEngine
@@ -45,7 +46,8 @@ func chainMatchesPython(caseName: String) throws {
     let golden = try GoldenCase(caseName)
     let gpu = try GPU()
     let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film),
-                                    print: golden.printProfile(), gpu: gpu, tables: Tables.load())
+                                    print: golden.printProfile(), gpu: gpu, tables: Tables.load(),
+                                    intermediateFormat: .rgba32Float)
     let rgbIn = try SpektraEngineTests.golden(caseName, "rgb_in").image
     let result = gpu.download(try gpu.run { simulation.encode(rgbIn, on: $0) })
     let reference = try SpektraEngineTests.golden(caseName, "rgb_out").values
@@ -63,6 +65,26 @@ func chainMatchesPython(caseName: String) throws {
         #expect(difference.maxAbsolute < 2e-5)
         #expect(steps.max()! <= 2 && identical >= 0.999)
     }
+}
+
+/// The filming steps' half-float intermediates (the app's) against full floats (which the parity
+/// tests check against Python), through the whole chain on the photo, as 8-bit values.
+@Test(arguments: goldenCases.filter { $0.hasPrefix("photo") })
+func halfFloatIntermediatesMatchFullFloats(caseName: String) throws {
+    let golden = try GoldenCase(caseName)
+    let (gpu, tables) = (try GPU(), try Tables.load())
+    let rgbIn = try SpektraEngineTests.golden(caseName, "rgb_in").image
+    func render(_ format: MTLPixelFormat) throws -> [Float] {
+        let simulation = try Simulation(parameters: golden.params, film: Profile.load(golden.film),
+                                        print: golden.printProfile(), gpu: gpu, tables: tables, intermediateFormat: format)
+        return gpu.download(try gpu.run { simulation.encode(rgbIn, on: $0) })
+    }
+    let (half, full) = (try render(.rgba16Float), try render(.rgba32Float))
+    let difference = Difference(half, full, floor: 1)
+    let levels = zip(half, full).map { abs($0 - $1) * 255 }
+    let changed = Double(levels.filter { $0 >= 0.5 }.count) / Double(levels.count)  // rounding to another level
+    print("\(caseName) half-float intermediates: \(difference); 8-bit: max \(levels.max()!) levels, \(changed * 100)% move ≥ 0.5")
+    #expect(levels.max()! < 3 && changed < 0.02)
 }
 
 /// The LUT creator's QA oracle: ΔE2000 between this chain and Python on its 50k random sRGB

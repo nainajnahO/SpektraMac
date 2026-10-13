@@ -17,7 +17,7 @@ extension GPU {
             $0.setBuffer(maxima, offset: 0, index: 0)
             $0.setBytes(&rows, length: 4, index: 1)
         }
-        let output = makeTexture(width: input.width, height: input.height)
+        let output = makeTexture(like: input)
         var settings = SIMD3<Float>(Float(boostEv), Float(boostRange), Float(protectEv))
         encode("boost_highlights", on: encoder, textures: [input, output], grid: output.size) {
             $0.setBuffer(maxima, offset: 0, index: 0)
@@ -31,7 +31,7 @@ extension GPU {
     /// halation (Σ_k a_k G(σ_h √k), ρ-decaying weights), optionally renormalised.
     public func encodeHalation(on encoder: Encoder, input: any MTLTexture,
                                halation h: Parameters.Halation, pixelSizeUm: Double) -> any MTLTexture {
-        func texture() -> any MTLTexture { makeTexture(width: input.width, height: input.height) }
+        func texture() -> any MTLTexture { makeTexture(like: input) }
         let floor = SIMD3<Double>(repeating: 1e-6)
         var raw = input
 

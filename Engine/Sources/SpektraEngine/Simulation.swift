@@ -49,6 +49,8 @@ public struct Simulation {
     /// The output gamut compression and its C_max table on the GPU; nil when it's off.
     let outputCompression: (model: OutputGamutCompression, maxChroma: any MTLBuffer)?
     let outputColourSpace: Tables.ColourSpace
+    /// The pixel format of the filming steps' intermediates (see ``init(parameters:film:print:gpu:tables:cache:intermediateFormat:)``).
+    let intermediateFormat: MTLPixelFormat
 
     public struct UnknownColourSpace: Error, CustomStringConvertible {
         public let name: String
@@ -56,8 +58,16 @@ public struct Simulation {
     }
 
     /// `cache` keeps the costliest tables for the next simulation built with it.
+    ///
+    /// `intermediateFormat` is the pixel format of the filming steps' intermediates: half floats by
+    /// default. Their blurs and blends are most of a full render's memory traffic, which halves:
+    /// 376 ms instead of 497 for 24 MP on an M1 Pro. The steps' results, log exposure and density,
+    /// stay full floats, as do printing and scanning: half floats' steps on a log scale (up to
+    /// 0.002) grow visible through the print, and would coarsen 16-bit exports' gradations.
+    /// Renders move by about a level (8-bit) at most; grain draws differently but alike. Full
+    /// floats (`.rgba32Float`) track Python's f64 to its parity tests' limits.
     public init(parameters: Parameters, film: Profile, print: Profile, gpu: GPU, tables: Tables,
-                cache: SimulationCache = SimulationCache()) throws {
+                cache: SimulationCache = SimulationCache(), intermediateFormat: MTLPixelFormat = .rgba16Float) throws {
         guard let inputColourSpace = tables.colourSpaces[parameters.io.inputColorSpace] else {
             throw UnknownColourSpace(name: parameters.io.inputColorSpace)
         }
@@ -67,6 +77,7 @@ public struct Simulation {
         self.gpu = gpu
         self.tables = tables
         self.inputColourSpace = inputColourSpace
+        self.intermediateFormat = intermediateFormat
 
         let lutKey = SimulationCache.FilmingLUTKey(
             film: film.info.stock, adaptationWindow: parameters.settings.applyHanatos2025AdaptationWindow,
@@ -198,6 +209,10 @@ public struct Simulation {
         }
     }
 
+    private func intermediate(width: Int, height: Int) -> any MTLTexture {
+        gpu.makeTexture(width: width, height: height, pixelFormat: intermediateFormat)
+    }
+
     /// `rgb_in → rgb_pre`: applies auto-exposure, `autoExposureEV` measured on the same image
     /// (``autoExposureEV(of:colourSpace:cctfDecoding:)`` in this simulation's input space). (Python's
     /// preprocess also crops and upscales; both are off by default and not ported.) Only reads
@@ -205,7 +220,7 @@ public struct Simulation {
     public func encodePreprocess(_ input: any MTLTexture, autoExposureEV: Double,
                                  on encoder: Encoder) -> any MTLTexture {
         guard parameters.camera.autoExposure else { return input }
-        let output = gpu.makeTexture(width: input.width, height: input.height)
+        let output = intermediate(width: input.width, height: input.height)
         gpu.encodeScale(on: encoder, input: input, output: output, by: pow(2, autoExposureEV))
         return output
     }
@@ -227,7 +242,7 @@ public struct Simulation {
     /// default).
     public func encodeExpose(_ rgb: any MTLTexture, on encoder: Encoder) -> any MTLTexture {
         // `light` holds the current result; each step that can works on it in place.
-        var light = gpu.makeTexture(width: rgb.width, height: rgb.height)
+        var light = intermediate(width: rgb.width, height: rgb.height)
         var matrix = simd_float3x3(inputToXYZ)
         var transfer = parameters.io.inputCctfDecoding ? inputColourSpace.transferIndex : 0
         var gamma = Float(inputColourSpace.gamma ?? 1)
@@ -251,8 +266,10 @@ public struct Simulation {
         if halation.active {
             light = gpu.encodeHalation(on: encoder, input: light, halation: halation, pixelSizeUm: pixelSizeUm)
         }
-        gpu.encodeLogExposure(on: encoder, input: light, output: light)
-        return light
+        // The result, on a log scale: full floats.
+        let logExposure = gpu.makeTexture(width: light.width, height: light.height)
+        gpu.encodeLogExposure(on: encoder, input: light, output: logExposure)
+        return logExposure
     }
 
     /// `log_e_film → cmy_film` (FilmingStage.develop): log exposure → CMY dye density through the
@@ -272,6 +289,7 @@ public struct Simulation {
         let (width, height) = (logExposure.width, logExposure.height)
         let gamma = parameters.filmRender.densityCurveGamma
         let axis = film.data.logExposure.map { SIMD3(repeating: $0 / gamma) }
+        // The result, on a log scale: full floats.
         let density = gpu.makeTexture(width: width, height: height)
         gpu.encodeInterpolate(on: encoder, input: logExposure, output: density, axis: axis, values: filmCurves)
         let couplers = parameters.filmRender.dirCouplers
@@ -282,7 +300,7 @@ public struct Simulation {
         // Rows of Mᵀ are M's columns (simd subscripts are columns).
         let matrix = couplers.matrix
         let rows = [matrix[0], matrix[1], matrix[2]]
-        let correction = gpu.makeTexture(width: width, height: height)
+        let correction = intermediate(width: width, height: height)
         if film.info.type == .positive {
             let densityMax = filmCurves.reduce(SIMD3(repeating: -Double.infinity)) { pointwiseMax($0, $1) }
             gpu.encodeMatrix(on: encoder, input: density, output: correction, rows: rows.map { -$0 },
@@ -294,7 +312,7 @@ public struct Simulation {
         if couplers.diffusionSizeUm > 0 {
             // The tail first: the core blur then diffuses the correction in place.
             let pixelSizeUm = pixelSizeUm(of: logExposure)
-            let tail = gpu.makeTexture(width: width, height: height)
+            let tail = intermediate(width: width, height: height)
             gpu.encodeExponentialBlur(on: encoder, input: correction, output: tail,
                                       decay: SIMD3(repeating: couplers.diffusionTailUm / pixelSizeUm))
             gpu.encodeGaussianBlur(on: encoder, input: correction, output: correction,
@@ -303,10 +321,11 @@ public struct Simulation {
             gpu.encodeAddScaled(on: encoder, accumulator: correction, input: tail, output: correction,
                                 weight: SIMD3(repeating: couplers.diffusionTailWeight))
         }
-        // The corrected exposure into the correction's texture, developed into the density's.
-        gpu.encodeAddScaled(on: encoder, accumulator: logExposure, input: correction, output: correction,
+        // The corrected exposure into the density's texture (full floats: it's a log exposure),
+        // developed there.
+        gpu.encodeAddScaled(on: encoder, accumulator: logExposure, input: correction, output: density,
                             weight: SIMD3(repeating: -1))
-        gpu.encodeInterpolate(on: encoder, input: correction, output: density, axis: axis, values: filmCurvesBeforeCouplers)
+        gpu.encodeInterpolate(on: encoder, input: density, output: density, axis: axis, values: filmCurvesBeforeCouplers)
         return density
     }
 }
@@ -334,14 +353,15 @@ extension Simulation {
         var source = density
         var axis = filmCurves
         if film.info.type == .positive {
-            source = gpu.makeTexture(width: width, height: height)
+            source = intermediate(width: width, height: height)
             gpu.encodeScale(on: encoder, input: density, output: source, by: -1)
             axis = filmCurves.map { -$0 }
         }
-        // The first sub-layer's grain develops into the sum, the others into one texture added to it.
-        let (layerDensity, sum, layerGrain) = (gpu.makeTexture(width: width, height: height),
+        // The first sub-layer's grain develops into the sum (the result, a density: full floats), the
+        // others into one texture added to it.
+        let (layerDensity, sum, layerGrain) = (intermediate(width: width, height: height),
                                                gpu.makeTexture(width: width, height: height),
-                                               gpu.makeTexture(width: width, height: height))
+                                               intermediate(width: width, height: height))
         for layer in 0..<3 {
             let share = layerMaxima[layer] / total
             var layerFog = SIMD3<Float>(share * fog)
@@ -380,13 +400,13 @@ extension Simulation {
             let sigma2 = log(1 + clumpingDeviation * clumpingDeviation)
             var muSigma = SIMD2<Float>(Float(-sigma2 / 2), Float(sigma2.squareRoot()))
             var seed = Self.seed
-            var clumping = gpu.makeTexture(width: width, height: height)
+            var clumping = intermediate(width: width, height: height)
             gpu.encode("lognormal_rgb", on: encoder, textures: [clumping], grid: clumping.size) {
                 $0.setBytes(&seed, length: 4, index: 0)
                 $0.setBytes(&muSigma, length: MemoryLayout<SIMD2<Float>>.size, index: 1)
             }
             if clumpingBlur > 0.4 {
-                let blurred = gpu.makeTexture(width: width, height: height)
+                let blurred = intermediate(width: width, height: height)
                 gpu.encodeGaussianBlur(on: encoder, input: clumping, output: blurred,
                                        sigma: SIMD3(repeating: clumpingBlur))
                 clumping = blurred

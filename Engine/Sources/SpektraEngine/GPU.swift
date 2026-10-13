@@ -1,10 +1,12 @@
+import Accelerate
 import Foundation
 import Metal
 
 /// The Metal device, queue and compiled kernels every stage runs on.
 ///
-/// Images live on the GPU as `rgba32Float` textures (RGB in `.xyz`, alpha unused). On Apple
-/// silicon memory is unified, so textures use shared storage and upload/download are plain copies.
+/// Images live on the GPU as `rgba32Float` textures, or `rgba16Float` where a stage chooses it
+/// (RGB in `.xyz`, alpha unused). On Apple silicon memory is unified, so textures use shared
+/// storage and upload/download are plain copies.
 /// Holds the memory set aside for renders, so it isn't Sendable: the Engine actor owns one.
 public final class GPU {
     public let device: any MTLDevice
@@ -48,9 +50,15 @@ public final class GPU {
 
     /// An image-sized texture the kernels can read and write, from the reserved memory while it
     /// has room. Its contents are undefined until written: every kernel writes its whole output.
-    public func makeTexture(width: Int, height: Int) -> any MTLTexture {
-        let descriptor = Self.textureDescriptor(width: width, height: height)
+    public func makeTexture(width: Int, height: Int, pixelFormat: MTLPixelFormat = .rgba32Float) -> any MTLTexture {
+        let descriptor = Self.textureDescriptor(width: width, height: height, pixelFormat: pixelFormat)
         return heap?.makeTexture(descriptor: descriptor) ?? device.makeTexture(descriptor: descriptor)!
+    }
+
+    /// A texture of `texture`'s size and pixel format: for a step's intermediates, which keep the
+    /// precision it's given.
+    public func makeTexture(like texture: any MTLTexture) -> any MTLTexture {
+        makeTexture(width: texture.width, height: texture.height, pixelFormat: texture.pixelFormat)
     }
 
     /// How many full-size textures ``reserveMemory(width:height:)`` sets aside: what the whole
@@ -93,9 +101,10 @@ public final class GPU {
         device.currentAllocatedSize - (heap.map { $0.size - $0.usedSize } ?? 0)
     }
 
-    private static func textureDescriptor(width: Int, height: Int) -> MTLTextureDescriptor {
+    private static func textureDescriptor(width: Int, height: Int,
+                                          pixelFormat: MTLPixelFormat = .rgba32Float) -> MTLTextureDescriptor {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba32Float, width: width, height: height, mipmapped: false)
+            pixelFormat: pixelFormat, width: width, height: height, mipmapped: false)
         descriptor.usage = [.shaderRead, .shaderWrite]
         descriptor.storageMode = .shared
         return descriptor
@@ -124,12 +133,31 @@ public final class GPU {
         return texture
     }
 
-    /// Downloads a texture as interleaved RGB floats (`height × width × 3`).
+    /// Downloads a texture (`rgba32Float` or `rgba16Float`) as interleaved RGB floats
+    /// (`height × width × 3`).
     public func download(_ texture: any MTLTexture) -> [Float] {
         let (width, height) = (texture.width, texture.height)
+        let region = MTLRegionMake2D(0, 0, width, height)
         var rgba = [Float](repeating: 0, count: width * height * 4)
-        texture.getBytes(&rgba, bytesPerRow: width * 16,
-                         from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        if texture.pixelFormat == .rgba16Float {
+            var half = [Float16](repeating: 0, count: width * height * 4)
+            texture.getBytes(&half, bytesPerRow: width * 8, from: region, mipmapLevel: 0)
+            // vImage converts planar data, so a row of RGBA is width × 4 values.
+            half.withUnsafeBytes { source in
+                rgba.withUnsafeMutableBytes { destination in
+                    var source = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: source.baseAddress),
+                                               height: vImagePixelCount(height), width: vImagePixelCount(width * 4),
+                                               rowBytes: width * 8)
+                    var destination = vImage_Buffer(data: destination.baseAddress, height: vImagePixelCount(height),
+                                                    width: vImagePixelCount(width * 4), rowBytes: width * 16)
+                    precondition(vImageConvert_Planar16FtoPlanarF(&source, &destination, vImage_Flags(kvImageNoFlags))
+                                 == kvImageNoError)
+                }
+            }
+        } else {
+            precondition(texture.pixelFormat == .rgba32Float)
+            texture.getBytes(&rgba, bytesPerRow: width * 16, from: region, mipmapLevel: 0)
+        }
         return rgb(fromRGBA: rgba, width: width, height: height)
     }
 
