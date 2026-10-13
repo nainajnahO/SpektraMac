@@ -43,12 +43,36 @@ public struct RGBImage: Sendable {
                 raw.localToneMapAmount = 0
             }
             image = raw.outputImage
+        } else if type?.conforms(to: .tiff) == true, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  (properties[kCGImagePropertyDepth] as? Int ?? 8) > 8 {
+            image = Self.plainImage(from: source, properties: properties)
         } else {
             image = CIImage(contentsOf: url, options: [.applyOrientationProperty: true])
         }
         // A RAW file Core Image can't decode comes back with an empty extent.
         guard let image, !image.extent.isEmpty else { throw DecodeError(url: url) }
         self.init(rendering: image)
+    }
+
+    /// The image ImageIO decodes, handed to Core Image as plain memory, upright. For TIFFs over
+    /// 8 bits per channel: Core Image reads them slowly otherwise, from the file or from ImageIO's
+    /// image alike (8.5 s for a 24 MP 16-bit TIFF with deflate compression, against 0.35 s to
+    /// decode it and 0.1 s to convert the copy, which converts the same).
+    private static func plainImage(from source: CGImageSource, properties: [CFString: Any]) -> CIImage? {
+        guard let decoded = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              let space = decoded.colorSpace,
+              let pixels = decoded.dataProvider?.data,
+              let provider = CGDataProvider(data: pixels),
+              let copy = CGImage(width: decoded.width, height: decoded.height,
+                                 bitsPerComponent: decoded.bitsPerComponent, bitsPerPixel: decoded.bitsPerPixel,
+                                 bytesPerRow: decoded.bytesPerRow, space: space, bitmapInfo: decoded.bitmapInfo,
+                                 provider: provider, decode: decoded.decode,
+                                 shouldInterpolate: decoded.shouldInterpolate, intent: decoded.renderingIntent)
+        else { return nil }
+        let orientation = (properties[kCGImagePropertyOrientation] as? UInt32)
+            .flatMap(CGImagePropertyOrientation.init(rawValue:)) ?? .up
+        return CIImage(cgImage: copy).oriented(orientation)
     }
 
     /// `image` rendered into ``workingColorSpace``.

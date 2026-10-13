@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Foundation
 import ImageIO
 import Testing
@@ -38,6 +39,35 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
 
     let display = try await engine.display(controls: Controls(), mode: .full)
     #expect(display.width == 2 && display.height == 1)
+}
+
+/// TIFFs, which reach Core Image through ImageIO, decode as Core Image reads them from the file,
+/// upright: a 16-bit Adobe RGB one and an untagged 8-bit one, both turned by their EXIF
+/// orientation (6: rotate 90° clockwise).
+@Test(arguments: [(16, true), (8, false)])
+func tiffDecodesAsCoreImageReadsIt(bits: Int, tagged: Bool) throws {
+    let (width, height) = (3, 2)
+    let values = (0..<(width * height * 3)).map { $0 * 3000 + 500 }
+    let data = bits == 16 ? values.map { UInt16($0) }.withUnsafeBytes { Data($0) } : Data(values.map { UInt8($0 % 256) })
+    let space = tagged ? CGColorSpace(name: CGColorSpace.adobeRGB1998)! : CGColorSpaceCreateDeviceRGB()
+    let image = CGImage(width: width, height: height, bitsPerComponent: bits, bitsPerPixel: 3 * bits,
+                        bytesPerRow: width * 3 * bits / 8, space: space,
+                        bitmapInfo: bits == 16 ? .byteOrder16Little : [], provider: CGDataProvider(data: data as CFData)!,
+                        decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+    let url = FileManager.default.temporaryDirectory.appending(component: "\(UUID()).tif")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.tiff.identifier as CFString, 1, nil)!
+    CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: 6] as CFDictionary)
+    #expect(CGImageDestinationFinalize(destination))
+
+    let decoded = try RGBImage(contentsOf: url)
+    #expect(decoded.width == height && decoded.height == width)
+    let reference = try #require(CIImage(contentsOf: url, options: [.applyOrientationProperty: true]))
+    var rgba = [Float](repeating: 0, count: width * height * 4)
+    RGBImage.makeContext().render(reference, toBitmap: &rgba, rowBytes: height * 16, bounds: reference.extent,
+                                  format: .RGBAf, colorSpace: RGBImage.workingColorSpace)
+    let expected = (0..<(width * height)).flatMap { rgba[($0 * 4)..<($0 * 4 + 3)] }
+    #expect(decoded.pixels.map(\.bitPattern) == expected.map(\.bitPattern))
 }
 
 /// What the screen shows is the render, upright, in 8-bit sRGB (within a unit of rounding), and
