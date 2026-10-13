@@ -109,11 +109,12 @@ YVV_KERNEL(yvv_rows_backward, false, true)
 YVV_KERNEL(yvv_columns_forward, true, false)
 YVV_KERNEL(yvv_columns_backward, true, true)
 
-// output = accumulator + weight · input (mixtures of blurs).
-kernel void add_scaled(texture2d<float, access::read> accumulator [[texture(0)]],
-                       texture2d<float, access::read> input [[texture(1)]],
-                       texture2d<float, access::write> output [[texture(2)]],
-                       constant float3 &weight [[buffer(0)]],
-                       uint2 gid [[thread_position_in_grid]]) {
-    output.write(float4(accumulator.read(gid).rgb + weight * input.read(gid).rgb, 1.0), gid);
+// output = weightA · a + weightB · b (blends and mixtures of blurs).
+kernel void weighted_sum(texture2d<float, access::read> a [[texture(0)]],
+                         texture2d<float, access::read> b [[texture(1)]],
+                         texture2d<float, access::write> output [[texture(2)]],
+                         constant float3 &weightA [[buffer(0)]],
+                         constant float3 &weightB [[buffer(1)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    output.write(float4(weightA * a.read(gid).rgb + weightB * b.read(gid).rgb, 1.0), gid);
 }

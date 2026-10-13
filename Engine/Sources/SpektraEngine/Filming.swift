@@ -44,10 +44,9 @@ extension GPU {
             encodeGaussianBlur(on: encoder, input: raw, output: core, sigma: pointwiseMax(coreSigma, floor))
             encodeExponentialBlur(on: encoder, input: raw, output: tail, decay: pointwiseMax(tailDecay, floor))
             // The scattered light into core, then the blend with raw into tail.
-            encodeScale(on: encoder, input: core, output: core, by: 1 - tailWeight)
-            encodeAddScaled(on: encoder, accumulator: core, input: tail, output: core, weight: tailWeight)
-            encodeScale(on: encoder, input: raw, output: tail, by: 1 - amount)
-            encodeAddScaled(on: encoder, accumulator: tail, input: core, output: tail, weight: SIMD3(repeating: amount))
+            encodeWeightedSum(on: encoder, core, times: 1 - tailWeight, plus: tail, times: tailWeight, output: core)
+            encodeWeightedSum(on: encoder, raw, times: SIMD3(repeating: 1 - amount),
+                              plus: core, times: SIMD3(repeating: amount), output: tail)
             raw = tail
         }
 
@@ -58,20 +57,19 @@ extension GPU {
             var weights = (0..<bounces).map { pow(h.halationBounceDecay, Double($0)) }
             let total = weights.reduce(0, +)
             weights = weights.map { $0 / total }
+            // The first bounce blurs straight into sum, so sum holds Σ_k (a_k / a_0) G(σ_h √k) and the
+            // last step weights it by a_0.
             let (blurred, sum) = (texture(), texture())
             for (index, weight) in weights.enumerated() {
                 let sigma = pointwiseMax(firstSigma * Double(index + 1).squareRoot(), floor)
-                encodeGaussianBlur(on: encoder, input: raw, output: blurred, sigma: sigma)
-                if index == 0 {
-                    encodeScale(on: encoder, input: blurred, output: sum, by: weight)
-                } else {
-                    encodeAddScaled(on: encoder, accumulator: sum, input: blurred, output: sum, weight: SIMD3(repeating: weight))
+                encodeGaussianBlur(on: encoder, input: raw, output: index == 0 ? sum : blurred, sigma: sigma)
+                if index > 0 {
+                    encodeWeightedSum(on: encoder, sum, times: SIMD3(repeating: 1),
+                                      plus: blurred, times: SIMD3(repeating: weight / weights[0]), output: sum)
                 }
             }
-            encodeAddScaled(on: encoder, accumulator: raw, input: sum, output: sum, weight: strength)
-            if h.halationRenormalize {
-                encodeScale(on: encoder, input: sum, output: sum, by: 1 / (1 + strength))
-            }
+            let scale = h.halationRenormalize ? 1 / (1 + strength) : SIMD3(repeating: 1)
+            encodeWeightedSum(on: encoder, raw, times: scale, plus: sum, times: strength * weights[0] * scale, output: sum)
             raw = sum
         }
         return raw

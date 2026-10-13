@@ -62,8 +62,8 @@ extension GPU {
             if index == 0 {
                 encodeScale(on: encoder, input: component, output: sum, by: term.amplitude)
             } else {
-                encodeAddScaled(on: encoder, accumulator: sum, input: component, output: sum,
-                                weight: SIMD3(repeating: term.amplitude))
+                encodeWeightedSum(on: encoder, sum, times: SIMD3(repeating: 1),
+                                  plus: component, times: SIMD3(repeating: term.amplitude), output: sum)
             }
         }
         if sum !== output {
@@ -71,12 +71,13 @@ extension GPU {
         }
     }
 
-    /// `accumulator + weight · input`, per channel.
-    public func encodeAddScaled(on encoder: Encoder, accumulator: any MTLTexture,
-                                input: any MTLTexture, output: any MTLTexture, weight: SIMD3<Double>) {
-        var weight = SIMD3<Float>(weight)
-        encode("add_scaled", on: encoder, textures: [accumulator, input, output], grid: output.size) {
-            $0.setBytes(&weight, length: MemoryLayout<SIMD3<Float>>.size, index: 0)
+    /// `a · weightA + b · weightB`, per channel, in one pass: blends, sums and differences.
+    public func encodeWeightedSum(on encoder: Encoder, _ a: any MTLTexture, times weightA: SIMD3<Double>,
+                                  plus b: any MTLTexture, times weightB: SIMD3<Double>, output: any MTLTexture) {
+        var (weightA, weightB) = (SIMD3<Float>(weightA), SIMD3<Float>(weightB))
+        encode("weighted_sum", on: encoder, textures: [a, b, output], grid: output.size) {
+            $0.setBytes(&weightA, length: MemoryLayout<SIMD3<Float>>.size, index: 0)
+            $0.setBytes(&weightB, length: MemoryLayout<SIMD3<Float>>.size, index: 1)
         }
     }
 
