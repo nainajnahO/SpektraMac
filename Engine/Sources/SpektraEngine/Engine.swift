@@ -164,9 +164,10 @@ public actor Engine {
     }
 
     /// ``render(controls:mode:)`` for the screen: 8-bit sRGB, no larger than `maxPixels` on its
-    /// long side (Core Animation can't texture images over 16384 px). Core Image scales it down
-    /// on the GPU, so only that comes back from it.
-    public func display(controls: Controls, mode: RenderMode, maxPixels: Int = 4096) throws -> CGImage {
+    /// long side. By default that's the most Core Animation can texture, 16384 px, so the canvas
+    /// zooms into the render's own pixels. Core Image scales larger ones down on the GPU, so only
+    /// that comes back from it.
+    public func display(controls: Controls, mode: RenderMode, maxPixels: Int = 16384) throws -> CGImage {
         let output = try renderTexture(controls: controls, mode: mode)
         // Core Image puts a texture's first row at the bottom.
         guard let image = CIImage(mtlTexture: output, options: [.colorSpace: Self.outputColorSpace]) else {

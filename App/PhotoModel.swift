@@ -15,7 +15,8 @@ final class PhotoModel {
     }
 
     /// The open photo (on the engine's GPU): its file name, size and preview size.
-    struct Photo {
+    struct Photo: Identifiable {
+        let id = UUID()
         let name: String
         let width: Int
         let height: Int
