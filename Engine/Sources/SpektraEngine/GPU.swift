@@ -218,6 +218,15 @@ public final class Encoder {
         allocatedAtStart = gpu.allocatedSize
     }
 
+    /// Encodes work that needs the command buffer itself (Metal Performance Shaders) between kernels.
+    func encodeCommands(_ body: (any MTLCommandBuffer) -> Void) {
+        flushIfOverBudget()
+        guard !isCancelled else { return }
+        compute.endEncoding()
+        body(commandBuffer)
+        compute = commandBuffer.makeComputeCommandEncoder()!
+    }
+
     /// Completes the last command buffer; throws the first error any of them reported, or
     /// `CancellationError` if the task was cancelled.
     func finish() throws {
