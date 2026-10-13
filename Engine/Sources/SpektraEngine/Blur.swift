@@ -27,7 +27,7 @@ extension GPU {
             let blur = MPSImageGaussianBlur(device: device, sigma: Float(sigma.x))
             blur.edgeMode = .clamp
             // It can't write over its input: blurred elsewhere and copied back.
-            let destination = input === output ? makeTexture(width: input.width, height: input.height) : output
+            let destination = input === output ? makeTexture(like: output) : output
             encoder.encodeCommands { blur.encode(commandBuffer: $0, sourceTexture: input, destinationTexture: destination) }
             if destination !== output {
                 encodeScale(on: encoder, input: destination, output: output, by: 1)
@@ -36,7 +36,7 @@ extension GPU {
         }
         // One scratch texture for every pass, so `output` may be `input`: the FIR runs input →
         // scratch → output, then the recursive filter output → scratch → output → scratch → output.
-        let scratch = makeTexture(width: input.width, height: input.height)
+        let scratch = makeTexture(like: output)
         var source = input
         if onFIR.contains(true) {
             encodeFIR(on: encoder, input: source, scratch: scratch, output: output, sigma: sigma, channels: onFIR,
@@ -55,8 +55,8 @@ extension GPU {
                                       output: any MTLTexture, decay: SIMD3<Double>, truncate: Double = 3) {
         // (amplitude, σ/λ), copied from _EXPONENTIAL_GAUSSIAN_FITS[3]; amplitudes sum to 1.
         let mixture: [(amplitude: Double, ratio: Double)] = [(0.1633, 0.5360), (0.6496, 1.5236), (0.1870, 2.7684)]
-        let component = makeTexture(width: input.width, height: input.height)
-        let sum = input === output ? makeTexture(width: input.width, height: input.height) : output
+        let component = makeTexture(like: output)
+        let sum = input === output ? makeTexture(like: output) : output
         for (index, term) in mixture.enumerated() {
             encodeGaussianBlur(on: encoder, input: input, output: component, sigma: decay * term.ratio, truncate: truncate)
             if index == 0 {
