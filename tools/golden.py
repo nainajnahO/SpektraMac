@@ -31,7 +31,9 @@ float64 by the Python functions themselves from those same float32 inputs (so on
 own error shows): curve interpolation (numba fast_interp) on a negative film's exposure axis and on
 a positive film's non-monotonic -density axis, log10(max(x, 0) + 1e-10), 10**x and a 3x3 matrix;
 and blurs (fast_gaussian_filter, fast_exponential_filter) with per-channel sigmas covering the FIR
-path, the IIR path, a mix, and an image smaller than the kernel, with `<name>_sigma` alongside; and each film's
+path, the IIR path, a mix, and an image smaller than the kernel, with `<name>_sigma` alongside (one
+sigma >= 3 for every channel, `blur_equal` and `blur_wide`: an exact Gaussian instead, scipy's
+gaussian_filter with replicated edges, since the engine blurs those with Apple's); and each film's
 hanatos2025 tc LUT before input gamut compression (`tc_lut_raw_<film>`, 192x192x3); and on that LUT's
 own cell grid, the input gamut compression's normalised distance to the spectral locus around D55
 and T (`locus_dnorm_<illuminant>`) and matplotlib's inside/outside test (`locus_inside`); highlight
@@ -121,6 +123,7 @@ from spektrafilm.utils.fast_interp import fast_interp
 from spektrafilm.utils.gamut_compression import OutputGamutCompressSpec, compress_rgb
 from spektrafilm.utils.morph_curves import PrintCurvesMorphParams, apply_print_curves_morph
 from matplotlib.path import Path as MplPath
+from scipy import ndimage
 from spektrafilm.utils.gamut_compression import (
     _CAM16UCS_L_A,
     _CAM16UCS_Y_B,
@@ -316,10 +319,22 @@ def primitives() -> dict[str, np.ndarray]:
         "blur_wide": ((96, 128), (100.0, 100.0, 100.0)),
         "blur_tiny": ((6, 8), (2.9, 1.0, 0.4)),
     }
+
+    def reference_blur(x, sigma):
+        # One sigma >= 3 for every channel: the engine runs Apple's Gaussian blur, an exact Gaussian
+        # with replicated edges, which fast_gaussian_filter's recursive filter approximates (up to
+        # 0.2 off at the borders on these pixels).
+        if sigma[0] >= 3 and len(set(sigma)) == 1:
+            return ndimage.gaussian_filter(x, (sigma[0], sigma[0], 0), mode="nearest", truncate=8)
+        return fast_gaussian_filter(x, np.array(sigma))
+
     for name, (shape, sigma) in blur_cases.items():
         x = rng.uniform(0, 1, (*shape, 3)).astype(np.float32).astype(np.float64)
-        arrays.update({f"{name}_x": x, f"{name}_sigma": np.array(sigma),
-                       f"{name}_out": fast_gaussian_filter(x, np.array(sigma))})
+        arrays.update({f"{name}_x": x, f"{name}_sigma": np.array(sigma), f"{name}_out": reference_blur(x, sigma)})
+    # The smallest sigma Apple's blur takes, on blur_iir's pixels: no new draw, so later arrays keep theirs.
+    x = arrays["blur_iir_x"]
+    arrays.update(blur_equal_x=x, blur_equal_sigma=np.array((3.0, 3.0, 3.0)),
+                  blur_equal_out=reference_blur(x, (3.0, 3.0, 3.0)))
     x = rng.uniform(0, 1, (96, 128, 3)).astype(np.float32).astype(np.float64)
     decay = np.array([2.0, 9.7, 34.0])
     arrays.update(blur_exponential_x=x, blur_exponential_sigma=decay,

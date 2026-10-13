@@ -1,17 +1,37 @@
 import Foundation
 import Metal
+import MetalPerformanceShaders
 
 /// Host side of `Shaders/Blur.metal`. Sigmas are in pixels, one per channel.
 extension GPU {
     /// Spektrafilm's `fast_gaussian_filter`: per channel, σ ≤ 0 leaves the channel alone, σ < 3
     /// runs a separable FIR (radius `Int(truncate·σ + 0.5)`, reflected edges), σ ≥ 3 the Young–van
     /// Vliet recursive filter (replicated edges). Channels on another path pass through unchanged.
+    ///
+    /// When every channel takes the same σ ≥ 3 (halation's bounces, the couplers' diffusion), Apple's
+    /// Gaussian blur (`MPSImageGaussianBlur`, edges clamped) runs instead: 6–13 ms at 24 MP against
+    /// the recursive filter's 22 ms, which makes four full passes over memory whatever σ. It's the
+    /// closer of the two to an exact Gaussian (within 0.002 on random pixels, where the recursive
+    /// filter is up to 0.2 off at the borders and 0.01 inside), so renders part from Python's: by up
+    /// to 5 of 255 levels inside the image and 20 on the rows at the border, with no difference to
+    /// see side by side at 100 %.
     public func encodeGaussianBlur(on encoder: Encoder, input: any MTLTexture,
                                    output: any MTLTexture, sigma: SIMD3<Double>, truncate: Double = 3) {
         let onFIR = (0..<3).map { sigma[$0] > 0 && sigma[$0] < 3 }
         let onIIR = (0..<3).map { sigma[$0] >= 3 }
         guard onFIR.contains(true) || onIIR.contains(true) else {
             encodeScale(on: encoder, input: input, output: output, by: 1)
+            return
+        }
+        if onIIR.allSatisfy({ $0 }) && sigma.x == sigma.y && sigma.y == sigma.z {
+            let blur = MPSImageGaussianBlur(device: device, sigma: Float(sigma.x))
+            blur.edgeMode = .clamp
+            // It can't write over its input: blurred elsewhere and copied back.
+            let destination = input === output ? makeTexture(width: input.width, height: input.height) : output
+            encoder.encodeCommands { blur.encode(commandBuffer: $0, sourceTexture: input, destinationTexture: destination) }
+            if destination !== output {
+                encodeScale(on: encoder, input: destination, output: output, by: 1)
+            }
             return
         }
         // One scratch texture for every pass, so `output` may be `input`: the FIR runs input →
