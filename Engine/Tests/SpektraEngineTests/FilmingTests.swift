@@ -95,7 +95,7 @@ func exposeMatchesLogEFilm(caseName: String) throws {
     }
     let difference = Difference(gpu.download(output), try golden("primitives", "boost_out").values, floor: 1)
     print("boost: \(difference)")
-    #expect(difference.maxRelative < 1e-6)
+    #expect(difference.maxRelative < 2e-6)  // fast maths functions
 }
 
 @Test func halationMatchesPythonAtFullResolutionScale() throws {

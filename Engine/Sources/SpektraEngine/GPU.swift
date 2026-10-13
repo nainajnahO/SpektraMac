@@ -24,7 +24,9 @@ public final class GPU {
         guard let queue = device.makeCommandQueue() else { throw SetupError.noQueue }
 
         // Compiled at runtime from the bundled sources: `swift build` doesn't compile .metal files.
-        // IEEE-safe maths and precise functions so results track the f64 Python reference.
+        // Fast maths functions: the spectral and colour kernels spend their time in exp, pow and
+        // log, which run 2–3× faster, and renders move by under 0.005 of an 8-bit level. IEEE-safe
+        // arithmetic, though: the recursive blur's float pairs need it evaluated as written.
         let source = try FileManager.default.contentsOfDirectory(at: shaders, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "metal" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
@@ -32,7 +34,7 @@ public final class GPU {
             .joined(separator: "\n")
         let options = MTLCompileOptions()
         options.mathMode = .safe
-        options.mathFloatingPointFunctions = .precise
+        options.mathFloatingPointFunctions = .fast
         let library = try device.makeLibrary(source: source, options: options)
 
         var pipelines: [String: any MTLComputePipelineState] = [:]
