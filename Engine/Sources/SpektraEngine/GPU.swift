@@ -57,15 +57,26 @@ public final class GPU {
     /// fresh, more and the memory goes unused).
     static let reservedTextures = 10
 
+    /// The most ``reserveMemory(width:height:)`` sets aside: a quarter of the Mac's memory. More
+    /// and the system compresses and pages memory: at 48 MP on 16 GB, 10 textures (7.7 GB)
+    /// rendered slower than 5.
+    static let reserveLimit = Int(ProcessInfo.processInfo.physicalMemory / 4)
+
     /// Sets aside GPU memory for the intermediates of renders up to `width × height`
-    /// (``reservedTextures`` textures: 3.8 GB at 24 MP), replacing what was set aside before.
-    /// A fresh texture costs more than the kernel writing it — the system clears its pages on
-    /// first use, 14 ms for 24 MP — and a render makes dozens; from this memory (an automatic
-    /// heap) they reuse what earlier ones released. Textures that don't fit are allocated fresh.
+    /// (``reservedTextures`` textures, as many as fit in ``reserveLimit``: 3.8 GB at 24 MP),
+    /// replacing what was set aside before. A fresh texture costs more than the kernel writing
+    /// it — the system clears its pages on first use, 14 ms for 24 MP — and a render makes
+    /// dozens; from this memory (an automatic heap) they reuse what earlier ones released.
+    /// Textures that don't fit are allocated fresh.
     public func reserveMemory(width: Int, height: Int) {
         let slot = device.heapTextureSizeAndAlign(descriptor: Self.textureDescriptor(width: width, height: height))
+        let textures = min(Self.reservedTextures, Self.reserveLimit / slot.size)
+        guard textures > 0 else {
+            heap = nil
+            return
+        }
         let descriptor = MTLHeapDescriptor()
-        descriptor.size = Self.reservedTextures * slot.size
+        descriptor.size = textures * slot.size
         descriptor.storageMode = .shared
         descriptor.type = .automatic
         descriptor.hazardTrackingMode = .tracked
