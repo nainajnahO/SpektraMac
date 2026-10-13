@@ -115,12 +115,7 @@ public final class GPU {
     /// memory.
     public func upload(rgb: [Float], width: Int, height: Int) -> any MTLTexture {
         precondition(rgb.count == width * height * 3)
-        var rgba = [Float](repeating: 0, count: width * height * 4)
-        for pixel in 0..<(width * height) {
-            rgba[pixel * 4] = rgb[pixel * 3]
-            rgba[pixel * 4 + 1] = rgb[pixel * 3 + 1]
-            rgba[pixel * 4 + 2] = rgb[pixel * 3 + 2]
-        }
+        let rgba = rgba(fromRGB: rgb, width: width, height: height, alpha: 0)
         let texture = device.makeTexture(descriptor: Self.textureDescriptor(width: width, height: height))!
         texture.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0,
                         withBytes: rgba, bytesPerRow: width * 16)
@@ -133,13 +128,7 @@ public final class GPU {
         var rgba = [Float](repeating: 0, count: width * height * 4)
         texture.getBytes(&rgba, bytesPerRow: width * 16,
                          from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
-        var rgb = [Float](repeating: 0, count: width * height * 3)
-        for pixel in 0..<(width * height) {
-            rgb[pixel * 3] = rgba[pixel * 4]
-            rgb[pixel * 3 + 1] = rgba[pixel * 4 + 1]
-            rgb[pixel * 3 + 2] = rgba[pixel * 4 + 2]
-        }
-        return rgb
+        return rgb(fromRGBA: rgba, width: width, height: height)
     }
 
     /// Encodes one kernel over `grid` threads (usually a texture's ``MTLTexture/size``: one per

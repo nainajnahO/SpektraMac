@@ -1,3 +1,4 @@
+import Accelerate
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
@@ -88,23 +89,12 @@ public struct RGBImage: Sendable {
         var rgba = [Float](repeating: 0, count: width * height * 4)
         Self.makeContext().render(image, toBitmap: &rgba, rowBytes: width * 16, bounds: extent,
                                   format: .RGBAf, colorSpace: Self.workingColorSpace)
-        var rgb = [Float](repeating: 0, count: width * height * 3)
-        for pixel in 0..<(width * height) {
-            rgb[pixel * 3] = rgba[pixel * 4]
-            rgb[pixel * 3 + 1] = rgba[pixel * 4 + 1]
-            rgb[pixel * 3 + 2] = rgba[pixel * 4 + 2]
-        }
-        self.init(width: width, height: height, pixels: rgb)
+        self.init(width: width, height: height, pixels: rgb(fromRGBA: rgba, width: width, height: height))
     }
 
     /// The pixels as Core Image's image, in ``workingColorSpace``.
     var ciImage: CIImage {
-        var rgba = [Float](repeating: 1, count: width * height * 4)
-        for pixel in 0..<(width * height) {
-            rgba[pixel * 4] = pixels[pixel * 3]
-            rgba[pixel * 4 + 1] = pixels[pixel * 3 + 1]
-            rgba[pixel * 4 + 2] = pixels[pixel * 3 + 2]
-        }
+        let rgba = rgba(fromRGB: pixels, width: width, height: height, alpha: 1)
         return CIImage(bitmapData: Data(bytes: rgba, count: rgba.count * 4), bytesPerRow: width * 16,
                        size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: Self.workingColorSpace)
     }
@@ -129,16 +119,29 @@ public struct RGBImage: Sendable {
         public var description: String { "Can't write \(url.lastPathComponent)" }
     }
 
-    /// Writes the pixels, already encoded in `colorSpace`, as `save_image_oiio` does: clipped to
-    /// [0, 1] and truncated to integers, 16-bit for TIFF (deflate) and PNG, 8-bit for JPEG
-    /// (quality 0.98, OpenImageIO's 98). The file embeds `colorSpace`'s ICC profile and
-    /// `metadata`, marked upright since the pixels are.
+    /// Writes the pixels, already encoded in `colorSpace`, about as `save_image_oiio` does:
+    /// clipped to [0, 1] and rounded to integers (it truncates: at most a level apart), 16-bit
+    /// for TIFF and PNG, 8-bit for JPEG (quality 0.98, OpenImageIO's 98). TIFFs are uncompressed,
+    /// unlike its deflate, which took 2.7 s for 24 MP and saved 4 % on a render with grain. The
+    /// file embeds `colorSpace`'s ICC profile and `metadata`, marked upright since the pixels are.
     public func write(to url: URL, as type: UTType, colorSpace: CGColorSpace, metadata: PhotoMetadata?) throws {
         let bits = type.conforms(to: .jpeg) ? 8 : 16
-        // NaN (outside the colour model) as black, as NumPy's cast gives.
-        func clipped(_ value: Float) -> Float { value.isNaN ? 0 : min(max(value, 0), 1) }
-        let data = bits == 16 ? pixels.map { UInt16(clipped($0) * 65535) }.withUnsafeBytes { Data($0) }
-                              : pixels.map { UInt8(clipped($0) * 255) }.withUnsafeBytes { Data($0) }
+        // vImage converts planar data, so each row of interleaved RGB is width × 3 values. It
+        // writes NaN (outside the colour model) as black, as NumPy's cast gives.
+        var data = Data(count: pixels.count * bits / 8)
+        pixels.withUnsafeBytes { source in
+            data.withUnsafeMutableBytes { destination in
+                var source = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: source.baseAddress),
+                                           height: vImagePixelCount(height), width: vImagePixelCount(width * 3),
+                                           rowBytes: width * 12)
+                var destination = vImage_Buffer(data: destination.baseAddress, height: vImagePixelCount(height),
+                                                width: vImagePixelCount(width * 3), rowBytes: width * 3 * bits / 8)
+                let flags = vImage_Flags(kvImageNoFlags)
+                let error = bits == 16 ? vImageConvert_FTo16U(&source, &destination, 0, 1 / 65535, flags)
+                                       : vImageConvert_PlanarFtoPlanar8(&source, &destination, 1, 0, flags)
+                precondition(error == kvImageNoError)
+            }
+        }
         guard let image = CGImage(width: width, height: height, bitsPerComponent: bits, bitsPerPixel: 3 * bits,
                                   bytesPerRow: width * 3 * bits / 8, space: colorSpace,
                                   bitmapInfo: bits == 16 ? .byteOrder16Little : [],
@@ -153,7 +156,7 @@ public struct RGBImage: Sendable {
         }
         if type.conforms(to: .tiff) {
             var tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
-            tiff[kCGImagePropertyTIFFCompression] = 8  // deflate
+            tiff[kCGImagePropertyTIFFCompression] = 1  // none
             properties[kCGImagePropertyTIFFDictionary] = tiff
         }
         CGImageDestinationAddImage(destination, image, properties as CFDictionary)
@@ -167,6 +170,37 @@ public struct RGBImage: Sendable {
         let options: [CIContextOption: Any] = [.workingFormat: CIFormat.RGBAf, .cacheIntermediates: false]
         return commandQueue.map { CIContext(mtlCommandQueue: $0, options: options) } ?? CIContext(options: options)
     }
+}
+
+/// Interleaved RGBA floats without their alpha, as interleaved RGB (`width × height` pixels).
+func rgb(fromRGBA rgba: [Float], width: Int, height: Int) -> [Float] {
+    var rgb = [Float](repeating: 0, count: width * height * 3)
+    rgba.withUnsafeBytes { source in
+        rgb.withUnsafeMutableBytes { destination in
+            var source = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: source.baseAddress),
+                                       height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width * 16)
+            var destination = vImage_Buffer(data: destination.baseAddress, height: vImagePixelCount(height),
+                                            width: vImagePixelCount(width), rowBytes: width * 12)
+            precondition(vImageConvert_RGBAFFFFtoRGBFFF(&source, &destination, vImage_Flags(kvImageNoFlags)) == kvImageNoError)
+        }
+    }
+    return rgb
+}
+
+/// Interleaved RGB floats as interleaved RGBA, `alpha` in every pixel (`width × height` pixels).
+func rgba(fromRGB rgb: [Float], width: Int, height: Int, alpha: Float) -> [Float] {
+    var rgba = [Float](repeating: 0, count: width * height * 4)
+    rgb.withUnsafeBytes { source in
+        rgba.withUnsafeMutableBytes { destination in
+            var source = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: source.baseAddress),
+                                       height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width * 12)
+            var destination = vImage_Buffer(data: destination.baseAddress, height: vImagePixelCount(height),
+                                            width: vImagePixelCount(width), rowBytes: width * 16)
+            precondition(vImageConvert_RGBFFFtoRGBAFFFF(&source, nil, alpha, &destination, false,
+                                                        vImage_Flags(kvImageNoFlags)) == kvImageNoError)
+        }
+    }
+    return rgba
 }
 
 /// What a rendering written from a photo keeps of the photo's metadata: its EXIF, GPS and IPTC
