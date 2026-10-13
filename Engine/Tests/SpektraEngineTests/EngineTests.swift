@@ -309,7 +309,8 @@ func reservedMemoryRendersMatchFresh(caseName: String) throws {
 
 /// Exported files carry 16 bits (TIFF, PNG) or 8 (JPEG), the sRGB profile and the photo's
 /// metadata, and read back colour-managed as the colours written: a grey and a red block, sRGB
-/// 0.5 and (1, 0, 0), against colour-science's linear BT.2020 for the stored integers.
+/// 0.5 and (1, 0, 0), against colour-science's linear BT.2020 for the stored integers; and a NaN
+/// pixel (outside the colour model) as black.
 @Test(arguments: [UTType.tiff, .png, .jpeg])
 func exportWritesProfileAndMetadata(type: UTType) throws {
     let directory = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
@@ -339,6 +340,7 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
             pixels.replaceSubrange((y * width + x) * 3..<((y * width + x) * 3 + 3), with: rgb)
         }
     }
+    pixels.replaceSubrange(0..<3, with: [.nan, .nan, .nan])
     let exported = directory.appending(component: "out").appendingPathExtension(for: type)
     try RGBImage(width: width, height: height, pixels: pixels)
         .write(to: exported, as: type, colorSpace: Engine.exportColorSpace, metadata: metadata)
@@ -354,20 +356,23 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
     #expect(tiff?[kCGImagePropertyTIFFModel] as? String == "Camera")
     if type == .tiff {
-        #expect(tiff?[kCGImagePropertyTIFFCompression] as? Int == 8)
+        #expect(tiff?[kCGImagePropertyTIFFCompression] as? Int == 1)
     }
 
-    // The stored integers (truncated), decoded by colour-science's formulas into linear BT.2020.
+    // The stored integers (rounded), decoded by colour-science's formulas into linear BT.2020.
     let tables = try Tables.load()
     let (sRGB, bt2020) = (tables.colourSpaces["sRGB"]!, tables.colourSpaces["ITU-R BT.2020"]!)
     let maximum = type == .jpeg ? 255.0 : 65535.0
     func expected(_ encoded: SIMD3<Double>) -> SIMD3<Double> {
-        let stored = (encoded * maximum).rounded(.down) / maximum
+        let stored = (encoded * maximum).rounded(.toNearestOrAwayFromZero) / maximum
         let linear = SIMD3(sRGB.decode(stored.x), sRGB.decode(stored.y), sRGB.decode(stored.z))
         return simd_double3x3(rows: bt2020.xyzToRGB) * simd_double3x3(rows: sRGB.rgbToXYZ) * linear
     }
     let decoded = try RGBImage(contentsOf: exported)
     #expect(decoded.width == width && decoded.height == height)
+    if type != .jpeg {
+        #expect(decoded.pixels[0..<3] == [0, 0, 0])
+    }
     for (x, encoded) in [(8, SIMD3<Double>(0.5, 0.5, 0.5)), (24, SIMD3<Double>(1, 0, 0))] {
         let index = (8 * width + x) * 3
         let read = SIMD3(Double(decoded.pixels[index]), Double(decoded.pixels[index + 1]), Double(decoded.pixels[index + 2]))
