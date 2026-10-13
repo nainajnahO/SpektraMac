@@ -13,28 +13,32 @@ inline float expm1_accurate(float x) {
 }
 
 // Random numbers for the stochastic kernels (glare, grain). Counter-based, so nothing is stored
-// between dispatches and a render is reproducible: each pixel runs its own SplitMix64 sequence
-// (Steele, Lea & Flood 2014), started at a hash of (seed, stream, pixel). Python draws from
-// numba's unseeded generator instead, so only the statistics are comparable.
-inline ulong splitmix64_mix(ulong z) {
-    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ul;
-    z = (z ^ (z >> 27)) * 0x94D049BB133111EBul;
-    return z ^ (z >> 31);
+// between dispatches and a render is reproducible: each pixel runs its own PCG sequence
+// (PCG-RXS-M-XS 32, O'Neill 2014), started at a PCG hash of (seed, stream, pixel) (Jarzynski &
+// Olano 2020). All 32-bit: 64-bit multiplies cost the GPU several instructions each. Python draws
+// from numba's unseeded generator instead, so only the statistics are comparable.
+inline uint pcg_step(uint state) { return state * 747796405u + 2891336453u; }
+
+inline uint pcg_output(uint state) {
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
 }
 
+inline uint pcg_hash(uint value) { return pcg_output(pcg_step(value)); }
+
 struct Random {
-    ulong state;
+    uint state;
 
     Random(uint seed, uint stream, uint2 pixel)
-        : state(splitmix64_mix((ulong(seed) << 32 | stream) ^ splitmix64_mix(ulong(pixel.y) << 32 | pixel.x))) {}
+        : state(pcg_hash(pixel.x ^ pcg_hash(pixel.y ^ pcg_hash(stream ^ pcg_hash(seed))))) {}
 
-    ulong next() {
-        state += 0x9E3779B97F4A7C15ul;
-        return splitmix64_mix(state);
+    uint next() {
+        state = pcg_step(state);
+        return pcg_output(state);
     }
 
     // Uniform in (0, 1): 24 random bits, offset by half a step so neither end is reached.
-    float uniform() { return (float(next() >> 40) + 0.5f) / 16777216.0f; }
+    float uniform() { return (float(next() >> 8) + 0.5f) / 16777216.0f; }
 
     // Standard normal (Box–Muller).
     float normal() { return sqrt(-2.0f * log(uniform())) * cospi(2.0f * uniform()); }
@@ -54,32 +58,5 @@ struct Random {
             count++;
         }
         return count;
-    }
-
-    // Binomial(n, p), as fast_binomial: n Bernoulli trials below n = 25, the normal approximation
-    // rounded into [0, n] when the variance exceeds 10. Its third branch, inverting the CDF by a
-    // running sum, is replaced by Devroye's waiting-time method (geometric gaps between successes;
-    // the same distribution): in float the sum can end short of the uniform and return n. Drawn
-    // for min(p, 1 − p) and mirrored, so the small-variance branch stays short near p = 1.
-    uint binomial(uint n, float p) {
-        if (p <= 0.0f) return 0;
-        if (p >= 1.0f) return n;
-        bool mirrored = p > 0.5f;
-        float q = mirrored ? 1.0f - p : p;
-        uint count = 0;
-        if (n < 25) {
-            for (uint trial = 0; trial < n; trial++) count += uniform() < q ? 1 : 0;
-        } else if (float(n) * q * (1.0f - q) > 10.0f) {
-            float mean = float(n) * q;
-            count = uint(clamp(rint(mean + sqrt(mean * (1.0f - q)) * normal()), 0.0f, float(n)));
-        } else {
-            float logFailure = log1p_accurate(-q), position = 0.0f;
-            while (true) {
-                position += floor(log(uniform()) / logFailure) + 1.0f;
-                if (position > float(n)) break;
-                count++;
-            }
-        }
-        return mirrored ? n - count : count;
     }
 };

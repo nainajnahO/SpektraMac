@@ -127,9 +127,10 @@ kernel void boost_highlights(texture2d<float, access::read> input [[texture(0)]]
 }
 
 // layer_particle_model for one sub-layer of all three channels. The layer's density (plus its
-// share of fog) sets the development probability p = d / d_max; seeds ~ Poisson(n / saturation)
-// with saturation = 1 − p·uniformity; developed ~ Binomial(seeds, p); each developed particle
-// adds d_max / n of density, × saturation.
+// share of fog) sets the development probability p = d / d_max. Python draws seeds ~
+// Poisson(n / saturation), saturation = 1 − p·uniformity, then developed ~ Binomial(seeds, p):
+// that is Poisson(p · n / saturation) (Poisson thinning), drawn here at once. Each developed
+// particle adds d_max / n of density, × saturation.
 kernel void grain_layer(texture2d<float, access::read> density [[texture(0)]],
                         texture2d<float, access::write> output [[texture(1)]],
                         constant float3 &density_min [[buffer(0)]],
@@ -144,9 +145,8 @@ kernel void grain_layer(texture2d<float, access::read> density [[texture(0)]],
     float3 saturation = 1.0f - p * uniformity * (1.0f - 1e-6f);
     float3 grain;
     for (int channel = 0; channel < 3; channel++) {
-        uint seeds = random.poisson(particles[channel] / saturation[channel]);
-        grain[channel] = float(random.binomial(seeds, p[channel])) * (density_max[channel] / particles[channel])
-                       * saturation[channel];
+        float developed = float(random.poisson(particles[channel] / saturation[channel] * p[channel]));
+        grain[channel] = developed * (density_max[channel] / particles[channel]) * saturation[channel];
     }
     output.write(float4(grain, 1.0f), gid);
 }
