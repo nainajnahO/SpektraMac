@@ -180,6 +180,50 @@ func reservedMemoryRendersMatchFresh(caseName: String) throws {
     #expect(try render(on: gpu) == fresh)
 }
 
+/// A render that starts from the last render's steps is exactly a render from scratch, through
+/// a run of control changes in every mode. (Opening the photo again forgets the steps.)
+@Test func cachedRendersMatchFresh() async throws {
+    let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
+    let (engine, fresh) = (try Engine(), try Engine())
+    _ = await engine.open(image)
+    var controls = Controls()
+    let changes: [(String, (inout Controls) -> Void)] = [
+        ("defaults", { _ in }), ("Y filter", { $0.yFilterShift = 12 }), ("print exposure", { $0.printExposure = 1.3 }),
+        ("paper", { $0.paper = "fujifilm_crystal_archive_typeii" }), ("negative", { $0.scanFilm = true }),
+        ("print", { $0.scanFilm = false }), ("exposure", { $0.exposureCompensationEV = 1.25 }),
+        ("auto-exposure off", { $0.autoExposure = false }), ("grain off", { $0.grain = false }),
+        ("halation off", { $0.halation = false }), ("film", { $0.film = "kodak_gold_200" }),
+    ]
+    for (name, change) in changes {
+        change(&controls)
+        for mode in [RenderMode.preview, .full, .export] {
+            _ = await fresh.open(image)
+            let expected = try await fresh.render(controls: controls, mode: mode).pixels.map(\.bitPattern)
+            let cached = try await engine.render(controls: controls, mode: mode).pixels.map(\.bitPattern)
+            #expect(cached == expected, "\(name), \(mode)")
+        }
+    }
+}
+
+/// The engine's render, in steps from the photo kept on the GPU, is exactly the parity-tested
+/// chain from the image, grain and auto-exposure included.
+@Test func engineRenderIsTheChain() async throws {
+    let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
+    var controls = Controls()
+    controls.exposureCompensationEV = 0.75
+    let engine = try Engine()
+    _ = await engine.open(image)
+    let rendered = try await engine.render(controls: controls, mode: .full)
+
+    let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
+    let parameters = Engine.parameters(for: controls, film: film, print: paper,
+                                       database: try Tables.loadNeutralPrintFilters(), mode: .full)
+    let gpu = try GPU()
+    let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: try Tables.load())
+    let chain = gpu.download(try gpu.run { simulation.encode(image, on: $0) })
+    #expect(rendered.pixels.map(\.bitPattern) == chain.map(\.bitPattern))
+}
+
 /// Exported files carry 16 bits (TIFF, PNG) or 8 (JPEG), the sRGB profile and the photo's
 /// metadata, and read back colour-managed as the colours written: a grey and a red block, sRGB
 /// 0.5 and (1, 0, 0), against colour-science's linear BT.2020 for the stored integers.

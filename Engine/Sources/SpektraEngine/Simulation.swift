@@ -198,9 +198,10 @@ public struct Simulation {
         }
     }
 
-    /// `rgb_in → rgb_pre`: applies auto-exposure, `autoExposureEV` measured on the same image by
-    /// ``autoExposure(of:)``. (Python's preprocess also crops and upscales; both are off by
-    /// default and not ported.) Only reads `input`, which the engine keeps across renders.
+    /// `rgb_in → rgb_pre`: applies auto-exposure, `autoExposureEV` measured on the same image
+    /// (``autoExposureEV(of:colourSpace:cctfDecoding:)`` in this simulation's input space). (Python's
+    /// preprocess also crops and upscales; both are off by default and not ported.) Only reads
+    /// `input`, which the engine keeps across renders.
     public func encodePreprocess(_ input: any MTLTexture, autoExposureEV: Double,
                                  on encoder: Encoder) -> any MTLTexture {
         guard parameters.camera.autoExposure else { return input }
@@ -211,15 +212,10 @@ public struct Simulation {
 
     /// `rgb_in → rgb_pre` for an image not yet on the GPU: uploads and measures it.
     public func encodePreprocess(_ image: RGBImage, on encoder: Encoder) -> any MTLTexture {
-        encodePreprocess(gpu.upload(rgb: image.pixels, width: image.width, height: image.height),
-                         autoExposureEV: autoExposure(of: image), on: encoder)
-    }
-
-    /// The exposure in stops auto-exposure gives `image` (in this simulation's input colour
-    /// space); 0 when auto-exposure is off.
-    public func autoExposure(of image: RGBImage) -> Double {
-        guard parameters.camera.autoExposure else { return 0 }
-        return autoExposureEV(of: image, colourSpace: inputColourSpace, cctfDecoding: parameters.io.inputCctfDecoding)
+        let ev = parameters.camera.autoExposure
+            ? autoExposureEV(of: image, colourSpace: inputColourSpace, cctfDecoding: parameters.io.inputCctfDecoding) : 0
+        return encodePreprocess(gpu.upload(rgb: image.pixels, width: image.width, height: image.height),
+                                autoExposureEV: ev, on: encoder)
     }
 
     /// `rgb_pre → log_e_film` (FilmingStage.expose): the film's raw exposure through the
@@ -448,20 +444,18 @@ extension Simulation {
 }
 
 extension Simulation {
-    /// `rgb_in → rgb_out`: filming, printing (skipped when scanning the film itself) and scanning,
-    /// from an image on the GPU and its auto-exposure (``encodePreprocess(_:autoExposureEV:on:)``).
-    public func encode(_ input: any MTLTexture, autoExposureEV: Double, on encoder: Encoder) -> any MTLTexture {
-        let rgbPre = encodePreprocess(input, autoExposureEV: autoExposureEV, on: encoder)
-        let cmyFilm = encodeDevelop(encodeExpose(rgbPre, on: encoder), on: encoder)
+    /// `rgb_in → rgb_out`: filming, printing (skipped when scanning the film itself) and scanning.
+    public func encode(_ image: RGBImage, on encoder: Encoder) -> any MTLTexture {
+        let cmyFilm = encodeDevelop(encodeExpose(encodePreprocess(image, on: encoder), on: encoder), on: encoder)
+        return encodePrintAndScan(cmyFilm, on: encoder)
+    }
+
+    /// `cmy_film → rgb_out`: printing (skipped when scanning the film itself) and scanning. Only
+    /// reads `cmyFilm`.
+    public func encodePrintAndScan(_ cmyFilm: any MTLTexture, on encoder: Encoder) -> any MTLTexture {
         let cmy = parameters.io.scanFilm
             ? cmyFilm : encodePrintDevelop(encodePrintExpose(cmyFilm, on: encoder), on: encoder)
         return encodeScan(cmy, on: encoder)
-    }
-
-    /// `rgb_in → rgb_out` for an image not yet on the GPU: uploads and measures it.
-    public func encode(_ image: RGBImage, on encoder: Encoder) -> any MTLTexture {
-        encode(gpu.upload(rgb: image.pixels, width: image.width, height: image.height),
-               autoExposureEV: autoExposure(of: image), on: encoder)
     }
 
     /// `cmy_print` (or `cmy_film` when scanning film) → `rgb_out` (ScanningStage.scan): to linear
