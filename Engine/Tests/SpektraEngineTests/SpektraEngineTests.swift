@@ -18,6 +18,16 @@ import Testing
     }
 }
 
+@Test func reservedMemoryIsKeptWhileItFits() throws {
+    let gpu = try GPU()
+    gpu.reserveMemory(width: 600, height: 400)
+    let reserved = try #require(gpu.heap)
+    gpu.reserveMemory(width: 300, height: 200)
+    #expect(gpu.heap === reserved)
+    gpu.reserveMemory(width: 1200, height: 800)
+    #expect(gpu.heap !== reserved)
+}
+
 @Test func deltaE2000MatchesColourScience() {
     // Sharma, Wu & Dalal (2005) test pairs; references from colour.delta_E(method="CIE 2000").
     let cases: [(SIMD3<Double>, SIMD3<Double>, Double)] = [

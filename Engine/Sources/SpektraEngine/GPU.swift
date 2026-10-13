@@ -11,7 +11,7 @@ public final class GPU {
     public let queue: any MTLCommandQueue
     private let pipelines: [String: any MTLComputePipelineState]
     /// Memory set aside by ``reserveMemory(width:height:)``, where intermediates are made.
-    private var heap: (any MTLHeap)?
+    private(set) var heap: (any MTLHeap)?
 
     public enum SetupError: Error {
         case noDevice
@@ -63,11 +63,13 @@ public final class GPU {
     static let reserveLimit = Int(ProcessInfo.processInfo.physicalMemory / 4)
 
     /// Sets aside GPU memory for the intermediates of renders up to `width × height`
-    /// (``reservedTextures`` textures, as many as fit in ``reserveLimit``: 3.8 GB at 24 MP),
-    /// replacing what was set aside before. A fresh texture costs more than the kernel writing
-    /// it — the system clears its pages on first use, 14 ms for 24 MP — and a render makes
-    /// dozens; from this memory (an automatic heap) they reuse what earlier ones released.
-    /// Textures that don't fit are allocated fresh.
+    /// (``reservedTextures`` textures, as many as fit in ``reserveLimit``: 3.8 GB at 24 MP). A
+    /// fresh texture costs more than the kernel writing it — the system clears its pages on first
+    /// use, 14 ms for 24 MP — and a render makes dozens; from this memory (an automatic heap) they
+    /// reuse what earlier ones released. Textures that don't fit are allocated fresh.
+    ///
+    /// What was set aside before is kept when it's as large, so it stays at the largest photo's
+    /// size: new memory for each photo cost the first render after each open 150 ms more.
     public func reserveMemory(width: Int, height: Int) {
         let slot = device.heapTextureSizeAndAlign(descriptor: Self.textureDescriptor(width: width, height: height))
         let textures = min(Self.reservedTextures, Self.reserveLimit / slot.size)
@@ -75,6 +77,7 @@ public final class GPU {
             heap = nil
             return
         }
+        if let heap, heap.size >= textures * slot.size { return }
         let descriptor = MTLHeapDescriptor()
         descriptor.size = textures * slot.size
         descriptor.storageMode = .shared
