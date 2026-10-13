@@ -89,17 +89,17 @@ final class PhotoModel {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 let (image, metadata) = try await Task.detached(priority: .userInitiated) {
-                    (try RGBImage(contentsOf: url), PhotoMetadata(contentsOf: url))
+                    (try RGBImage.decode(contentsOf: url), PhotoMetadata(contentsOf: url))
                 }.value
                 // The engine opens the photo once it's done rendering the last one: stop that.
                 renderTask?.cancel()
                 isRendering = false
                 isRenderingFullResolution = false
-                let preview = await engine.open(image)
+                let opened = try await engine.open(image)
                 self.metadata = metadata
-                photo = Photo(name: url.lastPathComponent, width: image.width, height: image.height,
-                              previewWidth: preview.width, previewHeight: preview.height)
-                note("Opened \(url.lastPathComponent) (\(image.width) × \(image.height))")
+                photo = Photo(name: url.lastPathComponent, width: opened.width, height: opened.height,
+                              previewWidth: opened.previewWidth, previewHeight: opened.previewHeight)
+                note("Opened \(url.lastPathComponent) (\(opened.width) × \(opened.height))")
             } catch {
                 fail("Could not open \(url.lastPathComponent)", error)
             }

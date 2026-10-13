@@ -2,6 +2,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
 import ImageIO
+import Metal
 import UniformTypeIdentifiers
 
 /// An RGB image as 32-bit floats, interleaved and row-major (NumPy's `height × width × 3`).
@@ -27,10 +28,15 @@ public struct RGBImage: Sendable {
     }
 
     /// Decodes any file Core Image reads, upright and colour-managed into ``workingColorSpace``.
-    /// Camera RAW files are developed linearly, like Spektrafilm's RAW loader (rawpy with gamma 1
-    /// and no auto-brightening): white balance as shot, and no tone curve, shadow bias, baseline
-    /// exposure or gamut mapping.
     public init(contentsOf url: URL) throws {
+        self.init(rendering: try Self.decode(contentsOf: url))
+    }
+
+    /// Any file Core Image reads, upright, as Core Image's image of it: decoded as it's rendered
+    /// (``Engine/open(_:)`` renders it straight onto the GPU). Camera RAW files are developed
+    /// linearly, like Spektrafilm's RAW loader (rawpy with gamma 1 and no auto-brightening): white
+    /// balance as shot, and no tone curve, shadow bias, baseline exposure or gamut mapping.
+    public static func decode(contentsOf url: URL) throws -> CIImage {
         let image: CIImage?
         // CIRAWFilter opens other images too, so the file's type decides.
         let type = try url.resourceValues(forKeys: [.contentTypeKey]).contentType
@@ -46,13 +52,13 @@ public struct RGBImage: Sendable {
         } else if type?.conforms(to: .tiff) == true, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                   let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
                   (properties[kCGImagePropertyDepth] as? Int ?? 8) > 8 {
-            image = Self.plainImage(from: source, properties: properties)
+            image = plainImage(from: source, properties: properties)
         } else {
             image = CIImage(contentsOf: url, options: [.applyOrientationProperty: true])
         }
         // A RAW file Core Image can't decode comes back with an empty extent.
         guard let image, !image.extent.isEmpty else { throw DecodeError(url: url) }
-        self.init(rendering: image)
+        return image
     }
 
     /// The image ImageIO decodes, handed to Core Image as plain memory, upright. For TIFFs over
@@ -91,25 +97,22 @@ public struct RGBImage: Sendable {
         self.init(width: width, height: height, pixels: rgb)
     }
 
-    /// A copy no larger than `maxPixels` on its long side, for the preview. Python's
-    /// `resize_for_preview` resizes bilinearly after an anti-aliasing blur; Core Image's Lanczos
-    /// does both in one.
-    public func resized(maxPixels: Int) -> RGBImage {
-        guard max(width, height) > maxPixels else { return self }
+    /// The pixels as Core Image's image, in ``workingColorSpace``.
+    var ciImage: CIImage {
         var rgba = [Float](repeating: 1, count: width * height * 4)
         for pixel in 0..<(width * height) {
             rgba[pixel * 4] = pixels[pixel * 3]
             rgba[pixel * 4 + 1] = pixels[pixel * 3 + 1]
             rgba[pixel * 4 + 2] = pixels[pixel * 3 + 2]
         }
-        let image = CIImage(bitmapData: Data(bytes: rgba, count: rgba.count * 4), bytesPerRow: width * 16,
-                            size: CGSize(width: width, height: height), format: .RGBAf,
-                            colorSpace: Self.workingColorSpace)
-        return RGBImage(rendering: Self.scaledDown(image, maxPixels: maxPixels))
+        return CIImage(bitmapData: Data(bytes: rgba, count: rgba.count * 4), bytesPerRow: width * 16,
+                       size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: Self.workingColorSpace)
     }
 
-    /// `image` scaled down (Lanczos) to at most `maxPixels` on the long side. The edges are
-    /// extended before scaling so the border pixels keep full coverage.
+    /// `image` scaled down (Lanczos) to at most `maxPixels` on the long side, for the preview and the
+    /// screen. Python's `resize_for_preview` resizes bilinearly after an anti-aliasing blur;
+    /// Lanczos does both in one. The edges are extended before scaling so the border pixels keep
+    /// full coverage.
     static func scaledDown(_ image: CIImage, maxPixels: Int) -> CIImage {
         let (width, height) = (image.extent.width, image.extent.height)
         let scale = Double(maxPixels) / Double(max(width, height))
@@ -157,10 +160,12 @@ public struct RGBImage: Sendable {
         guard CGImageDestinationFinalize(destination) else { throw EncodeError(url: url) }
     }
 
-    // Full-float working format: Core Image's default half floats would cost precision.
-    // The system default Metal device, the one ``GPU`` renders on.
-    static func makeContext() -> CIContext {
-        CIContext(options: [.workingFormat: CIFormat.RGBAf, .cacheIntermediates: false])
+    // Full-float working format: Core Image's default half floats would cost precision. On
+    // `commandQueue` (the engine's, so its work and the kernels' run in order), or on the system
+    // default Metal device, the one ``GPU`` renders on.
+    static func makeContext(commandQueue: (any MTLCommandQueue)? = nil) -> CIContext {
+        let options: [CIContextOption: Any] = [.workingFormat: CIFormat.RGBAf, .cacheIntermediates: false]
+        return commandQueue.map { CIContext(mtlCommandQueue: $0, options: options) } ?? CIContext(options: options)
     }
 }
 

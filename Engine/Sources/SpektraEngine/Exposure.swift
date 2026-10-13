@@ -1,6 +1,7 @@
 import Accelerate
 import Dispatch
 import Foundation
+import Metal
 
 /// Spektrafilm's centre-weighted `measure_autoexposure_ev` on `ResizingService.small_preview`:
 /// the exposure in stops that brings the Gaussian-weighted (σ = 0.2 of the long edge) mean
@@ -9,6 +10,33 @@ import Foundation
 /// Runs on the CPU in f64: it reads only the preview's pixels, and the preview has to be
 /// scikit-image's `rescale(order=0)` exactly (see ``smallPreview(of:maxSize:)``).
 public func autoExposureEV(of image: RGBImage, colourSpace: Tables.ColourSpace, cctfDecoding: Bool) -> Double {
+    image.pixels.withUnsafeBufferPointer { pixels in
+        autoExposureEV(of: Pixels(base: pixels.baseAddress!, width: image.width, height: image.height, components: 3,
+                                  rowLength: image.width * 3),
+                       colourSpace: colourSpace, cctfDecoding: cctfDecoding)
+    }
+}
+
+/// ``autoExposureEV(of:colourSpace:cctfDecoding:)-(RGBImage,_,_)`` of a texture made by
+/// ``GPU/makeReadableTexture(width:height:)``, read in place.
+func autoExposureEV(of texture: any MTLTexture, colourSpace: Tables.ColourSpace, cctfDecoding: Bool) -> Double {
+    let base = texture.buffer!.contents().assumingMemoryBound(to: Float.self)
+    return autoExposureEV(of: Pixels(base: base, width: texture.width, height: texture.height, components: 4,
+                                     rowLength: texture.bufferBytesPerRow / 4),
+                          colourSpace: colourSpace, cctfDecoding: cctfDecoding)
+}
+
+/// An image's floats where they are: RGB first in each pixel's `components`, rows `rowLength`
+/// floats apart.
+struct Pixels {
+    let base: UnsafePointer<Float>
+    let width: Int
+    let height: Int
+    let components: Int
+    let rowLength: Int
+}
+
+private func autoExposureEV(of image: Pixels, colourSpace: Tables.ColourSpace, cctfDecoding: Bool) -> Double {
     let (preview, width, height) = smallPreview(of: image)
     // Y of colour.RGB_to_XYZ without chromatic adaptation.
     let yRow = colourSpace.rgbToXYZ[1]
@@ -38,10 +66,15 @@ public func autoExposureEV(of image: RGBImage, colourSpace: Tables.ColourSpace, 
 /// `small_preview` calls it, in f64: a Gaussian anti-alias with σ = (factor − 1)/2 per axis
 /// (scipy `gaussian_filter`, truncate 4, `mirror` edges), then nearest-neighbour samples at
 /// `floor((o + 0.5)·n/m)`. Only the sampled pixels are filtered. Images within `maxSize` are
-/// returned unchanged.
-func smallPreview(of image: RGBImage, maxSize: Int = 256) -> (pixels: [Double], width: Int, height: Int) {
-    let (width, height) = (image.width, image.height)
-    guard max(width, height) > maxSize else { return (image.pixels.map(Double.init), width, height) }
+/// returned unchanged. The result is RGB, row-major.
+func smallPreview(of image: Pixels, maxSize: Int = 256) -> (pixels: [Double], width: Int, height: Int) {
+    let (width, height, components) = (image.width, image.height, image.components)
+    guard max(width, height) > maxSize else {
+        let rgb = (0..<(width * height)).flatMap { pixel in
+            (0..<3).map { Double(image.base[pixel / width * image.rowLength + pixel % width * components + $0]) }
+        }
+        return (rgb, width, height)
+    }
     let scale = Double(maxSize) / Double(max(width, height))
     let outHeight = max(Int((scale * Double(height)).rounded(.toNearestOrEven)), 1)
     let outWidth = max(Int((scale * Double(width)).rounded(.toNearestOrEven)), 1)
@@ -62,21 +95,19 @@ func smallPreview(of image: RGBImage, maxSize: Int = 256) -> (pixels: [Double], 
     // Vertical pass on the sampled rows (all columns), then the horizontal pass on the sampled
     // columns: scipy filters axis 0 before axis 1.
     // vDSP so the bulk of the work (the full-width rows) stays fast in Debug builds too.
-    let rowLength = width * 3
+    let rowLength = width * components
     var vertical = [Double](repeating: 0, count: outHeight * rowLength)
     vertical.withUnsafeMutableBufferPointer { vertical in
-        image.pixels.withUnsafeBufferPointer { pixels in
-            // Each iteration writes only its own output row.
-            nonisolated(unsafe) let (vertical, pixels) = (vertical, pixels)
-            DispatchQueue.concurrentPerform(iterations: outHeight) { o in
-                var row = [Double](repeating: 0, count: rowLength)
-                let destination = vertical.baseAddress! + o * rowLength
-                for (k, weight) in rows.weights.enumerated() {
-                    let source = pixels.baseAddress! + mirror(rows.samples[o] + k - rows.radius, height) * rowLength
-                    vDSP_vspdp(source, 1, &row, 1, vDSP_Length(rowLength))
-                    var weight = weight
-                    vDSP_vsmaD(row, 1, &weight, destination, 1, destination, 1, vDSP_Length(rowLength))
-                }
+        // Each iteration writes only its own output row, and only reads the image.
+        nonisolated(unsafe) let (vertical, image) = (vertical, image)
+        DispatchQueue.concurrentPerform(iterations: outHeight) { o in
+            var row = [Double](repeating: 0, count: rowLength)
+            let destination = vertical.baseAddress! + o * rowLength
+            for (k, weight) in rows.weights.enumerated() {
+                let source = image.base + mirror(rows.samples[o] + k - rows.radius, height) * image.rowLength
+                vDSP_vspdp(source, 1, &row, 1, vDSP_Length(rowLength))
+                var weight = weight
+                vDSP_vsmaD(row, 1, &weight, destination, 1, destination, 1, vDSP_Length(rowLength))
             }
         }
     }
@@ -84,7 +115,7 @@ func smallPreview(of image: RGBImage, maxSize: Int = 256) -> (pixels: [Double], 
     for o in 0..<outHeight {
         for p in 0..<outWidth {
             for (k, weight) in columns.weights.enumerated() {
-                let source = (o * width + mirror(columns.samples[p] + k - columns.radius, width)) * 3
+                let source = o * rowLength + mirror(columns.samples[p] + k - columns.radius, width) * components
                 let destination = (o * outWidth + p) * 3
                 for c in 0..<3 {
                     preview[destination + c] += weight * vertical[source + c]
