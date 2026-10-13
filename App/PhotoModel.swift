@@ -14,13 +14,18 @@ final class PhotoModel {
         let message: String
     }
 
-    /// The opened photo at full resolution, in the engine's working space.
-    private(set) var source: RGBImage?
-    /// `source` down-sized: every change re-renders it at once, before the full render.
-    private(set) var preview: RGBImage? {
+    /// The open photo (on the engine's GPU): its file name, size and preview size.
+    struct Photo {
+        let name: String
+        let width: Int
+        let height: Int
+        let previewWidth: Int
+        let previewHeight: Int
+    }
+    /// A new photo renders at once.
+    private(set) var photo: Photo? {
         didSet { scheduleRender() }
     }
-    private(set) var sourceName = ""
     /// The photo's EXIF, GPS and IPTC records, for saved renderings.
     @ObservationIgnored private var metadata: PhotoMetadata?
     /// What the sidebar and the Film | Negative switch set; every change re-renders the preview.
@@ -75,6 +80,7 @@ final class PhotoModel {
     // MARK: Opening
 
     func open(_ url: URL) {
+        guard let engine else { return }
         // Files from the Open panel are security-scoped; dropped files are already accessible.
         let scoped = url.startAccessingSecurityScopedResource()
         isLoading = true
@@ -82,16 +88,18 @@ final class PhotoModel {
         Task {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
-                let engine = engine
-                let (image, preview, metadata) = try await Task.detached(priority: .userInitiated) {
-                    let image = try RGBImage(contentsOf: url)
-                    return (image, engine?.preview(of: image), PhotoMetadata(contentsOf: url))
+                let (image, metadata) = try await Task.detached(priority: .userInitiated) {
+                    (try RGBImage(contentsOf: url), PhotoMetadata(contentsOf: url))
                 }.value
-                sourceName = url.lastPathComponent
-                source = image
+                // The engine opens the photo once it's done rendering the last one: stop that.
+                renderTask?.cancel()
+                isRendering = false
+                isRenderingFullResolution = false
+                let preview = await engine.open(image)
                 self.metadata = metadata
-                self.preview = preview
-                note("Opened \(sourceName) (\(image.width) × \(image.height))")
+                photo = Photo(name: url.lastPathComponent, width: image.width, height: image.height,
+                              previewWidth: preview.width, previewHeight: preview.height)
+                note("Opened \(url.lastPathComponent) (\(image.width) × \(image.height))")
             } catch {
                 fail("Could not open \(url.lastPathComponent)", error)
             }
@@ -123,7 +131,7 @@ final class PhotoModel {
     private func render() {
         renderTask?.cancel()
         isRenderingFullResolution = false
-        guard let source, let preview, let engine else {
+        guard photo != nil, let engine else {
             displayImage = nil
             isRendering = false
             return
@@ -132,12 +140,12 @@ final class PhotoModel {
         let controls = controls
         renderTask = Task {
             do {
-                try await show(preview, controls: controls, mode: .preview, engine: engine)
+                try await show(controls: controls, mode: .preview, engine: engine)
                 isRendering = false
                 try await Task.sleep(for: Self.fullRenderDelay)
                 isRendering = true
                 isRenderingFullResolution = true
-                try await show(source, controls: controls, mode: .full, engine: engine)
+                try await show(controls: controls, mode: .full, engine: engine)
             } catch {
                 guard !Task.isCancelled else { return }
                 fail("Could not render", error)
@@ -147,10 +155,10 @@ final class PhotoModel {
         }
     }
 
-    /// Renders `image` and puts it on screen, unless a newer change has made it stale.
-    private func show(_ image: RGBImage, controls: Controls, mode: RenderMode, engine: Engine) async throws {
+    /// Renders the photo and puts it on screen, unless a newer change has made it stale.
+    private func show(controls: Controls, mode: RenderMode, engine: Engine) async throws {
         let start = ContinuousClock.now
-        let output = try await engine.render(image, controls: controls, mode: mode)
+        let output = try await engine.render(controls: controls, mode: mode)
         let display = await Task.detached(priority: .userInitiated) {
             output.displayImage(in: Engine.outputColorSpace)
         }.value
@@ -158,21 +166,21 @@ final class PhotoModel {
         displayImage = display
         showsFullResolution = mode == .full
         let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
-        note("Rendered \(mode == .full ? "full resolution" : "preview") (\(image.width) × \(image.height)) in \(elapsed)")
+        note("Rendered \(mode == .full ? "full resolution" : "preview") (\(output.width) × \(output.height)) in \(elapsed)")
     }
 
     // MARK: Saving and cancelling
 
-    var canSave: Bool { source != nil && engine != nil && savePhase == nil }
+    var canSave: Bool { photo != nil && engine != nil && savePhase == nil }
     var canCancel: Bool { savePhase != nil }
 
     /// Renders the photo at full resolution, sRGB-encoded, and writes it where the Save panel says:
     /// 16-bit TIFF or PNG, or JPEG, by the name's extension.
     func save() {
-        guard let source, let engine else { return }
+        guard let photo, let engine else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.jpeg, .tiff, .png]
-        panel.nameFieldStringValue = (sourceName as NSString).deletingPathExtension + ".jpg"
+        panel.nameFieldStringValue = (photo.name as NSString).deletingPathExtension + ".jpg"
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let type = UTType(filenameExtension: url.pathExtension) ?? .jpeg
@@ -182,7 +190,7 @@ final class PhotoModel {
             defer { savePhase = nil; saveTask = nil }
             let start = ContinuousClock.now
             do {
-                let output = try await engine.render(source, controls: controls, mode: .export)
+                let output = try await engine.render(controls: controls, mode: .export)
                 try Task.checkCancellation()
                 savePhase = "Writing \(url.lastPathComponent)…"
                 try await Task.detached(priority: .userInitiated) {

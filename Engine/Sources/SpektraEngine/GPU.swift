@@ -5,10 +5,13 @@ import Metal
 ///
 /// Images live on the GPU as `rgba32Float` textures (RGB in `.xyz`, alpha unused). On Apple
 /// silicon memory is unified, so textures use shared storage and upload/download are plain copies.
-public final class GPU: Sendable {
+/// Holds the memory set aside for renders, so it isn't Sendable: the Engine actor owns one.
+public final class GPU {
     public let device: any MTLDevice
     public let queue: any MTLCommandQueue
     private let pipelines: [String: any MTLComputePipelineState]
+    /// Memory set aside by ``reserveMemory(width:height:)``, where intermediates are made.
+    private var heap: (any MTLHeap)?
 
     public enum SetupError: Error {
         case noDevice
@@ -41,16 +44,48 @@ public final class GPU: Sendable {
         self.pipelines = pipelines
     }
 
-    /// An empty image-sized texture the kernels can read and write.
+    /// An image-sized texture the kernels can read and write, from the reserved memory while it
+    /// has room. Its contents are undefined until written: every kernel writes its whole output.
     public func makeTexture(width: Int, height: Int) -> any MTLTexture {
+        let descriptor = Self.textureDescriptor(width: width, height: height)
+        return heap?.makeTexture(descriptor: descriptor) ?? device.makeTexture(descriptor: descriptor)!
+    }
+
+    /// How many full-size textures ``reserveMemory(width:height:)`` sets aside: what the whole
+    /// chain holds at once with auto-exposure, halation, grain and glare on (measured; fewer and
+    /// some intermediates are allocated fresh, more and the memory goes unused).
+    static let reservedTextures = 9
+
+    /// Sets aside GPU memory for the intermediates of renders up to `width × height`
+    /// (``reservedTextures`` textures: 3.5 GB at 24 MP), replacing what was set aside before.
+    /// A fresh texture costs more than the kernel writing it — the system clears its pages on
+    /// first use, 14 ms for 24 MP — and a render makes dozens; from this memory (an automatic
+    /// heap) they reuse what earlier ones released. Textures that don't fit are allocated fresh.
+    public func reserveMemory(width: Int, height: Int) {
+        let slot = device.heapTextureSizeAndAlign(descriptor: Self.textureDescriptor(width: width, height: height))
+        let descriptor = MTLHeapDescriptor()
+        descriptor.size = Self.reservedTextures * slot.size
+        descriptor.storageMode = .shared
+        descriptor.type = .automatic
+        descriptor.hazardTrackingMode = .tracked
+        heap = device.makeHeap(descriptor: descriptor)
+    }
+
+    /// GPU memory in use: what's allocated, less what's reserved and free.
+    var allocatedSize: Int {
+        device.currentAllocatedSize - (heap.map { $0.size - $0.usedSize } ?? 0)
+    }
+
+    private static func textureDescriptor(width: Int, height: Int) -> MTLTextureDescriptor {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba32Float, width: width, height: height, mipmapped: false)
         descriptor.usage = [.shaderRead, .shaderWrite]
         descriptor.storageMode = .shared
-        return device.makeTexture(descriptor: descriptor)!
+        return descriptor
     }
 
-    /// Uploads interleaved RGB floats (row-major, `height × width × 3`, NumPy's layout).
+    /// Uploads interleaved RGB floats (row-major, `height × width × 3`, NumPy's layout). Uploads
+    /// outlive renders (the open photo, tables), so they don't take reserved memory.
     public func upload(rgb: [Float], width: Int, height: Int) -> any MTLTexture {
         precondition(rgb.count == width * height * 3)
         var rgba = [Float](repeating: 0, count: width * height * 4)
@@ -59,7 +94,7 @@ public final class GPU: Sendable {
             rgba[pixel * 4 + 1] = rgb[pixel * 3 + 1]
             rgba[pixel * 4 + 2] = rgb[pixel * 3 + 2]
         }
-        let texture = makeTexture(width: width, height: height)
+        let texture = device.makeTexture(descriptor: Self.textureDescriptor(width: width, height: height))!
         texture.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0,
                         withBytes: rgba, bytesPerRow: width * 16)
         return texture
@@ -108,7 +143,7 @@ public final class GPU: Sendable {
     /// (typically the output texture, complete by then). Throws `CancellationError` if the
     /// task is cancelled meanwhile.
     public func run<Result>(_ body: (Encoder) -> Result) throws -> Result {
-        let encoder = Encoder(device: device, queue: queue)
+        let encoder = Encoder(gpu: self)
         let result = body(encoder)
         try encoder.finish()
         return result
@@ -119,51 +154,50 @@ public final class GPU: Sendable {
 /// commands use alive until it completes, which for the whole chain on a 24 MP image is tens of
 /// gigabytes of intermediates. So once the commands encoded so far have allocated ``budget``,
 /// they are committed and waited for, and encoding continues in a new command buffer: the
-/// intermediates only that work used are freed. (Metal heaps with aliasing would reuse memory
-/// within one command buffer, but need every texture's last use marked by hand.)
+/// intermediates only that work used are freed, back to the reserved memory
+/// (``GPU/reserveMemory(width:height:)``) for the textures made after. (A heap with aliasing would
+/// reuse memory within one command buffer, but needs every texture's last use marked by hand.)
 public final class Encoder {
     /// Allocation that triggers a new command buffer: under one 24 MP texture (384 MB), so dead
     /// intermediates don't pile up; waiting between command buffers costs little next to kernels
     /// that run for milliseconds at that size.
     static let budget = 256 << 20
 
-    private let device: any MTLDevice
-    private let queue: any MTLCommandQueue
+    private let gpu: GPU
     private var commandBuffer: any MTLCommandBuffer
     /// The current command buffer's encoder, for kernels encoded outside ``GPU``.
     public private(set) var compute: any MTLComputeCommandEncoder
     private var allocatedAtStart: Int
     private var error: (any Error)?
-    /// The most GPU memory allocated at any kernel encoded so far.
+    /// The most GPU memory in use at any kernel encoded so far.
     public private(set) var peakAllocatedSize: Int
     /// Set once the task is cancelled: from then on kernels aren't encoded, so the work stops at
     /// the next commit, and ``finish()`` throws.
     private(set) var isCancelled = false
 
-    init(device: any MTLDevice, queue: any MTLCommandQueue) {
-        self.device = device
-        self.queue = queue
-        commandBuffer = queue.makeCommandBuffer()!
+    init(gpu: GPU) {
+        self.gpu = gpu
+        commandBuffer = gpu.queue.makeCommandBuffer()!
         compute = commandBuffer.makeComputeCommandEncoder()!
-        allocatedAtStart = device.currentAllocatedSize
+        allocatedAtStart = gpu.allocatedSize
         peakAllocatedSize = allocatedAtStart
     }
 
     func flushIfOverBudget() {
         isCancelled = isCancelled || Task.isCancelled
-        let allocated = device.currentAllocatedSize
+        let allocated = gpu.allocatedSize
         peakAllocatedSize = max(peakAllocatedSize, allocated)
         guard allocated - allocatedAtStart > Self.budget else { return }
         complete()
-        commandBuffer = queue.makeCommandBuffer()!
+        commandBuffer = gpu.queue.makeCommandBuffer()!
         compute = commandBuffer.makeComputeCommandEncoder()!
-        allocatedAtStart = device.currentAllocatedSize
+        allocatedAtStart = gpu.allocatedSize
     }
 
     /// Completes the last command buffer; throws the first error any of them reported, or
     /// `CancellationError` if the task was cancelled.
     func finish() throws {
-        peakAllocatedSize = max(peakAllocatedSize, device.currentAllocatedSize)
+        peakAllocatedSize = max(peakAllocatedSize, gpu.allocatedSize)
         complete()
         if let error { throw error }
         if isCancelled { throw CancellationError() }

@@ -17,7 +17,7 @@ struct ContentView: View {
             // full-height floating sidebar treatment.
             ImageCanvas()
                 .safeAreaInset(edge: .bottom) { StatusBar() }
-                .navigationTitle(model.sourceName.isEmpty ? "SpektraMac" : model.sourceName)
+                .navigationTitle(model.photo?.name ?? "SpektraMac")
                 .toolbar {
                     ToolbarItemGroup(placement: .principal) {
                         Picker("Show", selection: $model.controls.scanFilm) {
@@ -67,9 +67,9 @@ private struct SettingsSidebar: View {
         @Bindable var model = model
         Form {
             Section("Photo") {
-                if let source = model.source {
-                    LabeledContent("File", value: model.sourceName)
-                    LabeledContent("Size", value: "\(source.width) × \(source.height)")
+                if let photo = model.photo {
+                    LabeledContent("File", value: photo.name)
+                    LabeledContent("Size", value: "\(photo.width) × \(photo.height)")
                 } else {
                     LabeledContent("File") { Text("None").foregroundStyle(.secondary) }
                 }
@@ -199,11 +199,11 @@ private struct StatusBar: View {
             } else if model.isRendering {
                 ProgressView().controlSize(.small)
                 Text(model.isRenderingFullResolution ? "Rendering full resolution…" : "Rendering…")
-            } else if let source = model.source, let preview = model.preview {
+            } else if let photo = model.photo {
                 if model.showsFullResolution {
-                    Label("Full resolution, \(source.width) × \(source.height)", systemImage: "photo")
+                    Label("Full resolution, \(photo.width) × \(photo.height)", systemImage: "photo")
                 } else {
-                    Label("Preview, \(preview.width) × \(preview.height)", systemImage: "eye")
+                    Label("Preview, \(photo.previewWidth) × \(photo.previewHeight)", systemImage: "eye")
                 }
             } else {
                 Label("No photo", systemImage: "photo")

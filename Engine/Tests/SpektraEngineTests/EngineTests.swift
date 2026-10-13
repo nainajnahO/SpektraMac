@@ -31,7 +31,9 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
                               0.6274413720579783, 0.0690276171470781, 0.016364235071680725]
     #expect(Difference(image.pixels, expected).maxAbsolute < 2e-4)
 
-    let rendered = try await Engine().render(image, controls: Controls(), mode: .full)
+    let engine = try Engine()
+    _ = await engine.open(image)
+    let rendered = try await engine.render(controls: Controls(), mode: .full)
     #expect(rendered.width == 2 && rendered.height == 1)
 
     let display = try #require(rendered.displayImage(in: Engine.outputColorSpace))
@@ -50,7 +52,9 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
         #expect(rgb.allSatisfy { abs($0 / raw - 1) < 0.005 })
     }
 
-    let rendered = try await Engine().render(image, controls: Controls(), mode: .full)
+    let engine = try Engine()
+    _ = await engine.open(image)
+    let rendered = try await engine.render(controls: Controls(), mode: .full)
     #expect(rendered.width == 512 && rendered.height == 256)
     let finite = rendered.pixels.allSatisfy { $0.isFinite }
     #expect(finite)
@@ -63,13 +67,14 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
     parameters.applyPreviewMode()
     #expect(parameters == (try GoldenCase("preview-kodak_portra_400-kodak_portra_endura").params))
 
+    let image = RGBImage(width: 3000, height: 2000, pixels: [Float](repeating: 0.18, count: 3000 * 2000 * 3))
+    #expect(image.resized(maxPixels: 1600).pixels.allSatisfy { abs($0 - 0.18) < 1e-5 })
     let engine = try Engine()
-    let preview = engine.preview(of: RGBImage(width: 3000, height: 2000, pixels: [Float](repeating: 0.18, count: 3000 * 2000 * 3)))
+    let preview = await engine.open(image)
     #expect(preview.width == 1600 && preview.height == 1067)
-    #expect(preview.pixels.allSatisfy { abs($0 - 0.18) < 1e-5 })
     var controls = Controls()
     controls.scanFilm = true
-    let rendered = try await engine.render(preview, controls: controls, mode: .preview)
+    let rendered = try await engine.render(controls: controls, mode: .preview)
     #expect(rendered.width == 1600 && rendered.height == 1067)
 }
 
@@ -121,6 +126,28 @@ func controlsDigestLikePython(caseName: String) throws {
     let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
     let results = try [cached, fresh].map { simulation in gpu.download(try gpu.run { simulation.encode(image, on: $0) }) }
     #expect(results[0] == results[1])
+}
+
+/// A render from reserved memory, whose textures hold what the last render left there, is
+/// exactly a render from fresh (zeroed) memory: every kernel writes its whole output. Grain and
+/// glare on, so their kernels run too.
+@Test(arguments: goldenCases)
+func reservedMemoryRendersMatchFresh(caseName: String) throws {
+    let golden = try GoldenCase(caseName)
+    var parameters = golden.params
+    parameters.filmRender.grain.active = true
+    parameters.printRender.glare.active = true
+    let (film, print, tables) = (try Profile.load(golden.film), try golden.printProfile(), try Tables.load())
+    let image = try SpektraEngineTests.golden(caseName, "rgb_in").image
+    func render(on gpu: GPU) throws -> [UInt32] {
+        let simulation = try Simulation(parameters: parameters, film: film, print: print, gpu: gpu, tables: tables)
+        return gpu.download(try gpu.run { simulation.encode(image, on: $0) }).map(\.bitPattern)
+    }
+    let fresh = try render(on: GPU())
+    let gpu = try GPU()
+    gpu.reserveMemory(width: image.width, height: image.height)
+    _ = try render(on: gpu)
+    #expect(try render(on: gpu) == fresh)
 }
 
 /// Exported files carry 16 bits (TIFF, PNG) or 8 (JPEG), the sRGB profile and the photo's
@@ -197,8 +224,8 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
 /// A cancelled render stops encoding kernels and throws.
 @Test func renderStopsWhenCancelled() async throws {
     let engine = try Engine()
-    let image = RGBImage(width: 2000, height: 2000, pixels: [Float](repeating: 0.18, count: 2000 * 2000 * 3))
-    let render = Task { try await engine.render(image, controls: Controls(), mode: .full) }
+    _ = await engine.open(RGBImage(width: 2000, height: 2000, pixels: [Float](repeating: 0.18, count: 2000 * 2000 * 3)))
+    let render = Task { try await engine.render(controls: Controls(), mode: .full) }
     render.cancel()
     await #expect(throws: CancellationError.self) { try await render.value }
 }
