@@ -162,55 +162,59 @@ private struct ImageCanvas: View {
     var body: some View {
         Group {
             if let image = model.displayImage {
-                let fitted = fittedSize(for: image)
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: fitted.width * zoom, height: fitted.height * zoom)
-                    .offset(offset)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                    .gesture(DragGesture()
-                        .onChanged { drag in
-                            let start = dragStart ?? offset
-                            dragStart = start
-                            offset = clamped(CGSize(width: start.width + drag.translation.width,
-                                                    height: start.height + drag.translation.height))
-                        }
-                        .onEnded { _ in dragStart = nil })
-                    .simultaneousGesture(MagnifyGesture()
-                        .onChanged { pinch in
-                            zoom(by: pinch.magnification / pinched, at: pinch.startLocation)
-                            pinched = pinch.magnification
-                        }
-                        .onEnded { _ in pinched = 1 })
-                    .onTapGesture(count: 2) { zoom = 1; offset = .zero }
-                    .pointerStyle(zoom > 1 ? (dragStart == nil ? .grabIdle : .grabActive) : nil)
-                    .onContinuousHover { phase in
-                        switch phase {
-                        case .active(let location): pointer = location
-                        case .ended: pointer = nil
-                        }
+                // The reader takes the canvas's size and passes nothing back: a frame sized by the
+                // photo would make that the window's minimum, which the split view then chases
+                // until AppKit gives up (an exception when a photo opens).
+                GeometryReader { geometry in
+                    let fitted = fittedSize(for: image, in: geometry.size)
+                    Image(decorative: image, scale: 1)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: fitted.width * zoom, height: fitted.height * zoom)
+                        .position(x: geometry.size.width / 2 + offset.width, y: geometry.size.height / 2 + offset.height)
+                }
+                .contentShape(Rectangle())
+                .gesture(DragGesture()
+                    .onChanged { drag in
+                        let start = dragStart ?? offset
+                        dragStart = start
+                        offset = clamped(CGSize(width: start.width + drag.translation.width,
+                                                height: start.height + drag.translation.height))
                     }
-                    .onAppear {
-                        // SwiftUI has no scroll-wheel events for a plain view, so AppKit's: over the
-                        // photo, scrolling zooms instead of scrolling. A trackpad's momentum after
-                        // the fingers lift is left out, so the zoom stops with them.
-                        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
-                            guard let pointer else { return event }
-                            if event.momentumPhase.isEmpty {
-                                let step = event.hasPreciseScrollingDeltas ? 0.01 : 0.15  // points, or wheel lines
-                                zoom(by: exp(event.scrollingDeltaY * step), at: pointer)
-                            }
-                            return nil
-                        }
+                    .onEnded { _ in dragStart = nil })
+                .simultaneousGesture(MagnifyGesture()
+                    .onChanged { pinch in
+                        zoom(by: pinch.magnification / pinched, at: pinch.startLocation)
+                        pinched = pinch.magnification
                     }
-                    .onDisappear {
-                        if let scrollMonitor {
-                            NSEvent.removeMonitor(scrollMonitor)
-                        }
-                        scrollMonitor = nil
+                    .onEnded { _ in pinched = 1 })
+                .onTapGesture(count: 2) { zoom = 1; offset = .zero }
+                .pointerStyle(zoom > 1 ? (dragStart == nil ? .grabIdle : .grabActive) : nil)
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let location): pointer = location
+                    case .ended: pointer = nil
                     }
+                }
+                .onAppear {
+                    // SwiftUI has no scroll-wheel events for a plain view, so AppKit's: over the
+                    // photo, scrolling zooms instead of scrolling. A trackpad's momentum after
+                    // the fingers lift is left out, so the zoom stops with them.
+                    scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+                        guard let pointer else { return event }
+                        if event.momentumPhase.isEmpty {
+                            let step = event.hasPreciseScrollingDeltas ? 0.01 : 0.15  // points, or wheel lines
+                            zoom(by: exp(event.scrollingDeltaY * step), at: pointer)
+                        }
+                        return nil
+                    }
+                }
+                .onDisappear {
+                    if let scrollMonitor {
+                        NSEvent.removeMonitor(scrollMonitor)
+                    }
+                    scrollMonitor = nil
+                }
             } else {
                 // Outside the GeometryReader so it fills the canvas and centres itself.
                 ContentUnavailableView {
@@ -235,11 +239,11 @@ private struct ImageCanvas: View {
         }
     }
 
-    /// The image's size scaled to fit the canvas, with a margin.
-    private func fittedSize(for image: CGImage) -> CGSize {
+    /// The image's size scaled to fit `size`, with a margin.
+    private func fittedSize(for image: CGImage, in size: CGSize) -> CGSize {
         let inset: CGFloat = 12
-        let scale = max(0, min((canvasSize.width - 2 * inset) / CGFloat(image.width),
-                               (canvasSize.height - 2 * inset) / CGFloat(image.height)))
+        let scale = max(0, min((size.width - 2 * inset) / CGFloat(image.width),
+                               (size.height - 2 * inset) / CGFloat(image.height)))
         return CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
     }
 
@@ -247,7 +251,7 @@ private struct ImageCanvas: View {
     /// is: from all of the photo to 4 points per photo pixel.
     private func zoom(by factor: CGFloat, at anchor: CGPoint) {
         guard let image = model.displayImage, let photo = model.photo else { return }
-        let fitted = fittedSize(for: image)
+        let fitted = fittedSize(for: image, in: canvasSize)
         guard fitted.width > 0 else { return }
         let newZoom = min(max(zoom * factor, 1), max(1, 4 * CGFloat(photo.width) / fitted.width))
         let applied = newZoom / zoom
@@ -262,7 +266,7 @@ private struct ImageCanvas: View {
     /// centred where it's smaller.
     private func clamped(_ offset: CGSize) -> CGSize {
         guard let image = model.displayImage else { return .zero }
-        let fitted = fittedSize(for: image)
+        let fitted = fittedSize(for: image, in: canvasSize)
         let slack = CGSize(width: max(0, (fitted.width * zoom - canvasSize.width) / 2),
                            height: max(0, (fitted.height * zoom - canvasSize.height) / 2))
         return CGSize(width: min(max(offset.width, -slack.width), slack.width),
