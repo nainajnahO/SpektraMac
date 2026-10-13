@@ -17,6 +17,7 @@ default:
 
 func benchmark(width: Int, height: Int) throws {
     let gpu = try GPU()
+    gpu.reserveMemory(width: width, height: height)  // as the app does for an open photo
     let film = try Profile.load("kodak_portra_400")
     let paper = try Profile.load("kodak_portra_endura")
     var parameters = Parameters()
@@ -61,7 +62,7 @@ func benchmark(width: Int, height: Int) throws {
         lap("cmy_print → scanned RGB (81 bands)")
         _ = try gpu.run { simulation.encodeOutputCompression(scanned, on: $0) }
         lap("output gamut compression (cam16ucs)")
-        print("allocated on the GPU: \(gpu.device.currentAllocatedSize / 1_000_000) MB")
+        print("allocated on the GPU (incl. reserved): \(gpu.device.currentAllocatedSize / 1_000_000) MB")
     }
 
     // The app's path: the whole chain in one run.
@@ -71,5 +72,5 @@ func benchmark(width: Int, height: Int) throws {
         return simulation.encode(image, on: encoder)
     }
     lap("whole chain (rgb_in → rgb_out)")
-    print("peak allocated on the GPU: \(peak / 1_000_000) MB")
+    print("peak in use on the GPU: \(peak / 1_000_000) MB")
 }

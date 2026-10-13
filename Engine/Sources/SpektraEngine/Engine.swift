@@ -1,6 +1,7 @@
 import CoreGraphics
 import Dispatch
 import Foundation
+import Metal
 
 /// What the app's controls set (PLAN.md, Day 31). Everything else stays at Spektrafilm's defaults
 /// for the film and paper. A preset is these values as JSON.
@@ -37,10 +38,10 @@ public struct Controls: Codable, Sendable, Equatable {
 
 /// What a render is for.
 public enum RenderMode: Sendable {
-    /// Each change while editing: Spektrafilm's preview mode (no blurs or grain), on an image from
-    /// ``Engine/preview(of:)``. Linear, in ``Engine/outputColorSpace``.
+    /// Each change while editing: Spektrafilm's preview mode (no blurs or grain), on the open
+    /// photo's preview. Linear, in ``Engine/outputColorSpace``.
     case preview
-    /// The whole photo with every effect. Linear, in ``Engine/outputColorSpace``.
+    /// The whole open photo with every effect. Linear, in ``Engine/outputColorSpace``.
     case full
     /// As `full`, encoded for a file in ``Engine/exportColorSpace`` (Spektrafilm's default output).
     case export
@@ -63,6 +64,8 @@ public actor Engine {
     private let cache = SimulationCache()
     /// The last render's simulation, rebuilt when a render needs other parameters or profiles.
     private var simulation: Simulation?
+    /// The photo renders work on (``open(_:)``).
+    private var photo: Photo?
     /// The live preview's long side. Larger than Spektrafilm's `preview_max_size` (640), which is
     /// soft on a Retina display: about 0.1 s per change on an M1 Pro, preview mode and display.
     private nonisolated let previewMaxSize = 1600
@@ -72,6 +75,8 @@ public actor Engine {
     public static let outputColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
     /// The colour space of export renders: sRGB with its transfer function.
     public static let exportColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    /// The input colour space: RGBImage's working space, linear.
+    static let inputColorSpace = "ITU-R BT.2020"
 
     public init() throws {
         gpu = try GPU()
@@ -84,14 +89,37 @@ public actor Engine {
         papers = infos.filter { $0.stage == .printing }
     }
 
-    /// `image` down-sized for previewing.
-    public nonisolated func preview(of image: RGBImage) -> RGBImage {
-        image.resized(maxPixels: previewMaxSize)
+    /// A photo and its preview on the GPU, with the auto-exposure Spektrafilm measures on each.
+    /// Renders only read the textures.
+    private struct Photo {
+        let full: any MTLTexture
+        let fullEV: Double
+        let preview: any MTLTexture
+        let previewEV: Double
     }
 
-    /// The simulation of `image` as `controls` set it: the scanned print, or the developed film
-    /// itself. Throws `CancellationError` when the task is cancelled.
-    public func render(_ image: RGBImage, controls: Controls, mode: RenderMode) throws -> RGBImage {
+    /// Makes `image` the photo renders work on: uploads it and its preview (at most
+    /// ``previewMaxSize`` on the long side) once, measures their auto-exposure once, and sets
+    /// aside the GPU memory renders of its size need. Returns the preview's size.
+    public func open(_ image: RGBImage) -> (width: Int, height: Int) {
+        let preview = image.resized(maxPixels: previewMaxSize)
+        // Auto-exposure is measured the same way in every mode (input space, no CCTF decoding).
+        let space = tables.colourSpaces[Self.inputColorSpace]!
+        func upload(_ image: RGBImage) -> (any MTLTexture, Double) {
+            (gpu.upload(rgb: image.pixels, width: image.width, height: image.height),
+             autoExposureEV(of: image, colourSpace: space, cctfDecoding: false))
+        }
+        photo = nil  // frees the previous photo before reserving memory for this one
+        gpu.reserveMemory(width: image.width, height: image.height)
+        let (full, fullEV) = upload(image), (previewTexture, previewEV) = upload(preview)
+        photo = Photo(full: full, fullEV: fullEV, preview: previewTexture, previewEV: previewEV)
+        return (preview.width, preview.height)
+    }
+
+    /// The simulation of the open photo as `controls` set it: the scanned print, or the developed
+    /// film itself. Throws `CancellationError` when the task is cancelled.
+    public func render(controls: Controls, mode: RenderMode) throws -> RGBImage {
+        guard let photo else { preconditionFailure("Rendering before a photo is open") }
         let film = profiles[controls.film]!, print = profiles[controls.paper]!
         let parameters = Self.parameters(for: controls, film: film, print: print, database: neutralPrintFilters,
                                          mode: mode)
@@ -104,8 +132,9 @@ public actor Engine {
                                         cache: cache)
             self.simulation = simulation
         }
-        let output = try gpu.run { simulation.encode(image, on: $0) }
-        return RGBImage(width: image.width, height: image.height, pixels: gpu.download(output))
+        let (input, ev) = mode == .preview ? (photo.preview, photo.previewEV) : (photo.full, photo.fullEV)
+        let output = try gpu.run { simulation.encode(input, autoExposureEV: ev, on: $0) }
+        return RGBImage(width: output.width, height: output.height, pixels: gpu.download(output))
     }
 
     /// `controls` over Spektrafilm's defaults, in the app's colour spaces, digested as
@@ -113,7 +142,7 @@ public actor Engine {
     static func parameters(for controls: Controls, film: Profile, print: Profile,
                            database: [String: [String: [String: SIMD3<Double>]]], mode: RenderMode) -> Parameters {
         var parameters = Parameters()
-        parameters.io.inputColorSpace = "ITU-R BT.2020"  // RGBImage's working space, linear
+        parameters.io.inputColorSpace = inputColorSpace
         parameters.io.outputCctfEncoding = mode == .export  // the display is colour-managed: linear
         parameters.io.scanFilm = controls.scanFilm
         parameters.camera.autoExposure = controls.autoExposure
