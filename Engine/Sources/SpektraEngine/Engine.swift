@@ -91,13 +91,30 @@ public actor Engine {
         papers = infos.filter { $0.stage == .printing }
     }
 
-    /// A photo and its preview on the GPU, with the auto-exposure Spektrafilm measures on each.
-    /// Renders only read the textures.
+    /// The open photo on the GPU, at full size and as its preview.
     private struct Photo {
-        let full: any MTLTexture
-        let fullEV: Double
-        let preview: any MTLTexture
-        let previewEV: Double
+        var full: PhotoImage
+        var preview: PhotoImage
+    }
+
+    /// One image of the photo with the auto-exposure Spektrafilm measures on it, and what the
+    /// last render of it left to start from: the film's log exposure and the developed film.
+    /// Renders only read these textures.
+    private struct PhotoImage {
+        let texture: any MTLTexture
+        let autoExposureEV: Double
+        var exposure: Step?
+        var film: Step?
+    }
+
+    /// A step's result and what it was made from: the film and the parameters it reads.
+    private struct Step {
+        struct Key: Equatable {
+            let film: String
+            let parameters: Parameters
+        }
+        let key: Key
+        let texture: any MTLTexture
     }
 
     /// Makes `image` the photo renders work on: uploads it and its preview (at most
@@ -107,14 +124,13 @@ public actor Engine {
         let preview = image.resized(maxPixels: previewMaxSize)
         // Auto-exposure is measured the same way in every mode (input space, no CCTF decoding).
         let space = tables.colourSpaces[Self.inputColorSpace]!
-        func upload(_ image: RGBImage) -> (any MTLTexture, Double) {
-            (gpu.upload(rgb: image.pixels, width: image.width, height: image.height),
-             autoExposureEV(of: image, colourSpace: space, cctfDecoding: false))
+        func upload(_ image: RGBImage) -> PhotoImage {
+            PhotoImage(texture: gpu.upload(rgb: image.pixels, width: image.width, height: image.height),
+                       autoExposureEV: autoExposureEV(of: image, colourSpace: space, cctfDecoding: false))
         }
         photo = nil  // frees the previous photo before reserving memory for this one
         gpu.reserveMemory(width: image.width, height: image.height)
-        let (full, fullEV) = upload(image), (previewTexture, previewEV) = upload(preview)
-        photo = Photo(full: full, fullEV: fullEV, preview: previewTexture, previewEV: previewEV)
+        photo = Photo(full: upload(image), preview: upload(preview))
         return (preview.width, preview.height)
     }
 
@@ -146,8 +162,12 @@ public actor Engine {
         public var description: String { "Core Image couldn't draw the render" }
     }
 
+    /// Renders from the first step `controls` change since the last render of the same image: a
+    /// new paper, enlarger setting or Film | Negative choice prints and scans the developed film
+    /// again; switching grain develops the film's exposure again; the rest starts over. The same
+    /// kernels run as for a render from scratch, so the result is the same.
     private func renderTexture(controls: Controls, mode: RenderMode) throws -> any MTLTexture {
-        guard let photo else { preconditionFailure("Rendering before a photo is open") }
+        guard photo != nil else { preconditionFailure("Rendering before a photo is open") }
         let film = profiles[controls.film]!, print = profiles[controls.paper]!
         let parameters = Self.parameters(for: controls, film: film, print: print, database: neutralPrintFilters,
                                          mode: mode)
@@ -160,8 +180,54 @@ public actor Engine {
                                         cache: cache)
             self.simulation = simulation
         }
-        let (input, ev) = mode == .preview ? (photo.preview, photo.previewEV) : (photo.full, photo.fullEV)
-        return try gpu.run { simulation.encode(input, autoExposureEV: ev, on: $0) }
+        let image: WritableKeyPath<Photo, PhotoImage> = mode == .preview ? \.preview : \.full
+
+        // What's still valid of the last render; the rest is released before this one.
+        let exposureKey = Step.Key(film: controls.film, parameters: Self.exposureParameters(parameters))
+        let filmKey = Step.Key(film: controls.film, parameters: Self.filmParameters(parameters))
+        if photo![keyPath: image].exposure?.key != exposureKey {
+            photo![keyPath: image].exposure = nil
+        }
+        if photo![keyPath: image].film?.key != filmKey {
+            photo![keyPath: image].film = nil
+        }
+        let last = photo![keyPath: image]
+        let (logExposure, cmyFilm, output) = try gpu.run { encoder in
+            let logExposure = last.exposure?.texture ?? simulation.encodeExpose(
+                simulation.encodePreprocess(last.texture, autoExposureEV: last.autoExposureEV, on: encoder), on: encoder)
+            let cmyFilm = last.film?.texture ?? simulation.encodeDevelop(logExposure, on: encoder)
+            return (logExposure, cmyFilm, simulation.encodePrintAndScan(cmyFilm, on: encoder))
+        }
+        photo![keyPath: image].exposure = Step(key: exposureKey, texture: logExposure)
+        photo![keyPath: image].film = Step(key: filmKey, texture: cmyFilm)
+        return output
+    }
+
+    /// What the developed film depends on: every parameter but the printing and scanning ones.
+    /// (Leaving out what's known not to matter, rather than picking what does, keeps a parameter
+    /// ported later from being missed.)
+    private static func filmParameters(_ parameters: Parameters) -> Parameters {
+        var key = parameters
+        let defaults = Parameters()
+        key.enlarger = defaults.enlarger
+        key.printRender = defaults.printRender
+        key.scanner = defaults.scanner
+        key.io.outputColorSpace = defaults.io.outputColorSpace
+        key.io.outputCctfEncoding = defaults.io.outputCctfEncoding
+        key.io.outputGamutCompress = defaults.io.outputGamutCompress
+        key.io.scanFilm = defaults.io.scanFilm
+        return key
+    }
+
+    /// What the film's log exposure depends on: the developed film's parameters but those of its
+    /// development.
+    private static func exposureParameters(_ parameters: Parameters) -> Parameters {
+        var key = filmParameters(parameters)
+        let defaults = Parameters()
+        key.filmRender.densityCurveGamma = defaults.filmRender.densityCurveGamma
+        key.filmRender.dirCouplers = defaults.filmRender.dirCouplers
+        key.filmRender.grain = defaults.filmRender.grain
+        return key
     }
 
     /// `controls` over Spektrafilm's defaults, in the app's colour spaces, digested as

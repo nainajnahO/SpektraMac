@@ -52,12 +52,13 @@ public final class GPU {
     }
 
     /// How many full-size textures ``reserveMemory(width:height:)`` sets aside: what the whole
-    /// chain holds at once with auto-exposure, halation, grain and glare on (measured; fewer and
-    /// some intermediates are allocated fresh, more and the memory goes unused).
-    static let reservedTextures = 9
+    /// chain holds at once with auto-exposure, halation, grain and glare on, and the steps the
+    /// engine keeps for the next render (measured; fewer and some intermediates are allocated
+    /// fresh, more and the memory goes unused).
+    static let reservedTextures = 10
 
     /// Sets aside GPU memory for the intermediates of renders up to `width × height`
-    /// (``reservedTextures`` textures: 3.5 GB at 24 MP), replacing what was set aside before.
+    /// (``reservedTextures`` textures: 3.8 GB at 24 MP), replacing what was set aside before.
     /// A fresh texture costs more than the kernel writing it — the system clears its pages on
     /// first use, 14 ms for 24 MP — and a render makes dozens; from this memory (an automatic
     /// heap) they reuse what earlier ones released. Textures that don't fit are allocated fresh.
