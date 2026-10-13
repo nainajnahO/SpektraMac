@@ -131,7 +131,7 @@ final class PhotoModel {
     private func render() {
         renderTask?.cancel()
         isRenderingFullResolution = false
-        guard photo != nil, let engine else {
+        guard let photo, let engine else {
             displayImage = nil
             isRendering = false
             return
@@ -140,12 +140,13 @@ final class PhotoModel {
         let controls = controls
         renderTask = Task {
             do {
-                try await show(controls: controls, mode: .preview, engine: engine)
+                try await show(controls: controls, mode: .preview, engine: engine,
+                               size: "\(photo.previewWidth) × \(photo.previewHeight)")
                 isRendering = false
                 try await Task.sleep(for: Self.fullRenderDelay)
                 isRendering = true
                 isRenderingFullResolution = true
-                try await show(controls: controls, mode: .full, engine: engine)
+                try await show(controls: controls, mode: .full, engine: engine, size: "\(photo.width) × \(photo.height)")
             } catch {
                 guard !Task.isCancelled else { return }
                 fail("Could not render", error)
@@ -155,18 +156,16 @@ final class PhotoModel {
         }
     }
 
-    /// Renders the photo and puts it on screen, unless a newer change has made it stale.
-    private func show(controls: Controls, mode: RenderMode, engine: Engine) async throws {
+    /// Renders the photo and puts it on screen, unless a newer change has made it stale. `size`
+    /// is the rendered size, for the log.
+    private func show(controls: Controls, mode: RenderMode, engine: Engine, size: String) async throws {
         let start = ContinuousClock.now
-        let output = try await engine.render(controls: controls, mode: mode)
-        let display = await Task.detached(priority: .userInitiated) {
-            output.displayImage(in: Engine.outputColorSpace)
-        }.value
+        let display = try await engine.display(controls: controls, mode: mode)
         try Task.checkCancellation()
         displayImage = display
         showsFullResolution = mode == .full
         let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
-        note("Rendered \(mode == .full ? "full resolution" : "preview") (\(output.width) × \(output.height)) in \(elapsed)")
+        note("Rendered \(mode == .full ? "full resolution" : "preview") (\(size)) in \(elapsed)")
     }
 
     // MARK: Saving and cancelling

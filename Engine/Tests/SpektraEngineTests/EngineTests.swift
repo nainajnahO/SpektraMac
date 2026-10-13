@@ -36,8 +36,38 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
     let rendered = try await engine.render(controls: Controls(), mode: .full)
     #expect(rendered.width == 2 && rendered.height == 1)
 
-    let display = try #require(rendered.displayImage(in: Engine.outputColorSpace))
+    let display = try await engine.display(controls: Controls(), mode: .full)
     #expect(display.width == 2 && display.height == 1)
+}
+
+/// What the screen shows is the render, upright, in 8-bit sRGB (within a unit of rounding), and
+/// scaled down to fit `maxPixels`.
+@Test func displayShowsTheRender() async throws {
+    let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
+    let engine = try Engine()
+    _ = await engine.open(image)
+    let rendered = try await engine.render(controls: Controls(), mode: .full)
+    let display = try await engine.display(controls: Controls(), mode: .full)
+    #expect(display.width == image.width && display.height == image.height)
+    let bytes = try #require(display.dataProvider?.data as Data?)
+    func encoded(_ linear: Float) -> Int {
+        let v = Double(min(max(linear, 0), 1))
+        return Int(((v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1 / 2.4) - 0.055) * 255).rounded())
+    }
+    var worst = 0
+    for y in 0..<image.height {
+        for x in 0..<image.width {
+            for channel in 0..<3 {
+                let shown = Int(bytes[y * display.bytesPerRow + x * 4 + channel])
+                worst = max(worst, abs(shown - encoded(rendered.pixels[(y * image.width + x) * 3 + channel])))
+            }
+        }
+    }
+    print("display vs render: max difference \(worst)/255")
+    #expect(worst <= 1)
+
+    let small = try await engine.display(controls: Controls(), mode: .full, maxPixels: 100)
+    #expect(max(small.width, small.height) == 100)
 }
 
 /// The synthetic DNG `tools/golden.py` writes (camera RGB = linear sRGB): developed linearly, its
