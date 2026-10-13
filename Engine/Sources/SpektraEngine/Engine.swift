@@ -63,7 +63,9 @@ public actor Engine {
     private let profiles: [String: Profile]
     private let neutralPrintFilters: [String: [String: [String: SIMD3<Double>]]]
     private let cache = SimulationCache()
-    private let displayContext = RGBImage.makeContext()
+    /// Core Image on the GPU's queue: it renders opened photos into their textures and renders
+    /// to the screen.
+    private let context: CIContext
     /// The last render's simulation, rebuilt when a render needs other parameters or profiles.
     private var simulation: Simulation?
     /// The photo renders work on (``open(_:)``).
@@ -82,6 +84,7 @@ public actor Engine {
 
     public init() throws {
         gpu = try GPU()
+        context = RGBImage.makeContext(commandQueue: gpu.queue)
         tables = try Tables.load()
         neutralPrintFilters = try Tables.loadNeutralPrintFilters()
         let profiles = try Profile.stocks().map(Profile.load)
@@ -117,21 +120,40 @@ public actor Engine {
         let texture: any MTLTexture
     }
 
-    /// Makes `image` the photo renders work on: uploads it and its preview (at most
-    /// ``previewMaxSize`` on the long side) once, measures their auto-exposure once, and sets
-    /// aside the GPU memory renders of its size need. Returns the preview's size.
-    public func open(_ image: RGBImage) -> (width: Int, height: Int) {
-        let preview = image.resized(maxPixels: previewMaxSize)
+    /// Makes `image` (``RGBImage/decode(contentsOf:)``) the photo renders work on: Core Image
+    /// renders it once into a texture, and its preview (at most ``previewMaxSize`` on the long side)
+    /// from that on the GPU; auto-exposure is measured once on each, in place. Sets aside the GPU
+    /// memory renders of its size need. Returns the photo's size and its preview's.
+    public func open(_ image: CIImage) throws -> (width: Int, height: Int, previewWidth: Int, previewHeight: Int) {
+        let extent = image.extent.integral
+        let (width, height) = (Int(extent.width), Int(extent.height))
+        photo = nil  // frees the previous photo before reserving memory for this one
+        gpu.reserveMemory(width: width, height: height)
+        let full = gpu.makeReadableTexture(width: width, height: height)
+        try render(image, from: extent, into: full)
+        var preview = full
+        if max(width, height) > previewMaxSize {
+            // Core Image puts a texture's first row at the bottom.
+            let source = CIImage(mtlTexture: full, options: [.colorSpace: RGBImage.workingColorSpace])!
+            let scaled = RGBImage.scaledDown(source.oriented(.downMirrored), maxPixels: previewMaxSize)
+            preview = gpu.makeReadableTexture(width: Int(scaled.extent.width), height: Int(scaled.extent.height))
+            try render(scaled, from: scaled.extent, into: preview)
+        }
         // Auto-exposure is measured the same way in every mode (input space, no CCTF decoding).
         let space = tables.colourSpaces[Self.inputColorSpace]!
-        func upload(_ image: RGBImage) -> PhotoImage {
-            PhotoImage(texture: gpu.upload(rgb: image.pixels, width: image.width, height: image.height),
-                       autoExposureEV: autoExposureEV(of: image, colourSpace: space, cctfDecoding: false))
+        func measured(_ texture: any MTLTexture) -> PhotoImage {
+            PhotoImage(texture: texture, autoExposureEV: autoExposureEV(of: texture, colourSpace: space, cctfDecoding: false))
         }
-        photo = nil  // frees the previous photo before reserving memory for this one
-        gpu.reserveMemory(width: image.width, height: image.height)
-        photo = Photo(full: upload(image), preview: upload(preview))
-        return (preview.width, preview.height)
+        photo = Photo(full: measured(full), preview: measured(preview))
+        return (width, height, preview.width, preview.height)
+    }
+
+    /// Renders `region` of `image` into `texture`, top row first, in the working colour space.
+    private func render(_ image: CIImage, from region: CGRect, into texture: any MTLTexture) throws {
+        let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: nil)
+        destination.colorSpace = RGBImage.workingColorSpace
+        destination.isFlipped = true
+        try context.startTask(toRender: image, from: region, to: destination, at: .zero).waitUntilCompleted()
     }
 
     /// The simulation of the open photo as `controls` set it: the scanned print, or the developed
@@ -151,7 +173,7 @@ public actor Engine {
             throw DisplayError()
         }
         let scaled = RGBImage.scaledDown(image.oriented(.downMirrored), maxPixels: maxPixels)
-        guard let display = displayContext.createCGImage(scaled, from: scaled.extent, format: .RGBA8,
+        guard let display = context.createCGImage(scaled, from: scaled.extent, format: .RGBA8,
                                                          colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
             throw DisplayError()
         }

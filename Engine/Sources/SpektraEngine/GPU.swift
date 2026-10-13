@@ -96,8 +96,20 @@ public final class GPU {
         return descriptor
     }
 
+    /// An image-sized texture whose pixels live in a shared buffer, rows `bufferBytesPerRow` apart,
+    /// so the CPU reads them in place (memory is unified): for the open photo, which Core Image
+    /// renders and auto-exposure measures. Not from the reserved memory: it outlives renders.
+    public func makeReadableTexture(width: Int, height: Int) -> any MTLTexture {
+        let alignment = device.minimumLinearTextureAlignment(for: .rgba32Float)
+        let bytesPerRow = (width * 16 + alignment - 1) / alignment * alignment
+        let buffer = device.makeBuffer(length: bytesPerRow * height, options: .storageModeShared)!
+        return buffer.makeTexture(descriptor: Self.textureDescriptor(width: width, height: height), offset: 0,
+                                  bytesPerRow: bytesPerRow)!
+    }
+
     /// Uploads interleaved RGB floats (row-major, `height × width × 3`, NumPy's layout). Uploads
-    /// outlive renders (the open photo, tables), so they don't take reserved memory.
+    /// outlive renders (tables, images opened by tests and the CLI), so they don't take reserved
+    /// memory.
     public func upload(rgb: [Float], width: Int, height: Int) -> any MTLTexture {
         precondition(rgb.count == width * height * 3)
         var rgba = [Float](repeating: 0, count: width * height * 4)
