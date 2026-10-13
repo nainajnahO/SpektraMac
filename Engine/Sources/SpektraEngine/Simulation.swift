@@ -310,21 +310,20 @@ public struct Simulation {
         }
 
         if couplers.diffusionSizeUm > 0 {
-            // The tail first: the core blur then diffuses the correction in place.
+            // The diffused correction, its Gaussian core and exponential tail blended, replaces it.
             let pixelSizeUm = pixelSizeUm(of: logExposure)
-            let tail = intermediate(width: width, height: height)
+            let (core, tail) = (intermediate(width: width, height: height), intermediate(width: width, height: height))
+            gpu.encodeGaussianBlur(on: encoder, input: correction, output: core,
+                                   sigma: SIMD3(repeating: couplers.diffusionSizeUm / pixelSizeUm))
             gpu.encodeExponentialBlur(on: encoder, input: correction, output: tail,
                                       decay: SIMD3(repeating: couplers.diffusionTailUm / pixelSizeUm))
-            gpu.encodeGaussianBlur(on: encoder, input: correction, output: correction,
-                                   sigma: SIMD3(repeating: couplers.diffusionSizeUm / pixelSizeUm))
-            gpu.encodeScale(on: encoder, input: correction, output: correction, by: 1 - couplers.diffusionTailWeight)
-            gpu.encodeAddScaled(on: encoder, accumulator: correction, input: tail, output: correction,
-                                weight: SIMD3(repeating: couplers.diffusionTailWeight))
+            let tailWeight = SIMD3(repeating: couplers.diffusionTailWeight)
+            gpu.encodeWeightedSum(on: encoder, core, times: 1 - tailWeight, plus: tail, times: tailWeight, output: correction)
         }
         // The corrected exposure into the density's texture (full floats: it's a log exposure),
         // developed there.
-        gpu.encodeAddScaled(on: encoder, accumulator: logExposure, input: correction, output: density,
-                            weight: SIMD3(repeating: -1))
+        gpu.encodeWeightedSum(on: encoder, logExposure, times: SIMD3(repeating: 1),
+                              plus: correction, times: SIMD3(repeating: -1), output: density)
         gpu.encodeInterpolate(on: encoder, input: density, output: density, axis: axis, values: filmCurvesBeforeCouplers)
         return density
     }
@@ -388,8 +387,8 @@ extension Simulation {
                                        sigma: grain.blurDyeCloudsUm * densityPerParticle.squareRoot())
             }
             if layer > 0 {
-                gpu.encodeAddScaled(on: encoder, accumulator: sum, input: layerGrain, output: sum,
-                                    weight: SIMD3(repeating: 1))
+                gpu.encodeWeightedSum(on: encoder, sum, times: SIMD3(repeating: 1),
+                                      plus: layerGrain, times: SIMD3(repeating: 1), output: sum)
             }
         }
         // add_micro_structure: clumping, an independent lognormal factor of mean 1 per pixel and
@@ -504,7 +503,7 @@ extension Simulation {
         if !parameters.io.scanFilm && glare.active && glare.percent > 0 {
             let amount = gpu.encodeGlareAmount(on: encoder, width: cmy.width, height: cmy.height, glare: glare,
                                                seed: Self.seed)
-            gpu.encodeAddScaled(on: encoder, accumulator: xyz, input: amount, output: xyz, weight: scanWhite)
+            gpu.encodeWeightedSum(on: encoder, xyz, times: SIMD3(repeating: 1), plus: amount, times: scanWhite, output: xyz)
         }
         gpu.encodeMatrix(on: encoder, input: xyz, output: xyz, rows: (0..<3).map { scanToOutput.transpose[$0] })
         return xyz
@@ -526,11 +525,11 @@ extension Simulation {
         }
         let (sigma, amount) = (parameters.scanner.unsharpMask[0], parameters.scanner.unsharpMask[1])
         if sigma > 0 && amount > 0 {
-            // The detail rgb − blur into the blur's texture, then added to rgb.
-            let detail = gpu.makeTexture(width: rgb.width, height: rgb.height)
-            gpu.encodeGaussianBlur(on: encoder, input: rgb, output: detail, sigma: SIMD3(repeating: sigma))
-            gpu.encodeAddScaled(on: encoder, accumulator: rgb, input: detail, output: detail, weight: SIMD3(repeating: -1))
-            gpu.encodeAddScaled(on: encoder, accumulator: rgb, input: detail, output: rgb, weight: SIMD3(repeating: amount))
+            // rgb + amount · (rgb − blur) as (1 + amount) · rgb − amount · blur, in one pass.
+            let blurred = gpu.makeTexture(width: rgb.width, height: rgb.height)
+            gpu.encodeGaussianBlur(on: encoder, input: rgb, output: blurred, sigma: SIMD3(repeating: sigma))
+            gpu.encodeWeightedSum(on: encoder, rgb, times: SIMD3(repeating: 1 + amount),
+                                  plus: blurred, times: SIMD3(repeating: -amount), output: rgb)
         }
         return rgb
     }
