@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Dispatch
 import Foundation
 import Metal
@@ -62,6 +63,7 @@ public actor Engine {
     private let profiles: [String: Profile]
     private let neutralPrintFilters: [String: [String: [String: SIMD3<Double>]]]
     private let cache = SimulationCache()
+    private let displayContext = RGBImage.makeContext()
     /// The last render's simulation, rebuilt when a render needs other parameters or profiles.
     private var simulation: Simulation?
     /// The photo renders work on (``open(_:)``).
@@ -119,6 +121,32 @@ public actor Engine {
     /// The simulation of the open photo as `controls` set it: the scanned print, or the developed
     /// film itself. Throws `CancellationError` when the task is cancelled.
     public func render(controls: Controls, mode: RenderMode) throws -> RGBImage {
+        let output = try renderTexture(controls: controls, mode: mode)
+        return RGBImage(width: output.width, height: output.height, pixels: gpu.download(output))
+    }
+
+    /// ``render(controls:mode:)`` for the screen: 8-bit sRGB, no larger than `maxPixels` on its
+    /// long side (Core Animation can't texture images over 16384 px). Core Image scales it down
+    /// on the GPU, so only that comes back from it.
+    public func display(controls: Controls, mode: RenderMode, maxPixels: Int = 4096) throws -> CGImage {
+        let output = try renderTexture(controls: controls, mode: mode)
+        // Core Image puts a texture's first row at the bottom.
+        guard let image = CIImage(mtlTexture: output, options: [.colorSpace: Self.outputColorSpace]) else {
+            throw DisplayError()
+        }
+        let scaled = RGBImage.scaledDown(image.oriented(.downMirrored), maxPixels: maxPixels)
+        guard let display = displayContext.createCGImage(scaled, from: scaled.extent, format: .RGBA8,
+                                                         colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
+            throw DisplayError()
+        }
+        return display
+    }
+
+    public struct DisplayError: Error, CustomStringConvertible {
+        public var description: String { "Core Image couldn't draw the render" }
+    }
+
+    private func renderTexture(controls: Controls, mode: RenderMode) throws -> any MTLTexture {
         guard let photo else { preconditionFailure("Rendering before a photo is open") }
         let film = profiles[controls.film]!, print = profiles[controls.paper]!
         let parameters = Self.parameters(for: controls, film: film, print: print, database: neutralPrintFilters,
@@ -133,8 +161,7 @@ public actor Engine {
             self.simulation = simulation
         }
         let (input, ev) = mode == .preview ? (photo.preview, photo.previewEV) : (photo.full, photo.fullEV)
-        let output = try gpu.run { simulation.encode(input, autoExposureEV: ev, on: $0) }
-        return RGBImage(width: output.width, height: output.height, pixels: gpu.download(output))
+        return try gpu.run { simulation.encode(input, autoExposureEV: ev, on: $0) }
     }
 
     /// `controls` over Spektrafilm's defaults, in the app's colour spaces, digested as

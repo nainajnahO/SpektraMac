@@ -72,20 +72,6 @@ public struct RGBImage: Sendable {
     /// does both in one.
     public func resized(maxPixels: Int) -> RGBImage {
         guard max(width, height) > maxPixels else { return self }
-        return RGBImage(rendering: ciImage(in: Self.workingColorSpace, maxPixels: maxPixels))
-    }
-
-    /// An 8-bit sRGB copy no larger than `maxPixels` on its long side, for display (Core Animation
-    /// can't texture images over 16384 px). `colorSpace` is the space the pixels are in.
-    public func displayImage(in colorSpace: CGColorSpace, maxPixels: Int = 4096) -> CGImage? {
-        let image = ciImage(in: colorSpace, maxPixels: maxPixels)
-        return Self.makeContext().createCGImage(image, from: image.extent, format: .RGBA8,
-                                                colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
-    }
-
-    /// The pixels as a Core Image image, scaled down (Lanczos) to at most `maxPixels` on the long
-    /// side. The edges are extended before scaling so the border pixels keep full coverage.
-    private func ciImage(in colorSpace: CGColorSpace, maxPixels: Int) -> CIImage {
         var rgba = [Float](repeating: 1, count: width * height * 4)
         for pixel in 0..<(width * height) {
             rgba[pixel * 4] = pixels[pixel * 3]
@@ -93,7 +79,15 @@ public struct RGBImage: Sendable {
             rgba[pixel * 4 + 2] = pixels[pixel * 3 + 2]
         }
         let image = CIImage(bitmapData: Data(bytes: rgba, count: rgba.count * 4), bytesPerRow: width * 16,
-                            size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: colorSpace)
+                            size: CGSize(width: width, height: height), format: .RGBAf,
+                            colorSpace: Self.workingColorSpace)
+        return RGBImage(rendering: Self.scaledDown(image, maxPixels: maxPixels))
+    }
+
+    /// `image` scaled down (Lanczos) to at most `maxPixels` on the long side. The edges are
+    /// extended before scaling so the border pixels keep full coverage.
+    static func scaledDown(_ image: CIImage, maxPixels: Int) -> CIImage {
+        let (width, height) = (image.extent.width, image.extent.height)
         let scale = Double(maxPixels) / Double(max(width, height))
         guard scale < 1 else { return image }
         let filter = CIFilter.lanczosScaleTransform()
@@ -140,7 +134,8 @@ public struct RGBImage: Sendable {
     }
 
     // Full-float working format: Core Image's default half floats would cost precision.
-    private static func makeContext() -> CIContext {
+    // The system default Metal device, the one ``GPU`` renders on.
+    static func makeContext() -> CIContext {
         CIContext(options: [.workingFormat: CIFormat.RGBAf, .cacheIntermediates: false])
     }
 }
