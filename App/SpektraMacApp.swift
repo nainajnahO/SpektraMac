@@ -20,6 +20,9 @@ struct SpektraMacApp: App {
                 Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
                     .keyboardShortcut("s", modifiers: .command)
                     .disabled(!model.canSave)
+                Button("Export LUT…", systemImage: "cube") { model.exportLUT() }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                    .disabled(!model.canExportLUT)
                 Button("Cancel", systemImage: "xmark.circle") { model.cancel() }
                     .keyboardShortcut(".", modifiers: .command)
                     .disabled(!model.canCancel)

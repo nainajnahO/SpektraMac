@@ -68,6 +68,25 @@ public struct Controls: Codable, Sendable, Hashable {
     }
 }
 
+/// A 3D colour lookup table: `size`³ RGB outputs for inputs evenly spaced over [0, 1], red
+/// changing fastest, then green, then blue.
+public struct LUT: Sendable {
+    public let size: Int
+    public let values: [Float]
+
+    /// The table as a `.cube` file (Adobe's Cube LUT specification 1.0), titled `title`: the name
+    /// apps such as LightCraft show for it. `comments` go first, as `#` lines.
+    public func cube(title: String, comments: [String] = []) -> Data {
+        var text = comments.map { "# \($0)\n" }.joined()
+        text += "TITLE \"\(title.replacingOccurrences(of: "\"", with: "'"))\"\n"
+        text += "LUT_3D_SIZE \(size)\n"
+        for index in stride(from: 0, to: values.count, by: 3) {
+            text += String(format: "%.6f %.6f %.6f\n", values[index], values[index + 1], values[index + 2])
+        }
+        return Data(text.utf8)
+    }
+}
+
 /// What a render is for.
 public enum RenderMode: Sendable, Equatable {
     /// Each change while editing: Spektrafilm's preview mode (no blurs or grain), on the open
@@ -335,6 +354,45 @@ public actor Engine {
         photo![keyPath: image].exposure = Step(key: exposureKey, texture: logExposure)
         photo![keyPath: image].film = Step(key: filmKey, texture: cmyFilm)
         return output
+    }
+
+    /// A `size`³ 3D LUT of `controls`' look, for an app that applies one to display-encoded sRGB
+    /// (LightCraft does, after its own edits): each sRGB colour of the lattice opened as a photo is
+    /// (Core Image decodes it into the working space), exposed `exposureEV` stops over itself and
+    /// rendered as an export. What depends on other pixels is left out
+    /// (``Parameters/applyPerPixelMode()``). Doesn't touch the open photo. At most 128: the lattice
+    /// renders as an image size² wide, and a texture is at most 16384.
+    public func lut(controls: Controls, exposureEV: Double, size: Int) throws -> LUT {
+        precondition((2...128).contains(size))
+        let film = profiles[controls.film]!, print = profiles[controls.paper]!
+        var parameters = Self.parameters(for: controls, film: film, print: print, database: neutralPrintFilters,
+                                         mode: .export)
+        parameters.applyPerPixelMode()
+        let simulation = try Simulation(parameters: parameters, film: film, print: print, gpu: gpu, tables: tables,
+                                        cache: cache)
+        // The lattice in LUT order, a row per blue level: red changes fastest, then green.
+        let axis = (0..<size).map { Float($0) / Float(size - 1) }
+        var rgba = [Float]()
+        rgba.reserveCapacity(size * size * size * 4)
+        for blue in axis {
+            for green in axis {
+                for red in axis {
+                    rgba += [red, green, blue, 1]
+                }
+            }
+        }
+        let lattice = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: size * size * 16,
+                              size: CGSize(width: size * size, height: size), format: .RGBAf,
+                              colorSpace: Self.exportColorSpace)
+        let input = gpu.makeReadableTexture(width: size * size, height: size)
+        try render(lattice, from: lattice.extent, into: input)
+        let output = try gpu.run { encoder in
+            let exposed = simulation.encodePreprocess(input, autoExposureEV: exposureEV, on: encoder)
+            return simulation.encodePrintAndScan(simulation.encodeDevelop(simulation.encodeExpose(exposed, on: encoder),
+                                                                          on: encoder), on: encoder)
+        }
+        // A colour outside the colour model (NaN) is black, as in a saved photo.
+        return LUT(size: size, values: gpu.download(output).map { $0.isNaN ? 0 : min(max($0, 0), 1) })
     }
 
     /// What the developed film depends on: every parameter but the printing and scanning ones.
