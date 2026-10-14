@@ -69,13 +69,9 @@ private struct SettingsSidebar: View {
         @Bindable var model = model
         Form {
             Section("Simulation") {
-                Picker("Film", selection: $model.film) {
-                    StockSections(stocks: model.films)
-                }
-                Picker("Paper", selection: $model.controls.paper) {
-                    StockSections(stocks: model.papers)
-                }
-                .disabled(model.controls.scanFilm)
+                StockRow(title: "Film", stocks: model.films, selection: $model.film, controls: $model.controls)
+                StockRow(title: "Paper", stocks: model.papers, selection: $model.controls.paper, controls: $model.controls)
+                    .disabled(model.controls.scanFilm)
             }
             Section("Exposure") {
                 ExposureSlider()
@@ -100,20 +96,135 @@ private struct SettingsSidebar: View {
     }
 }
 
-/// A film or paper menu's stocks under headings, from their profiles: slides, still negatives or
-/// papers, then cine stocks.
-private struct StockSections: View {
+/// The Film or Paper row: its stocks in a pop-up menu (``StockMenu``). A row of its own, as
+/// `LabeledContent` gives its content at most about half the row, cutting short names.
+private struct StockRow: View {
+    let title: String
     let stocks: [ProfileInfo]
+    @Binding var selection: String
+    @Binding var controls: Controls
 
     var body: some View {
+        HStack {
+            Text(title)
+                .fixedSize()
+            Spacer(minLength: 8)
+            StockMenu(stocks: stocks, selection: $selection, controls: $controls)
+                .layoutPriority(1)
+                .accessibilityLabel(title)
+        }
+    }
+}
+
+/// A pop-up menu of stocks under headings, from their profiles: slides, still negatives or
+/// papers, then cine stocks. While it's open, the photo shows the stock the pointer is on as
+/// choosing it would, and goes back to `controls` as they were if the menu closes without a
+/// choice. AppKit's pop-up button: SwiftUI's menus don't say which item is highlighted, and an
+/// `NSMenuDelegate` is told.
+private struct StockMenu: NSViewRepresentable {
+    let stocks: [ProfileInfo]
+    @Binding var selection: String
+    /// What choosing a stock may change, as the menu found it.
+    @Binding var controls: Controls
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        // As SwiftUI's picker: the name at the arrows, cut short where the row is narrow.
+        button.alignment = .right
+        (button.cell as! NSPopUpButtonCell).lineBreakMode = .byTruncatingTail
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.choose(_:))
+        return button
+    }
+
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.parent = self
+        if coordinator.stocks != stocks.map(\.stock) {
+            coordinator.stocks = stocks.map(\.stock)
+            button.menu = menu(delegate: coordinator)
+        }
+        // While the menu is open, its check mark stays on the stock it opened with.
+        if !coordinator.isOpen {
+            button.select(button.itemArray.first { $0.representedObject as? String == selection })
+        }
+        button.isEnabled = context.environment.isEnabled
+    }
+
+    /// The selected stock's width, as SwiftUI's picker has, rather than the widest stock's.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView button: NSPopUpButton, context: Context) -> CGSize? {
+        let widest = button.intrinsicContentSize
+        func width(_ title: String) -> CGFloat { (title as NSString).size(withAttributes: [.font: button.font!]).width }
+        let ideal = widest.width - (button.itemTitles.map(width).max() ?? 0) + width(button.titleOfSelectedItem ?? "")
+        return CGSize(width: min(ideal, proposal.width ?? ideal), height: widest.height)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    private func menu(delegate: Coordinator) -> NSMenu {
         let groups = Dictionary(grouping: stocks) { stock -> String in
             if stock.type == .positive { return "Slide" }
             if stock.use == .cine { return "Cine" }
             return stock.stage == .filming ? "Negative" : "Still"
         }
-        ForEach(["Slide", "Negative", "Still", "Cine"].filter { groups[$0] != nil }, id: \.self) { heading in
-            Section(heading) {
-                ForEach(groups[heading]!, id: \.stock) { Text($0.name).tag($0.stock) }
+        let menu = NSMenu()
+        menu.delegate = delegate
+        for heading in ["Slide", "Negative", "Still", "Cine"] {
+            guard let group = groups[heading] else { continue }
+            if !menu.items.isEmpty {
+                menu.addItem(.separator())
+            }
+            menu.addItem(.sectionHeader(title: heading))
+            for stock in group {
+                let item = NSMenuItem(title: stock.name, action: nil, keyEquivalent: "")
+                item.representedObject = stock.stock
+                menu.addItem(item)
+            }
+        }
+        return menu
+    }
+
+    final class Coordinator: NSObject, NSMenuDelegate {
+        var parent: StockMenu
+        /// The stocks the menu lists.
+        var stocks: [String] = []
+        /// The controls the menu opened with, while it's open.
+        private var opened: Controls?
+        private var chosen: String?
+        var isOpen: Bool { opened != nil }
+
+        init(parent: StockMenu) {
+            self.parent = parent
+        }
+
+        func menuWillOpen(_ menu: NSMenu) {
+            opened = parent.controls
+            chosen = nil
+        }
+
+        func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
+            guard let opened else { return }
+            show(item?.representedObject as? String, from: opened)
+        }
+
+        @objc func choose(_ button: NSPopUpButton) {
+            chosen = button.selectedItem?.representedObject as? String
+        }
+
+        func menuDidClose(_ menu: NSMenu) {
+            // The pop-up sends its action as the menu closes: settle once both have run.
+            DispatchQueue.main.async { [self] in
+                guard let opened else { return }
+                self.opened = nil
+                show(chosen, from: opened)
+            }
+        }
+
+        /// The controls the menu opened with, `stock` chosen from them unless it's theirs.
+        private func show(_ stock: String?, from opened: Controls) {
+            parent.controls = opened
+            if let stock, stock != parent.selection {
+                parent.selection = stock
             }
         }
     }
