@@ -62,64 +62,96 @@ struct ContentView: View {
 
 // MARK: - Sidebar
 
+/// The settings, one step of the process at a time, chosen at the top: the camera's exposure,
+/// the film, and the print made from it.
 private struct SettingsSidebar: View {
     @Environment(PhotoModel.self) private var model
+    @SceneStorage("settingsCategory") private var category = Category.film
+
+    private enum Category: String, CaseIterable {
+        case camera = "Camera", film = "Film", print = "Print"
+    }
 
     var body: some View {
         @Bindable var model = model
         Form {
-            Section("Simulation") {
-                StockRow(title: "Film", stocks: model.films, selection: $model.film, controls: $model.controls)
-                StockRow(title: "Paper", stocks: model.papers, selection: $model.controls.paper, controls: $model.controls)
-                    .disabled(model.controls.scanFilm)
-            }
-            Section("Exposure") {
-                ExposureSlider()
-            }
-            Section("Enlarger") {
-                ValueSlider("Print exposure", value: $model.controls.printExposure, in: 0...2, step: 0.02,
-                            format: .number.precision(.fractionLength(2)))
-                ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: -100...100, step: 1,
-                            format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
-                            unit: "CC")
-                ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: -100...100, step: 1,
-                            format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
-                            unit: "CC")
-            }
-            .disabled(model.controls.scanFilm)
-            Section("Halation") {
-                Toggle("Halation", isOn: $model.controls.halation)
-                Group {
-                    ValueSlider("Strength", value: $model.controls.halationAmount, in: 0...3, step: 0.05,
-                                format: .number.precision(.fractionLength(2)))
-                        .help("The glow from light bouncing back off the film base, over the film's own.")
-                    ValueSlider("Size", value: $model.controls.halationSize, in: 0...3, step: 0.05,
-                                format: .number.precision(.fractionLength(2)))
-                        .help("How far the glow reaches, over the film's own.")
-                    ValueSlider("Scatter", value: $model.controls.scatterAmount, in: 0...1, step: 0.05,
-                                format: .number.precision(.fractionLength(2)))
-                        .help("Light spreading inside the emulsion, which softens fine detail.")
-                    ValueSlider("Scatter size", value: $model.controls.scatterSize, in: 0...3, step: 0.05,
-                                format: .number.precision(.fractionLength(2)))
-                        .help("How far light spreads inside the emulsion, over the film's own.")
+            switch category {
+            case .camera:
+                Section("Exposure") {
+                    ExposureSlider()
                 }
-                .disabled(!model.controls.halation)
-            }
-            Section("Grain") {
-                Toggle("Grain", isOn: $model.controls.grain)
-                Group {
-                    // Not down to 0: the particle count per pixel divides by the area.
-                    ValueSlider("Size", value: $model.controls.grainSize, in: 0.05...2, step: 0.05,
-                                format: .number.precision(.fractionLength(2)), unit: "µm²")
-                        .help("The area of one silver halide particle: about 0.1 µm² for ISO 100, 0.4 µm² for ISO 400.")
-                    ValueSlider("Softness", value: $model.controls.grainSoftness, in: 0...2, step: 0.05,
-                                format: .number.precision(.fractionLength(2)), unit: "px")
-                        .help("The blur over the grain, in pixels of the render.")
+            case .film:
+                Section {
+                    StockRow(title: "Film", stocks: model.films, selection: $model.film, controls: $model.controls)
                 }
-                .disabled(!model.controls.grain)
+                Section("Halation") {
+                    Toggle("Halation", isOn: $model.controls.halation)
+                    Group {
+                        ValueSlider("Strength", value: $model.controls.halationAmount, in: 0...3, step: 0.05,
+                                    format: .number.precision(.fractionLength(2)))
+                            .help("The glow from light bouncing back off the film base, over the film's own.")
+                        ValueSlider("Size", value: $model.controls.halationSize, in: 0...3, step: 0.05,
+                                    format: .number.precision(.fractionLength(2)))
+                            .help("How far the glow reaches, over the film's own.")
+                        ValueSlider("Scatter", value: $model.controls.scatterAmount, in: 0...1, step: 0.05,
+                                    format: .number.precision(.fractionLength(2)))
+                            .help("Light spreading inside the emulsion, which softens fine detail.")
+                        ValueSlider("Scatter size", value: $model.controls.scatterSize, in: 0...3, step: 0.05,
+                                    format: .number.precision(.fractionLength(2)))
+                            .help("How far light spreads inside the emulsion, over the film's own.")
+                    }
+                    .disabled(!model.controls.halation)
+                }
+                Section("Grain") {
+                    Toggle("Grain", isOn: $model.controls.grain)
+                    Group {
+                        // Not down to 0: the particle count per pixel divides by the area.
+                        ValueSlider("Size", value: $model.controls.grainSize, in: 0.05...2, step: 0.05,
+                                    format: .number.precision(.fractionLength(2)), unit: "µm²")
+                            .help("The area of one silver halide particle: about 0.1 µm² for ISO 100, 0.4 µm² for ISO 400.")
+                        ValueSlider("Softness", value: $model.controls.grainSoftness, in: 0...2, step: 0.05,
+                                    format: .number.precision(.fractionLength(2)), unit: "px")
+                            .help("The blur over the grain, in pixels of the render.")
+                    }
+                    .disabled(!model.controls.grain)
+                }
+            case .print:
+                if model.controls.scanFilm {
+                    Section {
+                        Text(model.isSlideFilm
+                             ? "A slide is viewed directly, so there's no print."
+                             : "The film itself is showing. These settings apply when the toolbar shows Print.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Group {
+                    Section {
+                        StockRow(title: "Paper", stocks: model.papers, selection: $model.controls.paper,
+                                 controls: $model.controls)
+                    }
+                    Section("Enlarger") {
+                        ValueSlider("Print exposure", value: $model.controls.printExposure, in: 0...2, step: 0.02,
+                                    format: .number.precision(.fractionLength(2)))
+                        ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: -100...100, step: 1,
+                                    format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
+                                    unit: "CC")
+                        ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: -100...100, step: 1,
+                                    format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
+                                    unit: "CC")
+                    }
+                }
+                .disabled(model.controls.scanFilm)
             }
         }
         .formStyle(.grouped)
+        .safeAreaInset(edge: .top) {
+            Picker("Settings", selection: $category) {
+                ForEach(Category.allCases, id: \.self) { Text($0.rawValue) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.top, 8)
+        }
     }
 }
 
