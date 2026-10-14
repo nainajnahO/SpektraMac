@@ -111,6 +111,8 @@ final class PhotoModel {
     }
     /// The reduced render is on screen and the controls haven't changed since.
     private var awaitsFullResolution = false
+    /// A preview is rendering: a change meanwhile waits for it to show, then renders.
+    private var isPreviewing = false
     private(set) var isLoading = false
     private(set) var isRendering = false
     private(set) var isRenderingFullResolution = false
@@ -155,6 +157,7 @@ final class PhotoModel {
                 isRendering = false
                 isRenderingFullResolution = false
                 awaitsFullResolution = false
+                isPreviewing = false
                 let opened = try await engine.open(image)
                 self.metadata = metadata
                 photo = Photo(name: url.lastPathComponent, width: opened.width, height: opened.height,
@@ -194,9 +197,13 @@ final class PhotoModel {
     /// Renders the preview, then, once the controls have been still for `fullRenderDelay`, with
     /// the blurs and grain the preview leaves out: at the size the canvas shows the photo, and the
     /// whole photo once ``wantsFullResolution``, or at once where the canvas shows it no smaller.
-    /// A newer render cancels it.
+    /// A change cancels it, except a preview, which shows and then renders the newest controls.
     private func render(from start: RenderStart = .preview) {
+        // A preview in flight shows, then renders the newest controls: cancelling it at each step
+        // of a slider would leave none on screen until the slider pauses.
+        guard start != .preview || !isPreviewing else { return }
         renderTask?.cancel()
+        isPreviewing = false
         isRenderingFullResolution = false
         awaitsFullResolution = false
         guard let photo, let engine else {
@@ -205,12 +212,18 @@ final class PhotoModel {
             return
         }
         isRendering = true
-        let controls = controls
+        isPreviewing = start == .preview
         renderTask = Task {
+            var controls = self.controls
             do {
                 if start != .full {
                     if start == .preview {
                         try await show(controls: controls, mode: .preview, engine: engine, photo: photo)
+                        while controls != self.controls {
+                            controls = self.controls
+                            try await show(controls: controls, mode: .preview, engine: engine, photo: photo)
+                        }
+                        isPreviewing = false
                     }
                     isRendering = false
                     try await Task.sleep(for: Self.fullRenderDelay)
@@ -232,6 +245,7 @@ final class PhotoModel {
                 guard !Task.isCancelled else { return }
                 fail("Could not render", error)
             }
+            isPreviewing = false
             isRendering = false
             isRenderingFullResolution = false
         }
