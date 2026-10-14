@@ -87,9 +87,36 @@ private struct SettingsSidebar: View {
                             unit: "CC")
             }
             .disabled(model.controls.scanFilm)
-            Section("Effects") {
-                Toggle("Grain", isOn: $model.controls.grain)
+            Section("Halation") {
                 Toggle("Halation", isOn: $model.controls.halation)
+                Group {
+                    ValueSlider("Strength", value: $model.controls.halationAmount, in: 0...3, step: 0.05,
+                                format: .number.precision(.fractionLength(2)))
+                        .help("The glow from light bouncing back off the film base, over the film's own.")
+                    ValueSlider("Size", value: $model.controls.halationSize, in: 0...3, step: 0.05,
+                                format: .number.precision(.fractionLength(2)))
+                        .help("How far the glow reaches, over the film's own.")
+                    ValueSlider("Scatter", value: $model.controls.scatterAmount, in: 0...1, step: 0.05,
+                                format: .number.precision(.fractionLength(2)))
+                        .help("Light spreading inside the emulsion, which softens fine detail.")
+                    ValueSlider("Scatter size", value: $model.controls.scatterSize, in: 0...3, step: 0.05,
+                                format: .number.precision(.fractionLength(2)))
+                        .help("How far light spreads inside the emulsion, over the film's own.")
+                }
+                .disabled(!model.controls.halation)
+            }
+            Section("Grain") {
+                Toggle("Grain", isOn: $model.controls.grain)
+                Group {
+                    // Not down to 0: the particle count per pixel divides by the area.
+                    ValueSlider("Size", value: $model.controls.grainSize, in: 0.05...2, step: 0.05,
+                                format: .number.precision(.fractionLength(2)), unit: "µm²")
+                        .help("The area of one silver halide particle: about 0.1 µm² for ISO 100, 0.4 µm² for ISO 400.")
+                    ValueSlider("Softness", value: $model.controls.grainSoftness, in: 0...2, step: 0.05,
+                                format: .number.precision(.fractionLength(2)), unit: "px")
+                        .help("The blur over the grain, in pixels of the render.")
+                }
+                .disabled(!model.controls.grain)
             }
         }
         .formStyle(.grouped)

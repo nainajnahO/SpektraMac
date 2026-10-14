@@ -21,8 +21,18 @@ public struct Controls: Codable, Sendable, Hashable {
     /// Enlarger filters, in Kodak CC units away from the film and paper's neutral ones.
     public var yFilterShift = 0.0
     public var mFilterShift = 0.0
-    public var grain = true
     public var halation = true
+    /// Multipliers over the film's halation preset (Spektrafilm's high-level halation scalars):
+    /// the glow from light bouncing off the film base, and light spreading inside the emulsion
+    /// (the scatter amount blends towards the scattered light, so 1 is all of it).
+    public var halationAmount = 1.0
+    public var halationSize = 1.0
+    public var scatterAmount = 1.0
+    public var scatterSize = 1.0
+    public var grain = true
+    /// Area of one silver halide particle in µm², and the grain's final blur in pixels.
+    public var grainSize = 0.2
+    public var grainSoftness = 0.65
 
     public init() {}
 
@@ -346,8 +356,14 @@ public actor Engine {
         parameters.enlarger.printExposure = controls.printExposure
         parameters.enlarger.yFilterShift = controls.yFilterShift
         parameters.enlarger.mFilterShift = controls.mFilterShift
-        parameters.filmRender.grain.active = controls.grain
         parameters.filmRender.halation.active = controls.halation
+        parameters.filmRender.halation.halationAmount = controls.halationAmount
+        parameters.filmRender.halation.halationSpatialScale = controls.halationSize
+        parameters.filmRender.halation.scatterAmount = controls.scatterAmount
+        parameters.filmRender.halation.scatterSpatialScale = controls.scatterSize
+        parameters.filmRender.grain.active = controls.grain
+        parameters.filmRender.grain.particleAreaUm2 = controls.grainSize
+        parameters.filmRender.grain.blur = controls.grainSoftness
         parameters.applyNeutralPrintFilters(film: film, print: print, database: database)
         if mode == .preview {
             parameters.applyPreviewMode()
