@@ -389,7 +389,7 @@ final class PhotoModel {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [Self.cubeType]
         panel.nameFieldStringValue = controls.scanFilm ? filmName : "\(filmName) – \(paperName)"
-        panel.message = "The LUT carries this exposure (\(stops) EV) and every setting a LUT can hold. Grain, halation, glare, highlight boost and the couplers' edge contrast depend on neighbouring pixels, so they're left out."
+        panel.message = "The LUT carries this exposure (\(stops) EV) and every setting a LUT can hold. Grain, halation, glare, highlight boost and the sharper edges of the couplers' Edge contrast depend on neighbouring pixels or the whole photo, so they're left out."
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let (controls, exposureEV) = (controls, exposureEV)
