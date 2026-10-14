@@ -469,3 +469,48 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     #expect(text.contains("\"film\" : \"kodak_vision3_500t\""))
     #expect(throws: DecodingError.self) { try Controls(preset: Data("{\"film\": 1}".utf8)) }
 }
+
+/// A LUT entry is what a render of a photo of that one sRGB colour gives, exposed the same (the
+/// As shot mark plus the offset), when nothing that depends on other pixels is on: patches of
+/// lattice colours, black, white, grey and some in between, through the app's own path. Within a
+/// quarter of an 8-bit level (measured: 3.7e-4): the photo's render still runs its blurs, through
+/// half-float intermediates. Its `.cube` is the comments, the title, the size and the entries,
+/// red fastest.
+@Test func lutEntriesAreUniformRenders() async throws {
+    let size = 5
+    var controls = Controls()
+    controls.exposureMark = .asShot
+    controls.exposureOffsetEV = 0.7
+    controls.grain = false
+    controls.glare = false
+    let engine = try Engine()
+    let lut = try await engine.lut(controls: controls, exposureEV: controls.exposureOffsetEV, size: size)
+    #expect(lut.values.count == size * size * size * 3)
+
+    let colours: [SIMD3<Int>] = [[0, 0, 0], [4, 4, 4], [2, 2, 2], [4, 0, 0], [0, 4, 0], [0, 0, 4], [1, 3, 2], [3, 1, 4]]
+    let patch = 32
+    let width = patch * colours.count
+    var rgba = [Float](repeating: 1, count: width * patch * 4)
+    for y in 0..<patch {
+        for x in 0..<width {
+            let colour = SIMD3<Float>(colours[x / patch]) / Float(size - 1)
+            (rgba[(y * width + x) * 4], rgba[(y * width + x) * 4 + 1], rgba[(y * width + x) * 4 + 2]) = (colour.x, colour.y, colour.z)
+        }
+    }
+    let photo = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+                        size: CGSize(width: width, height: patch), format: .RGBAf, colorSpace: Engine.exportColorSpace)
+    _ = try await engine.open(photo)
+    let rendered = try await engine.render(controls: controls, mode: .export)
+    for (index, colour) in colours.enumerated() {
+        let pixel = (patch / 2 * width + index * patch + patch / 2) * 3
+        let entry = ((colour.z * size + colour.y) * size + colour.x) * 3
+        let expected = (0..<3).map { min(max(rendered.pixels[pixel + $0], 0), 1) }
+        #expect(Difference(Array(lut.values[entry..<(entry + 3)]), expected.map(Double.init)).maxAbsolute < 1e-3, "\(colour): \(lut.values[entry..<(entry + 3)]) vs \(expected)")
+    }
+
+    let lines = String(decoding: lut.cube(title: "Test \"LUT\"", comments: ["Film: Portra 400"]), as: UTF8.self)
+        .split(separator: "\n")
+    #expect(Array(lines.prefix(3)) == ["# Film: Portra 400", "TITLE \"Test 'LUT'\"", "LUT_3D_SIZE 5"])
+    #expect(lines.count == 3 + size * size * size)
+    #expect(lines[3] == Substring(String(format: "%.6f %.6f %.6f", lut.values[0], lut.values[1], lut.values[2])))
+}

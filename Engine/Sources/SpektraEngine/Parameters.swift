@@ -95,6 +95,22 @@ extension Parameters {
         scanner.unsharpMask = [0, 0]
     }
 
+    /// What a LUT can hold: `digest_params` with `debug.deactivate_spatial_effects` and
+    /// `deactivate_stochastic_effects`, and no highlight boost (it scales by the image's maximum),
+    /// as `debug.lut_mode` has it. Unlike lut_mode it keeps the exposure and print settings, which
+    /// the LUT carries.
+    public mutating func applyPerPixelMode() {
+        filmRender.halation.active = false
+        filmRender.halation.boostEv = 0
+        filmRender.dirCouplers.diffusionSizeUm = 0
+        filmRender.grain.active = false
+        printRender.glare.active = false
+        camera.lensBlurUm = 0
+        enlarger.lensBlur = 0
+        scanner.lensBlur = 0
+        scanner.unsharpMask = [0, 0]
+    }
+
     public struct PrintRender: Codable, Sendable, Equatable {
         public var densityCurvesMorph = PrintCurvesMorph()
         public var glare = Glare()

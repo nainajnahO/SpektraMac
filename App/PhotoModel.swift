@@ -370,6 +370,48 @@ final class PhotoModel {
         saveTask?.cancel()
     }
 
+    // MARK: LUTs
+
+    var canExportLUT: Bool { engine != nil }
+    /// Spektrafilm's LUT tool's default size: trilinear interpolation between its entries is
+    /// within ΔE2000 0.56 of exact (Portra 400 → Portra Endura), a 1 MB file.
+    private static let lutSize = 33
+    /// macOS declares no type for `.cube` files, so the Save panel gets a dynamic one.
+    private static let cubeType = UTType(filenameExtension: "cube", conformingTo: .text)!
+
+    /// Writes the controls' look as a `.cube` LUT for LightCraft, which applies one to its
+    /// display-encoded sRGB, exposed as the exposure slider shows (``Engine/lut(controls:exposureEV:size:)``).
+    /// Its title, the name LightCraft shows, is the file's.
+    func exportLUT() {
+        guard let engine else { return }
+        let paperName = papers.first { $0.stock == controls.paper }?.name ?? controls.paper
+        let stops = exposureEV.formatted(.number.precision(.fractionLength(1)).sign(strategy: .always(includingZero: false)))
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [Self.cubeType]
+        panel.nameFieldStringValue = controls.scanFilm ? filmName : "\(filmName) – \(paperName)"
+        panel.message = "The LUT carries this exposure (\(stops) EV) and every setting a LUT can hold. Grain, halation, glare, highlight boost and the sharper edges of the couplers' Edge contrast depend on neighbouring pixels or the whole photo, so they're left out."
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let (controls, exposureEV) = (controls, exposureEV)
+        let comments = [
+            "Made with SpektraMac from Spektrafilm by Andrea Volpato (https://github.com/andreavolpato/spektrafilm).",
+            "Film and paper data: CC BY-SA 4.0.",
+            controls.scanFilm ? "Film: \(filmName), scanned" : "Film: \(filmName), printed on \(paperName)",
+            "Exposure: \(stops) EV",
+            "Input and output: sRGB, encoded",
+        ]
+        Task {
+            do {
+                let lut = try await engine.lut(controls: controls, exposureEV: exposureEV, size: Self.lutSize)
+                try lut.cube(title: url.deletingPathExtension().lastPathComponent, comments: comments)
+                    .write(to: url, options: .atomic)
+                note("Exported LUT \(url.lastPathComponent) at \(stops) EV")
+            } catch {
+                fail("Could not export the LUT", error)
+            }
+        }
+    }
+
     // MARK: Presets
 
     var canUsePresets: Bool { engine != nil }
