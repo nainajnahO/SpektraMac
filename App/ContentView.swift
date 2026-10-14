@@ -70,10 +70,10 @@ private struct SettingsSidebar: View {
         Form {
             Section("Simulation") {
                 Picker("Film", selection: $model.film) {
-                    ForEach(model.films, id: \.stock) { Text($0.name).tag($0.stock) }
+                    StockSections(stocks: model.films)
                 }
                 Picker("Paper", selection: $model.controls.paper) {
-                    ForEach(model.papers, id: \.stock) { Text($0.name).tag($0.stock) }
+                    StockSections(stocks: model.papers)
                 }
                 .disabled(model.controls.scanFilm)
             }
@@ -97,6 +97,25 @@ private struct SettingsSidebar: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// A film or paper menu's stocks under headings, from their profiles: slides, still negatives or
+/// papers, then cine stocks.
+private struct StockSections: View {
+    let stocks: [ProfileInfo]
+
+    var body: some View {
+        let groups = Dictionary(grouping: stocks) { stock -> String in
+            if stock.type == .positive { return "Slide" }
+            if stock.use == .cine { return "Cine" }
+            return stock.stage == .filming ? "Negative" : "Still"
+        }
+        ForEach(["Slide", "Negative", "Still", "Cine"].filter { groups[$0] != nil }, id: \.self) { heading in
+            Section(heading) {
+                ForEach(groups[heading]!, id: \.stock) { Text($0.name).tag($0.stock) }
+            }
+        }
     }
 }
 
