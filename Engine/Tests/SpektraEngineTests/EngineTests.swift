@@ -72,8 +72,9 @@ func tiffDecodesAsCoreImageReadsIt(bits: Int, tagged: Bool) throws {
 
 /// Opening renders the decoded photo straight onto the GPU: its renders, full, preview and
 /// reduced, are exactly the parity-tested chain on the photo decoded to an `RGBImage` and on that
-/// scaled down as the preview was made before (Core Image's Lanczos from the CPU copy). A Display
-/// P3 8-bit PNG and 16-bit TIFF larger than the preview, and the synthetic DNG.
+/// scaled down as the preview was made before (Core Image's Lanczos from the CPU copy), to the
+/// preview's size and a reduced render's. A Display P3 8-bit PNG and 16-bit TIFF larger than the
+/// preview, and the synthetic DNG.
 @Test(arguments: ["png", "tif", "dng"])
 func openRendersTheDecodedPhoto(format: String) async throws {
     let url: URL
@@ -103,17 +104,19 @@ func openRendersTheDecodedPhoto(format: String) async throws {
     let engine = try Engine()
     _ = try await engine.open(RGBImage.decode(contentsOf: url))
     let decoded = try RGBImage(contentsOf: url)
-    let scaled = RGBImage.scaledDown(decoded.ciImage, maxPixels: 1600)
-    let (width, height) = (Int(scaled.extent.width), Int(scaled.extent.height))
-    var rgba = [Float](repeating: 0, count: width * height * 4)
-    RGBImage.makeContext().render(scaled, toBitmap: &rgba, rowBytes: width * 16, bounds: scaled.extent, format: .RGBAf,
-                                  colorSpace: RGBImage.workingColorSpace)
-    let preview = RGBImage(width: width, height: height, pixels: (0..<(width * height)).flatMap { rgba[($0 * 4)..<($0 * 4 + 3)] })
+    func scaled(to maxPixels: Int) -> RGBImage {
+        let scaled = RGBImage.scaledDown(decoded.ciImage, maxPixels: maxPixels)
+        let (width, height) = (Int(scaled.extent.width), Int(scaled.extent.height))
+        var rgba = [Float](repeating: 0, count: width * height * 4)
+        RGBImage.makeContext().render(scaled, toBitmap: &rgba, rowBytes: width * 16, bounds: scaled.extent,
+                                      format: .RGBAf, colorSpace: RGBImage.workingColorSpace)
+        return RGBImage(width: width, height: height, pixels: (0..<(width * height)).flatMap { rgba[($0 * 4)..<($0 * 4 + 3)] })
+    }
 
     let controls = Controls()
     let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
     let (gpu, tables, database) = (try GPU(), try Tables.load(), try Tables.loadNeutralPrintFilters())
-    for (mode, image) in [(RenderMode.full, decoded), (.preview, preview), (.reduced, preview)] {
+    for (mode, image) in [(RenderMode.full, decoded), (.preview, scaled(to: 1600)), (.reduced(longSide: 1000), scaled(to: 1000))] {
         let rendered = try await engine.render(controls: controls, mode: mode)
         let parameters = Engine.parameters(for: controls, film: film, print: paper, database: database, mode: mode)
         let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: tables)
@@ -279,7 +282,7 @@ func reservedMemoryRendersMatchFresh(caseName: String) throws {
     ]
     for (name, change) in changes {
         change(&controls)
-        for mode in [RenderMode.preview, .reduced, .full, .export] {
+        for mode in [RenderMode.preview, .reduced(longSide: 300), .full, .export] {
             _ = try await fresh.open(image.ciImage)
             let expected = try await fresh.render(controls: controls, mode: mode).pixels.map(\.bitPattern)
             let cached = try await engine.render(controls: controls, mode: mode).pixels.map(\.bitPattern)

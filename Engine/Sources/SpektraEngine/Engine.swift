@@ -40,13 +40,14 @@ public struct Controls: Codable, Sendable, Equatable {
 }
 
 /// What a render is for.
-public enum RenderMode: Sendable {
+public enum RenderMode: Sendable, Equatable {
     /// Each change while editing: Spektrafilm's preview mode (no blurs or grain), on the open
     /// photo's preview. Linear, in ``Engine/outputColorSpace``.
     case preview
-    /// The open photo's preview with every effect: the finished look, at the preview's size.
-    /// Linear, in ``Engine/outputColorSpace``.
-    case reduced
+    /// The open photo with every effect, scaled to `longSide` pixels on its long side: the
+    /// finished look at the size the screen shows it (the whole photo, as `full`, if that's no
+    /// smaller). Linear, in ``Engine/outputColorSpace``.
+    case reduced(longSide: Int)
     /// The whole open photo with every effect. Linear, in ``Engine/outputColorSpace``.
     case full
     /// As `full`, encoded for a file in ``Engine/exportColorSpace`` (Spektrafilm's default output).
@@ -75,9 +76,8 @@ public actor Engine {
     private var simulation: Simulation?
     /// The photo renders work on (``open(_:)``).
     private var photo: Photo?
-    /// The preview's long side, for the live preview and reduced renders. Larger than
-    /// Spektrafilm's `preview_max_size` (640), which is soft on a Retina display: about 0.1 s per
-    /// change on an M1 Pro, preview mode and display.
+    /// The live preview's long side. Larger than Spektrafilm's `preview_max_size` (640), which is
+    /// soft on a Retina display: about 0.1 s per change on an M1 Pro, preview mode and display.
     private nonisolated let previewMaxSize = 1600
 
     /// The colour space of preview and full renders: linear sRGB, Spektrafilm's default output
@@ -104,6 +104,10 @@ public actor Engine {
     private struct Photo {
         var full: PhotoImage
         var preview: PhotoImage
+        /// The last `reduced` render's image of the photo.
+        var reduced: PhotoImage
+        /// What Vision found in the photo, for metering the images made later.
+        let regions: MeteringRegions
     }
 
     /// One image of the photo with the exposure each metering mark gives it (Spektrafilm meters
@@ -152,14 +156,7 @@ public actor Engine {
         gpu.reserveMemory(width: width, height: height)
         let full = gpu.makeReadableTexture(width: width, height: height)
         try render(image, from: extent, into: full)
-        var preview = full
-        if max(width, height) > previewMaxSize {
-            // Core Image puts a texture's first row at the bottom.
-            let source = CIImage(mtlTexture: full, options: [.colorSpace: RGBImage.workingColorSpace])!
-            let scaled = RGBImage.scaledDown(source.oriented(.downMirrored), maxPixels: previewMaxSize)
-            preview = gpu.makeReadableTexture(width: Int(scaled.extent.width), height: Int(scaled.extent.height))
-            try render(scaled, from: scaled.extent, into: preview)
-        }
+        let preview = try scaled(full, toLongSide: previewMaxSize)
         // Auto-exposure is metered the same way in every mode (input space, no CCTF decoding).
         let space = tables.colourSpaces[Self.inputColorSpace]!
         let previewLuminance = meteredLuminance(of: Pixels(preview), colourSpace: space, cctfDecoding: false)
@@ -168,16 +165,32 @@ public actor Engine {
         let regions = try MeteringRegions(finding: visionView(of: preview, exposure: centreWeighted.ev))
         let previewImage = PhotoImage(texture: preview, metering: MeteringReadings(
             luminance: previewLuminance.y, width: previewLuminance.width, height: previewLuminance.height, regions: regions))
-        var fullImage = previewImage
-        if full !== preview {
-            let luminance = meteredLuminance(of: Pixels(full), colourSpace: space, cctfDecoding: false)
-            fullImage = PhotoImage(texture: full, metering: MeteringReadings(
-                luminance: luminance.y, width: luminance.width, height: luminance.height, regions: regions))
-        }
-        photo = Photo(full: fullImage, preview: previewImage)
+        let fullImage = full === preview ? previewImage : metered(full, regions: regions)
+        photo = Photo(full: fullImage, preview: previewImage, reduced: previewImage, regions: regions)
         return OpenedPhoto(width: width, height: height, previewWidth: preview.width, previewHeight: preview.height,
                            metering: previewImage.metering,
                            meteringOverlays: regions.overlays(for: previewImage.metering, width: width, height: height))
+    }
+
+    /// `full` scaled down to `longSide` pixels on its long side as Spektrafilm's preview is made
+    /// (Lanczos), or `full` itself if it's no larger.
+    private func scaled(_ full: any MTLTexture, toLongSide longSide: Int) throws -> any MTLTexture {
+        guard max(full.width, full.height) > longSide else { return full }
+        // Core Image puts a texture's first row at the bottom.
+        let source = CIImage(mtlTexture: full, options: [.colorSpace: RGBImage.workingColorSpace])!
+        let scaled = RGBImage.scaledDown(source.oriented(.downMirrored), maxPixels: longSide)
+        let texture = gpu.makeReadableTexture(width: Int(scaled.extent.width), height: Int(scaled.extent.height))
+        try render(scaled, from: scaled.extent, into: texture)
+        return texture
+    }
+
+    /// `texture` as an image of the open photo, metered at every mark (in the input space, no
+    /// CCTF decoding, as in every mode).
+    private func metered(_ texture: any MTLTexture, regions: MeteringRegions) -> PhotoImage {
+        let luminance = meteredLuminance(of: Pixels(texture), colourSpace: tables.colourSpaces[Self.inputColorSpace]!,
+                                         cctfDecoding: false)
+        return PhotoImage(texture: texture, metering: MeteringReadings(
+            luminance: luminance.y, width: luminance.width, height: luminance.height, regions: regions))
     }
 
     /// What Vision looks at: `preview` exposed by Spektrafilm's meter, so a dim scene is readable, as 8-bit
@@ -251,7 +264,24 @@ public actor Engine {
                                         cache: cache)
             self.simulation = simulation
         }
-        let image: WritableKeyPath<Photo, PhotoImage> = mode == .preview || mode == .reduced ? \.preview : \.full
+        let image: WritableKeyPath<Photo, PhotoImage>
+        switch mode {
+        case .preview:
+            image = \.preview
+        case .reduced(let longSide):
+            let full = photo!.full.texture
+            if longSide >= max(full.width, full.height) {
+                image = \.full
+            } else {
+                let last = photo!.reduced.texture
+                if max(last.width, last.height) != longSide {
+                    photo!.reduced = metered(try scaled(full, toLongSide: longSide), regions: photo!.regions)
+                }
+                image = \.reduced
+            }
+        case .full, .export:
+            image = \.full
+        }
 
         let exposureEV = photo![keyPath: image].metering.reading(resolving: controls.exposureMark).ev
             + controls.exposureOffsetEV

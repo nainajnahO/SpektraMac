@@ -26,9 +26,6 @@ final class PhotoModel {
         let metering: MeteringReadings
         /// The region each mark meters, white with the weight as alpha.
         let meteringOverlays: [MeteringMark: CGImage]
-
-        /// Whether the preview is scaled down from the photo, so the photo has a reduced size.
-        var isLargerThanPreview: Bool { width > previewWidth || height > previewHeight }
     }
     /// A new photo renders at once.
     private(set) var photo: Photo? {
@@ -94,12 +91,21 @@ final class PhotoModel {
     private(set) var displayImage: CGImage?
     /// The render `displayImage` comes from.
     private(set) var shownMode: RenderMode?
-    /// Whether the canvas may show the photo larger than its reduced size: the pointer is over it,
-    /// or it's zoomed in. Only then does the whole photo render.
+    /// The photo's long side fitted on the canvas, in screen pixels: what renders are reduced to
+    /// until the canvas may show more. A new size renders a reduced render on screen again.
+    var canvasLongSide = 0 {
+        didSet {
+            if canvasLongSide != oldValue && awaitsFullResolution {
+                render(from: .reduced)
+            }
+        }
+    }
+    /// Whether the canvas may show the photo larger than it fits: the pointer is over it, or it's
+    /// zoomed in. Only then does the whole photo render, if it's larger than the canvas shows it.
     var wantsFullResolution = false {
         didSet {
             if wantsFullResolution && awaitsFullResolution {
-                render(fullResolutionOnly: true)
+                render(from: .full)
             }
         }
     }
@@ -181,11 +187,15 @@ final class PhotoModel {
         }
     }
 
+    /// Where a render starts: a change to the controls at the quick preview, a new canvas size at
+    /// the reduced render, ``wantsFullResolution`` at the whole photo.
+    private enum RenderStart { case preview, reduced, full }
+
     /// Renders the preview, then, once the controls have been still for `fullRenderDelay`, with
-    /// the blurs and grain the preview leaves out: at the preview's size, and the whole photo once
-    /// ``wantsFullResolution``. A photo no larger than its preview renders whole at once. A newer
-    /// change cancels them.
-    private func render(fullResolutionOnly: Bool = false) {
+    /// the blurs and grain the preview leaves out: at the size the canvas shows the photo, and the
+    /// whole photo once ``wantsFullResolution``, or at once where the canvas shows it no smaller.
+    /// A newer render cancels it.
+    private func render(from start: RenderStart = .preview) {
         renderTask?.cancel()
         isRenderingFullResolution = false
         awaitsFullResolution = false
@@ -198,20 +208,25 @@ final class PhotoModel {
         let controls = controls
         renderTask = Task {
             do {
-                if !fullResolutionOnly {
-                    try await show(controls: controls, mode: .preview, engine: engine, photo: photo)
+                if start != .full {
+                    if start == .preview {
+                        try await show(controls: controls, mode: .preview, engine: engine, photo: photo)
+                    }
                     isRendering = false
                     try await Task.sleep(for: Self.fullRenderDelay)
                     isRendering = true
-                    if photo.isLargerThanPreview {
-                        try await show(controls: controls, mode: .reduced, engine: engine, photo: photo)
-                    }
                 }
-                if wantsFullResolution || !photo.isLargerThanPreview {
+                // The canvas's size once things are still (the preview's before it has one).
+                let longSide = canvasLongSide > 0 ? canvasLongSide : max(photo.previewWidth, photo.previewHeight)
+                let reduces = start != .full && longSide < max(photo.width, photo.height)
+                if reduces {
+                    try await show(controls: controls, mode: .reduced(longSide: longSide), engine: engine, photo: photo)
+                }
+                if reduces && !wantsFullResolution {
+                    awaitsFullResolution = true
+                } else {
                     isRenderingFullResolution = true
                     try await show(controls: controls, mode: .full, engine: engine, photo: photo)
-                } else {
-                    awaitsFullResolution = true
                 }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -230,10 +245,10 @@ final class PhotoModel {
         displayImage = display
         shownMode = mode
         let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
-        let size = mode == .full ? "\(photo.width) × \(photo.height)" : "\(photo.previewWidth) × \(photo.previewHeight)"
+        let size = mode == .full ? "\(photo.width) × \(photo.height)" : "\(display.width) × \(display.height)"
         let name = switch mode {
         case .preview: "preview"
-        case .reduced: "reduced size"
+        case .reduced: "screen size"
         case .full, .export: "full resolution"
         }
         note("Rendered \(name) (\(size)) in \(elapsed)")
