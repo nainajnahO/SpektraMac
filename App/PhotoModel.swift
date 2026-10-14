@@ -27,9 +27,12 @@ final class PhotoModel {
         /// The region each mark meters, white with the weight as alpha.
         let meteringOverlays: [MeteringMark: CGImage]
     }
-    /// A new photo renders at once.
+    /// A new photo empties the kept renders and renders at once.
     private(set) var photo: Photo? {
-        didSet { scheduleRender() }
+        didSet {
+            finishedRenders.removeAllObjects()
+            scheduleRender()
+        }
     }
     /// The photo's EXIF, GPS and IPTC records, for saved renderings.
     @ObservationIgnored private var metadata: PhotoMetadata?
@@ -126,6 +129,15 @@ final class PhotoModel {
     private let engine: Engine?
     private let logger = Logger(subsystem: "nainajnahO.SpektraMac", category: "model")
     private var renderTask: Task<Void, Never>?
+    /// Finished renders at the canvas's size for the open photo, by the controls they show: going
+    /// back to controls shown before (hovering back to a stock, a slider back at a value) shows
+    /// them at once. Not full-resolution ones (96 MB at 24 MP). `NSCache` drops the oldest past
+    /// 512 MB, and all of them when memory runs low.
+    private let finishedRenders: NSCache<RenderKey, CGImage> = {
+        let cache = NSCache<RenderKey, CGImage>()
+        cache.totalCostLimit = 512 << 20
+        return cache
+    }()
     private var renderScheduled = false
     private var saveTask: Task<Void, Never>?
 
@@ -198,6 +210,7 @@ final class PhotoModel {
     /// the blurs and grain the preview leaves out: at the size the canvas shows the photo, and the
     /// whole photo once ``wantsFullResolution``, or at once where the canvas shows it no smaller.
     /// A change cancels it, except a preview, which shows and then renders the newest controls.
+    /// Controls with a kept finished render (``finishedRenders``) show it instead, at once.
     private func render(from start: RenderStart = .preview) {
         // A preview in flight shows, then renders the newest controls: cancelling it at each step
         // of a slider would leave none on screen until the slider pauses.
@@ -216,23 +229,27 @@ final class PhotoModel {
         renderTask = Task {
             var controls = self.controls
             do {
-                if start != .full {
-                    if start == .preview {
-                        try await show(controls: controls, mode: .preview, engine: engine, photo: photo)
-                        while controls != self.controls {
-                            controls = self.controls
+                // Whether a kept finished render is on screen.
+                var isFinished = false
+                if start == .preview {
+                    repeat {
+                        controls = self.controls
+                        isFinished = showKept(controls, photo: photo)
+                        if !isFinished {
                             try await show(controls: controls, mode: .preview, engine: engine, photo: photo)
                         }
-                        isPreviewing = false
-                    }
+                    } while controls != self.controls
+                    isPreviewing = false
+                }
+                if start != .full && !isFinished {
                     isRendering = false
                     try await Task.sleep(for: Self.fullRenderDelay)
                     isRendering = true
                 }
-                // The canvas's size once things are still (the preview's before it has one).
-                let longSide = canvasLongSide > 0 ? canvasLongSide : max(photo.previewWidth, photo.previewHeight)
+                // The canvas's size once things are still.
+                let longSide = reducedLongSide(of: photo)
                 let reduces = start != .full && longSide < max(photo.width, photo.height)
-                if reduces {
+                if reduces && !isFinished {
                     try await show(controls: controls, mode: .reduced(longSide: longSide), engine: engine, photo: photo)
                 }
                 if reduces && !wantsFullResolution {
@@ -251,6 +268,23 @@ final class PhotoModel {
         }
     }
 
+    /// The long side renders are reduced to: the canvas's (the preview's before it has a size).
+    private func reducedLongSide(of photo: Photo) -> Int {
+        canvasLongSide > 0 ? canvasLongSide : max(photo.previewWidth, photo.previewHeight)
+    }
+
+    /// Puts the kept finished render of `controls` on screen, if there is one.
+    private func showKept(_ controls: Controls, photo: Photo) -> Bool {
+        let longSide = reducedLongSide(of: photo)
+        guard let image = finishedRenders.object(forKey: RenderKey(controls: controls, longSide: longSide)) else {
+            return false
+        }
+        displayImage = image
+        shownMode = .reduced(longSide: longSide)
+        note("Showed the kept screen size (\(image.width) × \(image.height))")
+        return true
+    }
+
     /// Renders the photo and puts it on screen, unless a newer change has made it stale.
     private func show(controls: Controls, mode: RenderMode, engine: Engine, photo: Photo) async throws {
         let start = ContinuousClock.now
@@ -258,6 +292,10 @@ final class PhotoModel {
         try Task.checkCancellation()
         displayImage = display
         shownMode = mode
+        if case .reduced(let longSide) = mode {
+            finishedRenders.setObject(display, forKey: RenderKey(controls: controls, longSide: longSide),
+                                      cost: display.bytesPerRow * display.height)
+        }
         let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
         let size = mode == .full ? "\(photo.width) × \(photo.height)" : "\(display.width) × \(display.height)"
         let name = switch mode {
@@ -266,6 +304,28 @@ final class PhotoModel {
         case .full, .export: "full resolution"
         }
         note("Rendered \(name) (\(size)) in \(elapsed)")
+    }
+
+    /// What a kept render shows: `NSCache` wants an object key.
+    private nonisolated final class RenderKey: NSObject {
+        let controls: Controls
+        let longSide: Int
+
+        init(controls: Controls, longSide: Int) {
+            (self.controls, self.longSide) = (controls, longSide)
+        }
+
+        override func isEqual(_ object: Any?) -> Bool {
+            guard let other = object as? RenderKey else { return false }
+            return controls == other.controls && longSide == other.longSide
+        }
+
+        override var hash: Int {
+            var hasher = Hasher()
+            hasher.combine(controls)
+            hasher.combine(longSide)
+            return hasher.finalize()
+        }
     }
 
     // MARK: Saving and cancelling
