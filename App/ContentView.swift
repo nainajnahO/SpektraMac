@@ -84,10 +84,7 @@ private struct SettingsSidebar: View {
                 .disabled(model.controls.scanFilm)
             }
             Section("Exposure") {
-                Toggle("Auto exposure", isOn: $model.controls.autoExposure)
-                ValueSlider("Compensation", value: $model.controls.exposureCompensationEV, in: -5...5, step: 0.25,
-                            format: .number.precision(.fractionLength(2)).sign(strategy: .always(includingZero: false)),
-                            unit: "EV")
+                ExposureSlider()
             }
             Section("Enlarger") {
                 ValueSlider("Print exposure", value: $model.controls.printExposure, in: 0...2, step: 0.02,
@@ -106,6 +103,113 @@ private struct SettingsSidebar: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// The exposure, in stops over the photo as shot. Its dots are where each way of metering puts
+/// it for this photo (``MeteringMark``); a mark's name shows only while the slider is on it, so
+/// marks a fraction of a stop apart don't crowd, and the trackpad clicks as it lands on one.
+private struct ExposureSlider: View {
+    @Environment(PhotoModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        let readings = model.photo.map { photo in
+            MeteringMark.allCases.compactMap { mark in photo.metering.ev[mark.rawValue].map { (mark: mark, ev: $0) } }
+        } ?? []
+        let here = model.marksAtExposure
+        let range = range(readings.map(\.ev) + [model.exposureEV])
+        VStack(alignment: .leading, spacing: 6) {
+            LabeledContent("Exposure") {
+                Text("\(model.exposureEV.formatted(Self.stops)) EV").monospacedDigit()
+            }
+            Slider(value: $model.exposureEV, in: range) {
+                Text("Exposure")
+            } ticks: {
+                SliderTickContentForEach(Set(readings.map(\.ev)).sorted(), id: \.self) { SliderTick($0) }
+            } onEditingChanged: { model.isAdjustingExposure = $0 }
+            .labelsHidden()
+            .sensoryFeedback(.alignment, trigger: here) { _, new in model.isAdjustingExposure && !new.isEmpty }
+            MarkName(name: here.map(\.name).formatted(.list(type: .and)),
+                     fraction: (model.exposureEV - range.lowerBound) / (range.upperBound - range.lowerBound))
+            Text(description(here: here))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .disabled(model.photo == nil)
+    }
+
+    private static let stops = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))
+        .sign(strategy: .always(includingZero: false))
+
+    /// −4…+8 stops, widened to whole stops past any reading outside it.
+    private func range(_ values: [Double]) -> ClosedRange<Double> {
+        min(-4, (values.min() ?? 0).rounded(.down) - 1)...max(8, (values.max() ?? 0).rounded(.up) + 1)
+    }
+
+    /// What the mark the slider is on meters, or how far it is from the nearest one.
+    private func description(here: [MeteringMark]) -> String {
+        guard let photo = model.photo else {
+            return "\(model.controls.exposureMark.name): \(model.controls.exposureMark.about)."
+        }
+        let resolved = photo.metering.reading(resolving: model.controls.exposureMark).mark
+        var text = if let mark = here.first(where: { $0 == resolved }) ?? here.first {
+            "\(mark.name): \(mark.about)."
+        } else {
+            "\(model.controls.exposureOffsetEV.formatted(Self.stops)) EV from \(resolved.name)."
+        }
+        if resolved != model.controls.exposureMark {
+            text += " No \(model.controls.exposureMark.name.lowercased()) found in this photo, so it starts from \(resolved.name)."
+        }
+        return text
+    }
+}
+
+/// The name of the mark the slider is on, under its dot. A slider tick's own label would be the
+/// built-in way, but SwiftUI (macOS 26) draws it once and keeps its first text however it
+/// changes, so the name is a text of its own at the dot: the slider's track ends 10 pt in from
+/// each side (its knob's radius), measured. Kept inside the row at the ends.
+private struct MarkName: View {
+    let name: String
+    /// Where the dot is along the slider, 0 at its minimum.
+    let fraction: Double
+    @State private var width: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { geometry in
+            let inset = 10.0
+            let x = inset + fraction * (geometry.size.width - 2 * inset)
+            Text(name)
+                .foregroundStyle(.tint)
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+                .position(x: min(max(x, width / 2), geometry.size.width - width / 2), y: geometry.size.height / 2)
+        }
+        .frame(height: 16)
+    }
+}
+
+private extension MeteringMark {
+    var name: String {
+        switch self {
+        case .asShot: "As shot"
+        case .centreWeighted: "Centre-weighted"
+        case .objects: "Objects"
+        case .people: "People"
+        case .faces: "Faces"
+        }
+    }
+
+    /// What the mark's exposure is.
+    var about: String {
+        switch self {
+        case .asShot: "the exposure the camera chose"
+        case .centreWeighted: "meters the whole frame, the centre counting most, as Spektrafilm and a film camera do"
+        case .objects: "meters what stands out in the frame"
+        case .people: "meters the people in the frame, so a bright sky or background can't darken them"
+        case .faces: "meters the faces in the frame"
+        }
     }
 }
 
@@ -170,6 +274,7 @@ private struct ImageCanvas: View {
                     Image(decorative: image, scale: 1)
                         .resizable()
                         .interpolation(.high)
+                        .overlay { meteringOverlay }
                         .frame(width: fitted.width * zoom, height: fitted.height * zoom)
                         .position(x: geometry.size.width / 2 + offset.width, y: geometry.size.height / 2 + offset.height)
                 }
@@ -236,6 +341,22 @@ private struct ImageCanvas: View {
         .onChange(of: model.photo?.id) {
             zoom = 1
             offset = .zero
+        }
+    }
+
+    /// While the Exposure slider is held on a mark: the region that mark meters, tinted.
+    @ViewBuilder private var meteringOverlay: some View {
+        if model.isAdjustingExposure, let photo = model.photo {
+            ZStack {
+                ForEach(model.marksAtExposure, id: \.self) { mark in
+                    if let overlay = photo.meteringOverlays[mark] {
+                        Color.pink
+                            .mask { Image(decorative: overlay, scale: 1).resizable() }
+                            .opacity(0.5)
+                    }
+                }
+            }
+            .allowsHitTesting(false)
         }
     }
 
