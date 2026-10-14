@@ -79,6 +79,9 @@ private struct SettingsSidebar: View {
             case .camera:
                 Section("Exposure") {
                     ExposureSlider()
+                    ValueSlider("Highlight boost", value: $model.controls.highlightBoost, in: 0...10, step: 0.5,
+                                format: .number.precision(.fractionLength(1)), unit: "EV")
+                        .help("Raises the brightest highlights before they reach the film, rebuilding light the camera clipped, so bright lights glow more.")
                 }
             case .film:
                 Section {
@@ -101,6 +104,20 @@ private struct SettingsSidebar: View {
                             .help("How far light spreads inside the emulsion, over the film's own.")
                     }
                     .disabled(!model.controls.halation)
+                }
+                Section("Couplers") {
+                    Toggle("Couplers", isOn: $model.controls.couplers)
+                    // At most 1.5: much stronger inhibition (both at 2, say) breaks Spektrafilm's
+                    // curves corrected for it, greys and all, in Python as here.
+                    Group {
+                        ValueSlider("Saturation", value: $model.controls.couplerSaturation, in: 0...1.5, step: 0.05,
+                                    format: .number.precision(.fractionLength(2)))
+                            .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
+                        ValueSlider("Edge contrast", value: $model.controls.couplerEdgeContrast, in: 0...1.5, step: 0.05,
+                                    format: .number.precision(.fractionLength(2)))
+                            .help("How strongly each layer holds back its own development nearby: more gives crisper edges in fine detail. The overall contrast stays the film's.")
+                    }
+                    .disabled(!model.controls.couplers)
                 }
                 Section("Grain") {
                     Toggle("Grain", isOn: $model.controls.grain)
@@ -128,6 +145,9 @@ private struct SettingsSidebar: View {
                     Section {
                         StockRow(title: "Paper", stocks: model.papers, selection: $model.controls.paper,
                                  controls: $model.controls)
+                        ValueSlider("Contrast", value: $model.controls.printContrast, in: 0.5...2, step: 0.05,
+                                    format: .number.precision(.fractionLength(2)))
+                            .help("The paper's contrast around mid-grey: lower brings a bright sky and dark faces closer together.")
                     }
                     Section("Enlarger") {
                         ValueSlider("Print exposure", value: $model.controls.printExposure, in: 0...2, step: 0.02,
@@ -138,6 +158,24 @@ private struct SettingsSidebar: View {
                         ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: -100...100, step: 1,
                                     format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
                                     unit: "CC")
+                        ValueSlider("Preflash", value: $model.controls.preflash, in: 0...0.05, step: 0.001,
+                                    format: .number.precision(.fractionLength(3)))
+                            .help("A flash of plain light on the paper before the print, so light tones such as a bright sky gain some tone. It darkens the whole print: lower the print exposure to bring the mid-tones back.")
+                    }
+                    Section("Glare") {
+                        Toggle("Glare", isOn: $model.controls.glare)
+                        Group {
+                            ValueSlider("Amount", value: $model.controls.glareAmount, in: 0...1, step: 0.01,
+                                        format: .number.precision(.fractionLength(2)), unit: "%")
+                                .help("Stray light over the print as it's viewed, in percent of the light: it lifts the blacks.")
+                            ValueSlider("Roughness", value: $model.controls.glareRoughness, in: 0...1, step: 0.05,
+                                        format: .number.precision(.fractionLength(2)))
+                                .help("How unevenly the stray light falls.")
+                            ValueSlider("Softness", value: $model.controls.glareSoftness, in: 0...3, step: 0.1,
+                                        format: .number.precision(.fractionLength(1)), unit: "px")
+                                .help("The blur over the stray light, in pixels of the render.")
+                        }
+                        .disabled(!model.controls.glare)
                     }
                 }
                 .disabled(model.controls.scanFilm)
