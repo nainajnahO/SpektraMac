@@ -89,8 +89,28 @@ final class PhotoModel {
     var isAdjustingExposure = false
     /// Display-sized rendering of the last simulation.
     private(set) var displayImage: CGImage?
-    /// Whether `displayImage` comes from the full-resolution render rather than the preview.
-    private(set) var showsFullResolution = false
+    /// The render `displayImage` comes from.
+    private(set) var shownMode: RenderMode?
+    /// The photo's long side fitted on the canvas, in screen pixels: what renders are reduced to
+    /// until the canvas may show more. A new size renders a reduced render on screen again.
+    var canvasLongSide = 0 {
+        didSet {
+            if canvasLongSide != oldValue && awaitsFullResolution {
+                render(from: .reduced)
+            }
+        }
+    }
+    /// Whether the canvas may show the photo larger than it fits: the pointer is over it, or it's
+    /// zoomed in. Only then does the whole photo render, if it's larger than the canvas shows it.
+    var wantsFullResolution = false {
+        didSet {
+            if wantsFullResolution && awaitsFullResolution {
+                render(from: .full)
+            }
+        }
+    }
+    /// The reduced render is on screen and the controls haven't changed since.
+    private var awaitsFullResolution = false
     private(set) var isLoading = false
     private(set) var isRendering = false
     private(set) var isRenderingFullResolution = false
@@ -134,6 +154,7 @@ final class PhotoModel {
                 renderTask?.cancel()
                 isRendering = false
                 isRenderingFullResolution = false
+                awaitsFullResolution = false
                 let opened = try await engine.open(image)
                 self.metadata = metadata
                 photo = Photo(name: url.lastPathComponent, width: opened.width, height: opened.height,
@@ -153,7 +174,7 @@ final class PhotoModel {
 
     // MARK: Rendering
 
-    /// How long the controls stay still before the whole photo renders.
+    /// How long the controls stay still before the blurs and grain render.
     private static let fullRenderDelay = Duration.milliseconds(500)
 
     /// Renders once per main-actor turn, however many settings changed in it.
@@ -166,11 +187,18 @@ final class PhotoModel {
         }
     }
 
-    /// Renders the preview, then, once the controls have been still for `fullRenderDelay`, the
-    /// whole photo with the blurs and grain the preview leaves out. A newer change cancels both.
-    private func render() {
+    /// Where a render starts: a change to the controls at the quick preview, a new canvas size at
+    /// the reduced render, ``wantsFullResolution`` at the whole photo.
+    private enum RenderStart { case preview, reduced, full }
+
+    /// Renders the preview, then, once the controls have been still for `fullRenderDelay`, with
+    /// the blurs and grain the preview leaves out: at the size the canvas shows the photo, and the
+    /// whole photo once ``wantsFullResolution``, or at once where the canvas shows it no smaller.
+    /// A newer render cancels it.
+    private func render(from start: RenderStart = .preview) {
         renderTask?.cancel()
         isRenderingFullResolution = false
+        awaitsFullResolution = false
         guard let photo, let engine else {
             displayImage = nil
             isRendering = false
@@ -180,13 +208,26 @@ final class PhotoModel {
         let controls = controls
         renderTask = Task {
             do {
-                try await show(controls: controls, mode: .preview, engine: engine,
-                               size: "\(photo.previewWidth) × \(photo.previewHeight)")
-                isRendering = false
-                try await Task.sleep(for: Self.fullRenderDelay)
-                isRendering = true
-                isRenderingFullResolution = true
-                try await show(controls: controls, mode: .full, engine: engine, size: "\(photo.width) × \(photo.height)")
+                if start != .full {
+                    if start == .preview {
+                        try await show(controls: controls, mode: .preview, engine: engine, photo: photo)
+                    }
+                    isRendering = false
+                    try await Task.sleep(for: Self.fullRenderDelay)
+                    isRendering = true
+                }
+                // The canvas's size once things are still (the preview's before it has one).
+                let longSide = canvasLongSide > 0 ? canvasLongSide : max(photo.previewWidth, photo.previewHeight)
+                let reduces = start != .full && longSide < max(photo.width, photo.height)
+                if reduces {
+                    try await show(controls: controls, mode: .reduced(longSide: longSide), engine: engine, photo: photo)
+                }
+                if reduces && !wantsFullResolution {
+                    awaitsFullResolution = true
+                } else {
+                    isRenderingFullResolution = true
+                    try await show(controls: controls, mode: .full, engine: engine, photo: photo)
+                }
             } catch {
                 guard !Task.isCancelled else { return }
                 fail("Could not render", error)
@@ -196,16 +237,21 @@ final class PhotoModel {
         }
     }
 
-    /// Renders the photo and puts it on screen, unless a newer change has made it stale. `size`
-    /// is the rendered size, for the log.
-    private func show(controls: Controls, mode: RenderMode, engine: Engine, size: String) async throws {
+    /// Renders the photo and puts it on screen, unless a newer change has made it stale.
+    private func show(controls: Controls, mode: RenderMode, engine: Engine, photo: Photo) async throws {
         let start = ContinuousClock.now
         let display = try await engine.display(controls: controls, mode: mode)
         try Task.checkCancellation()
         displayImage = display
-        showsFullResolution = mode == .full
+        shownMode = mode
         let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
-        note("Rendered \(mode == .full ? "full resolution" : "preview") (\(size)) in \(elapsed)")
+        let size = mode == .full ? "\(photo.width) × \(photo.height)" : "\(display.width) × \(display.height)"
+        let name = switch mode {
+        case .preview: "preview"
+        case .reduced: "screen size"
+        case .full, .export: "full resolution"
+        }
+        note("Rendered \(name) (\(size)) in \(elapsed)")
     }
 
     // MARK: Saving and cancelling

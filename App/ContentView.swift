@@ -264,6 +264,7 @@ private struct ImageCanvas: View {
     @State private var dragStart: CGSize?
     @State private var pinched: CGFloat = 1
     @State private var scrollMonitor: Any?
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Group {
@@ -272,7 +273,7 @@ private struct ImageCanvas: View {
                 // photo would make that the window's minimum, which the split view then chases
                 // until AppKit gives up (an exception when a photo opens).
                 GeometryReader { geometry in
-                    let fitted = fittedSize(for: image, in: geometry.size)
+                    let fitted = fittedSize(in: geometry.size)
                     Image(decorative: image, scale: 1)
                         .resizable()
                         .interpolation(.high)
@@ -344,6 +345,13 @@ private struct ImageCanvas: View {
             zoom = 1
             offset = .zero
         }
+        .onChange(of: fittedLongSide, initial: true) { _, pixels in
+            model.canvasLongSide = pixels
+        }
+        // With the pointer anywhere over the canvas, where scrolling zooms.
+        .onChange(of: pointer != nil || zoom > 1, initial: true) { _, wants in
+            model.wantsFullResolution = wants
+        }
     }
 
     /// While the Exposure slider is held on a mark: the region that mark meters, tinted.
@@ -362,19 +370,27 @@ private struct ImageCanvas: View {
         }
     }
 
-    /// The image's size scaled to fit `size`, with a margin.
-    private func fittedSize(for image: CGImage, in size: CGSize) -> CGSize {
+    /// The photo's size scaled to fit `size`, with a margin: the photo's own shape, whichever
+    /// render is shown, so swapping renders can't move it.
+    private func fittedSize(in size: CGSize) -> CGSize {
+        guard let photo = model.photo else { return .zero }
         let inset: CGFloat = 12
-        let scale = max(0, min((size.width - 2 * inset) / CGFloat(image.width),
-                               (size.height - 2 * inset) / CGFloat(image.height)))
-        return CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
+        let scale = max(0, min((size.width - 2 * inset) / CGFloat(photo.width),
+                               (size.height - 2 * inset) / CGFloat(photo.height)))
+        return CGSize(width: CGFloat(photo.width) * scale, height: CGFloat(photo.height) * scale)
+    }
+
+    /// The fitted photo's long side in screen pixels.
+    private var fittedLongSide: Int {
+        let fitted = fittedSize(in: canvasSize)
+        return Int((max(fitted.width, fitted.height) * displayScale).rounded(.up))
     }
 
     /// Zooms by `factor`, keeping the photo's point under `anchor` (canvas coordinates) where it
     /// is: from all of the photo to 4 points per photo pixel.
     private func zoom(by factor: CGFloat, at anchor: CGPoint) {
-        guard let image = model.displayImage, let photo = model.photo else { return }
-        let fitted = fittedSize(for: image, in: canvasSize)
+        guard let photo = model.photo else { return }
+        let fitted = fittedSize(in: canvasSize)
         guard fitted.width > 0 else { return }
         let newZoom = min(max(zoom * factor, 1), max(1, 4 * CGFloat(photo.width) / fitted.width))
         let applied = newZoom / zoom
@@ -388,8 +404,7 @@ private struct ImageCanvas: View {
     /// `offset` limited so the zoomed photo fills the canvas where it's larger, and stays
     /// centred where it's smaller.
     private func clamped(_ offset: CGSize) -> CGSize {
-        guard let image = model.displayImage else { return .zero }
-        let fitted = fittedSize(for: image, in: canvasSize)
+        let fitted = fittedSize(in: canvasSize)
         let slack = CGSize(width: max(0, (fitted.width * zoom - canvasSize.width) / 2),
                            height: max(0, (fitted.height * zoom - canvasSize.height) / 2))
         return CGSize(width: min(max(offset.width, -slack.width), slack.width),
@@ -416,8 +431,10 @@ private struct StatusBar: View {
                 ProgressView().controlSize(.mini)
                 Text(model.isRenderingFullResolution ? "Rendering full resolution…" : "Rendering…")
             } else if let photo = model.photo {
-                if model.showsFullResolution {
+                if model.shownMode == .full {
                     Label("Full resolution, \(photo.width) × \(photo.height)", systemImage: "photo")
+                } else if case .reduced? = model.shownMode, let image = model.displayImage {
+                    Label("Screen size, \(image.width) × \(image.height)", systemImage: "photo")
                 } else {
                     Label("Preview, \(photo.previewWidth) × \(photo.previewHeight)", systemImage: "eye")
                 }
