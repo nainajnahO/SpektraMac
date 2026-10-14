@@ -403,15 +403,17 @@ private struct StatusBar: View {
     @Environment(PhotoModel.self) private var model
 
     var body: some View {
+        // Mini spinners keep the bar the labels' height: a small one makes it a point taller, and
+        // the photo above would shrink each time a render starts and grow when it ends.
         HStack(spacing: 12) {
             if model.isLoading {
-                ProgressView().controlSize(.small)
+                ProgressView().controlSize(.mini)
                 Text("Opening…")
             } else if let phase = model.savePhase {
-                ProgressView().controlSize(.small)
+                ProgressView().controlSize(.mini)
                 Text(phase)
             } else if model.isRendering {
-                ProgressView().controlSize(.small)
+                ProgressView().controlSize(.mini)
                 Text(model.isRenderingFullResolution ? "Rendering full resolution…" : "Rendering…")
             } else if let photo = model.photo {
                 if model.showsFullResolution {
