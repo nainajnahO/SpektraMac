@@ -27,8 +27,11 @@ public struct Controls: Codable, Sendable, Hashable {
     /// A flash of the bare enlarger light on the paper before the print, as a fraction of the
     /// clear film base's exposure: it darkens light tones more than white or the shadows.
     public var preflash = 0.0
-    /// The paper's contrast, as a multiplier of its curves' gamma around mid-grey.
+    /// The paper's contrast, as a multiplier of its curves' gamma around mid-grey; and of its
+    /// light tones' alone (its fastest sub-layer's) and its dark tones' (the others').
     public var printContrast = 1.0
+    public var printHighlightContrast = 1.0
+    public var printShadowContrast = 1.0
     /// Stray light over the print when it's viewed: its mean in percent of the light, its spread
     /// relative to that, and its blur in pixels.
     public var glare = true
@@ -436,7 +439,10 @@ public actor Engine {
         parameters.enlarger.preflashExposure = controls.preflash
         // Off at 1: Python's default, which the morph at 1 renders identically.
         parameters.printRender.densityCurvesMorph.active = controls.printContrast != 1
+            || controls.printHighlightContrast != 1 || controls.printShadowContrast != 1
         parameters.printRender.densityCurvesMorph.gammaFactor = controls.printContrast
+        parameters.printRender.densityCurvesMorph.gammaFactorFast = controls.printHighlightContrast
+        parameters.printRender.densityCurvesMorph.gammaFactorSlow = controls.printShadowContrast
         parameters.printRender.glare.active = controls.glare
         parameters.printRender.glare.percent = controls.glareAmount
         parameters.printRender.glare.roughness = controls.glareRoughness

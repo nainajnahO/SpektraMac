@@ -148,6 +148,12 @@ private struct SettingsSidebar: View {
                         ValueSlider("Contrast", value: $model.controls.printContrast, in: 0.5...2, step: 0.05,
                                     format: .number.precision(.fractionLength(2)))
                             .help("The paper's contrast around mid-grey: lower brings a bright sky and dark faces closer together.")
+                        ValueSlider("Highlight contrast", value: $model.controls.printHighlightContrast, in: 0.5...2,
+                                    step: 0.05, format: .number.precision(.fractionLength(2)))
+                            .help("The paper's contrast in the light tones alone: lower keeps more detail in a bright sky.")
+                        ValueSlider("Shadow contrast", value: $model.controls.printShadowContrast, in: 0.5...2,
+                                    step: 0.05, format: .number.precision(.fractionLength(2)))
+                            .help("The paper's contrast in the dark tones alone: lower opens up faces in shadow.")
                     }
                     Section("Enlarger") {
                         ValueSlider("Print exposure", value: $model.controls.printExposure, in: 0...2, step: 0.02,
