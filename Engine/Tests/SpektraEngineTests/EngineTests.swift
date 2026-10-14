@@ -218,6 +218,28 @@ func controlsDigestLikePython(caseName: String) throws {
     #expect(parameters == golden.params)
 }
 
+/// The halation and grain sliders set Spektrafilm's high-level halation scalars (the film's own
+/// halation preset stays), and the grain's particle area and blur; nothing else.
+@Test func effectControlsSetTheirParameters() throws {
+    var controls = Controls()
+    controls.halationAmount = 2
+    controls.halationSize = 0.5
+    controls.scatterAmount = 0.25
+    controls.scatterSize = 1.5
+    controls.grainSize = 0.4
+    controls.grainSoftness = 0.9
+    let (film, paper, database) = (try Profile.load(controls.film), try Profile.load(controls.paper),
+                                   try Tables.loadNeutralPrintFilters())
+    var expected = Engine.parameters(for: Controls(), film: film, print: paper, database: database, mode: .full)
+    expected.filmRender.halation.halationAmount = 2
+    expected.filmRender.halation.halationSpatialScale = 0.5
+    expected.filmRender.halation.scatterAmount = 0.25
+    expected.filmRender.halation.scatterSpatialScale = 1.5
+    expected.filmRender.grain.particleAreaUm2 = 0.4
+    expected.filmRender.grain.blur = 0.9
+    #expect(Engine.parameters(for: controls, film: film, print: paper, database: database, mode: .full) == expected)
+}
+
 /// The pickers' lists: Spektrafilm's `FilmStocks` and `PrintPapers`, and every film's target
 /// print among the papers.
 @Test func stockLists() throws {
@@ -405,8 +427,14 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     controls.printExposure = 1.24
     controls.yFilterShift = -7
     controls.mFilterShift = 12
-    controls.grain = false
     controls.halation = false
+    controls.halationAmount = 1.5
+    controls.halationSize = 0.8
+    controls.scatterAmount = 0.5
+    controls.scatterSize = 1.2
+    controls.grain = false
+    controls.grainSize = 0.4
+    controls.grainSoftness = 0.8
     let preset = try controls.preset()
     #expect(try Controls(preset: preset) == controls)
     let text = try #require(String(data: preset, encoding: .utf8))
