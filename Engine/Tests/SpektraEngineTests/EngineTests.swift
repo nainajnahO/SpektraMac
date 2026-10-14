@@ -225,6 +225,8 @@ func controlsDigestLikePython(caseName: String) throws {
     controls.highlightBoost = 3
     controls.preflash = 0.02
     controls.printContrast = 0.8
+    controls.printHighlightContrast = 0.7
+    controls.printShadowContrast = 1.3
     controls.glare = false
     controls.glareAmount = 0.2
     controls.glareRoughness = 0.5
@@ -245,6 +247,8 @@ func controlsDigestLikePython(caseName: String) throws {
     expected.enlarger.preflashExposure = 0.02
     expected.printRender.densityCurvesMorph.active = true
     expected.printRender.densityCurvesMorph.gammaFactor = 0.8
+    expected.printRender.densityCurvesMorph.gammaFactorFast = 0.7
+    expected.printRender.densityCurvesMorph.gammaFactorSlow = 1.3
     expected.printRender.glare = Parameters.Glare(active: false, percent: 0.2, roughness: 0.5, blur: 1.5)
     expected.filmRender.dirCouplers.active = false
     expected.filmRender.dirCouplers.inhibitionInterlayer = 1.4
@@ -256,6 +260,14 @@ func controlsDigestLikePython(caseName: String) throws {
     expected.filmRender.grain.particleAreaUm2 = 0.4
     expected.filmRender.grain.blur = 0.9
     #expect(Engine.parameters(for: controls, film: film, print: paper, database: database, mode: .full) == expected)
+
+    // Any of the paper's contrasts away from 1 turns the morph on.
+    for contrast in [\Controls.printContrast, \.printHighlightContrast, \.printShadowContrast] {
+        var controls = Controls()
+        controls[keyPath: contrast] = 1.1
+        #expect(Engine.parameters(for: controls, film: film, print: paper, database: database, mode: .full)
+            .printRender.densityCurvesMorph.active)
+    }
 }
 
 /// The pickers' lists: Spektrafilm's `FilmStocks` and `PrintPapers`, and every film's target
@@ -448,6 +460,8 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     controls.highlightBoost = 2
     controls.preflash = 0.01
     controls.printContrast = 1.2
+    controls.printHighlightContrast = 0.8
+    controls.printShadowContrast = 1.1
     controls.glare = false
     controls.glareAmount = 0.1
     controls.glareRoughness = 0.4
