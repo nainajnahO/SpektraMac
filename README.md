@@ -20,25 +20,18 @@ Swift with the image pipeline on the GPU via Metal.
 |---|---|
 | `App/` | SwiftUI app |
 | `Engine/` | `SpektraEngine` Swift package (Metal shaders, host code, tests) and the `spektra-cli` tool |
-| `Engine/Sources/SpektraEngine/Resources/` | Film/paper profiles and spectral tables exported from Spektrafilm by `tools/export_tables.py` |
-| `tools/` | Python scripts that export data and generate reference data from the original Spektrafilm |
+| `Engine/Sources/SpektraEngine/Resources/` | Film/paper profiles and spectral tables exported from Spektrafilm |
 
 Requires macOS 26.5 or newer and Xcode 27.
 
 ## Reference data
 
-The parity tests compare every stage against dumps from the original Python Spektrafilm. They are
-not committed (about 80 MB); generate them once with the pinned release:
-
-```bash
-uv tool install spektrafilm==0.3.4
-~/.local/share/uv/tools/spektrafilm/bin/python tools/golden.py
-```
-
-This writes `golden/<case>/` with one float32 `.npy` per pipeline tap, the film's spectral lookup
-table and the parameters used. `golden/manifest.json` (committed) holds a checksum of every file,
-so `git diff` shows whether a regeneration changed anything. See the top of
-[tools/golden.py](tools/golden.py) for the inputs, film pairs and settings.
+The parity tests compare every stage against dumps from the original Python Spektrafilm 0.3.4 in
+`golden/<case>/`: one float32 `.npy` per pipeline tap, the film's spectral lookup table and the
+parameters used. Neither the dumps (about 230 MB) nor the Python scripts that make them and that
+exported the bundled data are in the repository; without `golden/`, those tests fail with a "not
+found" error. `golden/manifest.json` (committed) holds a checksum of every file, so `git diff` shows
+whether a regeneration changed anything.
 
 ## Credits and licence
 
