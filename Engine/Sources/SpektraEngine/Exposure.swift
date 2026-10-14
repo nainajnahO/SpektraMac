@@ -10,20 +10,13 @@ import Metal
 /// Runs on the CPU in f64: it reads only the preview's pixels, and the preview has to be
 /// scikit-image's `rescale(order=0)` exactly (see ``smallPreview(of:maxSize:)``).
 public func autoExposureEV(of image: RGBImage, colourSpace: Tables.ColourSpace, cctfDecoding: Bool) -> Double {
-    image.pixels.withUnsafeBufferPointer { pixels in
-        autoExposureEV(of: Pixels(base: pixels.baseAddress!, width: image.width, height: image.height, components: 3,
-                                  rowLength: image.width * 3),
-                       colourSpace: colourSpace, cctfDecoding: cctfDecoding)
+    let luminance = image.pixels.withUnsafeBufferPointer { pixels in
+        meteredLuminance(of: Pixels(base: pixels.baseAddress!, width: image.width, height: image.height, components: 3,
+                                    rowLength: image.width * 3),
+                         colourSpace: colourSpace, cctfDecoding: cctfDecoding)
     }
-}
-
-/// ``autoExposureEV(of:colourSpace:cctfDecoding:)-(RGBImage,_,_)`` of a texture made by
-/// ``GPU/makeReadableTexture(width:height:)``, read in place.
-func autoExposureEV(of texture: any MTLTexture, colourSpace: Tables.ColourSpace, cctfDecoding: Bool) -> Double {
-    let base = texture.buffer!.contents().assumingMemoryBound(to: Float.self)
-    return autoExposureEV(of: Pixels(base: base, width: texture.width, height: texture.height, components: 4,
-                                     rowLength: texture.bufferBytesPerRow / 4),
-                          colourSpace: colourSpace, cctfDecoding: cctfDecoding)
+    // Python falls back to 0 EV for a black frame.
+    return exposureEV(luminance.y, weights: centreWeights(width: luminance.width, height: luminance.height)) ?? 0
 }
 
 /// An image's floats where they are: RGB first in each pixel's `components`, rows `rowLength`
@@ -36,30 +29,53 @@ struct Pixels {
     let rowLength: Int
 }
 
-private func autoExposureEV(of image: Pixels, colourSpace: Tables.ColourSpace, cctfDecoding: Bool) -> Double {
+extension Pixels {
+    /// A texture made by ``GPU/makeReadableTexture(width:height:)``, read in place.
+    init(_ texture: any MTLTexture) {
+        self.init(base: texture.buffer!.contents().assumingMemoryBound(to: Float.self), width: texture.width,
+                  height: texture.height, components: 4, rowLength: texture.bufferBytesPerRow / 4)
+    }
+}
+
+/// The luminance `measure_autoexposure_ev` meters: Y of `colour.RGB_to_XYZ` (no chromatic
+/// adaptation) on the image's ≤256 px preview, row-major.
+func meteredLuminance(of image: Pixels, colourSpace: Tables.ColourSpace,
+                      cctfDecoding: Bool) -> (y: [Double], width: Int, height: Int) {
     let (preview, width, height) = smallPreview(of: image)
-    // Y of colour.RGB_to_XYZ without chromatic adaptation.
     let yRow = colourSpace.rgbToXYZ[1]
+    let y = (0..<(width * height)).map { pixel in
+        var rgb = SIMD3(preview[pixel * 3], preview[pixel * 3 + 1], preview[pixel * 3 + 2])
+        if cctfDecoding {
+            rgb = SIMD3(colourSpace.decode(rgb.x), colourSpace.decode(rgb.y), colourSpace.decode(rgb.z))
+        }
+        return (yRow * rgb).sum()
+    }
+    return (y, width, height)
+}
+
+/// The `center_weighted` method's weights over a `width × height` preview: a Gaussian with
+/// σ = 0.2 of the long edge around the centre, row-major.
+func centreWeights(width: Int, height: Int) -> [Double] {
     let longEdge = Double(max(width, height))
     let xs = (0..<width).map { (Double($0) / Double(width) - 0.5) * Double(width) / longEdge }
     let ys = (0..<height).map { (Double($0) / Double(height) - 0.5) * Double(height) / longEdge }
     let sigma = 0.2
-    var weightedSum = 0.0, maskSum = 0.0
-    for row in 0..<height {
-        for column in 0..<width {
-            let mask = exp(-(xs[column] * xs[column] + ys[row] * ys[row]) / (2 * sigma * sigma))
-            let index = (row * width + column) * 3
-            var rgb = SIMD3(preview[index], preview[index + 1], preview[index + 2])
-            if cctfDecoding {
-                rgb = SIMD3(colourSpace.decode(rgb.x), colourSpace.decode(rgb.y), colourSpace.decode(rgb.z))
-            }
-            weightedSum += (yRow * rgb).sum() * mask
-            maskSum += mask
-        }
+    return (0..<(width * height)).map { pixel in
+        let (x, y) = (xs[pixel % width], ys[pixel / width])
+        return exp(-(x * x + y * y) / (2 * sigma * sigma))
     }
-    let ev = -log2(weightedSum / maskSum / 0.184)
-    // Python falls back to 0 EV for a black frame.
-    return ev.isInfinite ? 0 : ev
+}
+
+/// The exposure in stops that brings the `weights`-weighted mean of `y` to 0.184, or nil where
+/// the weights see no light (Python's infinite EV) or nothing at all.
+func exposureEV(_ y: [Double], weights: [Double]) -> Double? {
+    var weightedSum = 0.0, weightSum = 0.0
+    for (value, weight) in zip(y, weights) {
+        weightedSum += value * weight
+        weightSum += weight
+    }
+    let ev = -log2(weightedSum / weightSum / 0.184)
+    return ev.isFinite ? ev : nil
 }
 
 /// scikit-image `rescale(image, maxSize / longEdge, order=0, channel_axis=2)` as Spektrafilm's

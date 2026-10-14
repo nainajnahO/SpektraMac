@@ -14,7 +14,8 @@ final class PhotoModel {
         let message: String
     }
 
-    /// The open photo (on the engine's GPU): its file name, size and preview size.
+    /// The open photo (on the engine's GPU): its file name, size and preview size, and what the
+    /// metering marks found in it.
     struct Photo: Identifiable {
         let id = UUID()
         let name: String
@@ -22,6 +23,9 @@ final class PhotoModel {
         let height: Int
         let previewWidth: Int
         let previewHeight: Int
+        let metering: MeteringReadings
+        /// The region each mark meters, white with the weight as alpha.
+        let meteringOverlays: [MeteringMark: CGImage]
     }
     /// A new photo renders at once.
     private(set) var photo: Photo? {
@@ -49,6 +53,37 @@ final class PhotoModel {
     var filmName: String { films.first { $0.stock == controls.film }?.name ?? controls.film }
     var films: [ProfileInfo] { engine?.films ?? [] }
     var papers: [ProfileInfo] { engine?.papers ?? [] }
+    /// The exposure the slider shows, in stops over the photo as shot: the controls' mark's
+    /// reading for this photo plus their offset. Set within ``snap`` of a mark, it lands on the
+    /// mark; elsewhere it keeps the nearest mark and the offset from it, so the next photo opens
+    /// as far from that mark's own reading.
+    var exposureEV: Double {
+        get {
+            guard let photo else { return controls.exposureOffsetEV }
+            return photo.metering.reading(resolving: controls.exposureMark).ev + controls.exposureOffsetEV
+        }
+        set {
+            guard let photo else { return }
+            let nearest = MeteringMark.allCases.compactMap { mark in photo.metering.ev[mark.rawValue].map { (mark, $0) } }
+                .min { abs($0.1 - newValue) < abs($1.1 - newValue) }!
+            var controls = controls
+            controls.exposureMark = nearest.0
+            controls.exposureOffsetEV = abs(newValue - nearest.1) < Self.snap ? 0 : newValue - nearest.1
+            self.controls = controls
+        }
+    }
+    /// How close to a mark the slider lands on it, in stops.
+    static let snap = 0.15
+    /// The marks the exposure is on: those whose reading for this photo rounds to it.
+    var marksAtExposure: [MeteringMark] {
+        guard let photo else { return [] }
+        let exposure = exposureEV
+        return MeteringMark.allCases.filter { mark in
+            photo.metering.ev[mark.rawValue].map { abs($0 - exposure) < 0.05 } ?? false
+        }
+    }
+    /// While the Exposure slider is held: the canvas then tints the region the mark it's on meters.
+    var isAdjustingExposure = false
     /// Display-sized rendering of the last simulation.
     private(set) var displayImage: CGImage?
     /// Whether `displayImage` comes from the full-resolution render rather than the preview.
@@ -99,7 +134,8 @@ final class PhotoModel {
                 let opened = try await engine.open(image)
                 self.metadata = metadata
                 photo = Photo(name: url.lastPathComponent, width: opened.width, height: opened.height,
-                              previewWidth: opened.previewWidth, previewHeight: opened.previewHeight)
+                              previewWidth: opened.previewWidth, previewHeight: opened.previewHeight,
+                              metering: opened.metering, meteringOverlays: opened.meteringOverlays)
                 note("Opened \(url.lastPathComponent) (\(opened.width) × \(opened.height))")
             } catch {
                 fail("Could not open \(url.lastPathComponent)", error)

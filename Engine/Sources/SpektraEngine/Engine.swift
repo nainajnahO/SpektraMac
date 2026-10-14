@@ -12,8 +12,10 @@ public struct Controls: Codable, Sendable, Equatable {
     public var paper = "kodak_portra_endura"
     /// Scan the developed film itself instead of a print of it (`io.scan_film`).
     public var scanFilm = false
-    public var autoExposure = true
-    public var exposureCompensationEV = 0.0
+    /// The exposure: `exposureMark`'s reading for the photo (``MeteringReadings``) plus
+    /// `exposureOffsetEV` stops. A new photo opens at the same mark's own reading.
+    public var exposureMark = MeteringMark.centreWeighted
+    public var exposureOffsetEV = 0.0
     /// The enlarger's exposure time, relative to the one that prints a mid-grey neutral.
     public var printExposure = 1.0
     /// Enlarger filters, in Kodak CC units away from the film and paper's neutral ones.
@@ -100,31 +102,46 @@ public actor Engine {
         var preview: PhotoImage
     }
 
-    /// One image of the photo with the auto-exposure Spektrafilm measures on it, and what the
-    /// last render of it left to start from: the film's log exposure and the developed film.
-    /// Renders only read these textures.
+    /// One image of the photo with the exposure each metering mark gives it (Spektrafilm meters
+    /// each image on its own preview), and what the last render of it left to start from: the
+    /// film's log exposure and the developed film. Renders only read these textures.
     private struct PhotoImage {
         let texture: any MTLTexture
-        let autoExposureEV: Double
+        let metering: MeteringReadings
         var exposure: Step?
         var film: Step?
     }
 
-    /// A step's result and what it was made from: the film and the parameters it reads.
+    /// A step's result and what it was made from: the film, the parameters it reads and the
+    /// exposure (a mark's reading for the photo plus an offset, so not a parameter).
     private struct Step {
         struct Key: Equatable {
             let film: String
             let parameters: Parameters
+            let exposureEV: Double
         }
         let key: Key
         let texture: any MTLTexture
     }
 
+    /// What ``open(_:)`` found out about a photo.
+    public struct OpenedPhoto: Sendable {
+        public let width: Int
+        public let height: Int
+        public let previewWidth: Int
+        public let previewHeight: Int
+        /// The preview's metering readings, as the controls show them.
+        public let metering: MeteringReadings
+        /// Each mark's region, for the canvas to tint (``MeteringRegions/overlays(for:width:height:maxSize:)``).
+        public let meteringOverlays: [MeteringMark: CGImage]
+    }
+
     /// Makes `image` (``RGBImage/decode(contentsOf:)``) the photo renders work on: Core Image
     /// renders it once into a texture, and its preview (at most ``previewMaxSize`` on the long side)
-    /// from that on the GPU; auto-exposure is measured once on each, in place. Sets aside the GPU
-    /// memory renders of its size need. Returns the photo's size and its preview's.
-    public func open(_ image: CIImage) throws -> (width: Int, height: Int, previewWidth: Int, previewHeight: Int) {
+    /// from that on the GPU. Vision looks for the metering marks' regions in the preview, and each
+    /// image is metered once at every mark, in place. Sets aside the GPU memory renders of its
+    /// size need.
+    public func open(_ image: CIImage) throws -> OpenedPhoto {
         let extent = image.extent.integral
         let (width, height) = (Int(extent.width), Int(extent.height))
         photo = nil  // frees the previous photo before reserving memory for this one
@@ -139,13 +156,40 @@ public actor Engine {
             preview = gpu.makeReadableTexture(width: Int(scaled.extent.width), height: Int(scaled.extent.height))
             try render(scaled, from: scaled.extent, into: preview)
         }
-        // Auto-exposure is measured the same way in every mode (input space, no CCTF decoding).
+        // Auto-exposure is metered the same way in every mode (input space, no CCTF decoding).
         let space = tables.colourSpaces[Self.inputColorSpace]!
-        func measured(_ texture: any MTLTexture) -> PhotoImage {
-            PhotoImage(texture: texture, autoExposureEV: autoExposureEV(of: texture, colourSpace: space, cctfDecoding: false))
+        let previewLuminance = meteredLuminance(of: Pixels(preview), colourSpace: space, cctfDecoding: false)
+        let centreWeighted = MeteringReadings(luminance: previewLuminance.y, width: previewLuminance.width,
+                                              height: previewLuminance.height, regions: nil).reading(resolving: .centreWeighted)
+        let regions = try MeteringRegions(finding: visionView(of: preview, exposure: centreWeighted.ev))
+        let previewImage = PhotoImage(texture: preview, metering: MeteringReadings(
+            luminance: previewLuminance.y, width: previewLuminance.width, height: previewLuminance.height, regions: regions))
+        var fullImage = previewImage
+        if full !== preview {
+            let luminance = meteredLuminance(of: Pixels(full), colourSpace: space, cctfDecoding: false)
+            fullImage = PhotoImage(texture: full, metering: MeteringReadings(
+                luminance: luminance.y, width: luminance.width, height: luminance.height, regions: regions))
         }
-        photo = Photo(full: measured(full), preview: measured(preview))
-        return (width, height, preview.width, preview.height)
+        photo = Photo(full: fullImage, preview: previewImage)
+        return OpenedPhoto(width: width, height: height, previewWidth: preview.width, previewHeight: preview.height,
+                           metering: previewImage.metering,
+                           meteringOverlays: regions.overlays(for: previewImage.metering, width: width, height: height))
+    }
+
+    /// What Vision looks at: `preview` exposed by Spektrafilm's meter, so a dim scene is readable, as 8-bit
+    /// sRGB at most 1024 px on the long side.
+    private func visionView(of preview: any MTLTexture, exposure: Double) throws -> CGImage {
+        let scale = min(1, 1024 / Double(max(preview.width, preview.height)))
+        // Core Image puts a texture's first row at the bottom.
+        let view = CIImage(mtlTexture: preview, options: [.colorSpace: RGBImage.workingColorSpace])!
+            .oriented(.downMirrored)
+            .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: exposure])
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        guard let image = context.createCGImage(view, from: view.extent.integral, format: .RGBA8,
+                                                colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
+            throw DisplayError()
+        }
+        return image
     }
 
     /// Renders `region` of `image` into `texture`, top row first, in the working colour space.
@@ -205,9 +249,13 @@ public actor Engine {
         }
         let image: WritableKeyPath<Photo, PhotoImage> = mode == .preview ? \.preview : \.full
 
+        let exposureEV = photo![keyPath: image].metering.reading(resolving: controls.exposureMark).ev
+            + controls.exposureOffsetEV
+
         // What's still valid of the last render; the rest is released before this one.
-        let exposureKey = Step.Key(film: controls.film, parameters: Self.exposureParameters(parameters))
-        let filmKey = Step.Key(film: controls.film, parameters: Self.filmParameters(parameters))
+        let exposureKey = Step.Key(film: controls.film, parameters: Self.exposureParameters(parameters),
+                                   exposureEV: exposureEV)
+        let filmKey = Step.Key(film: controls.film, parameters: Self.filmParameters(parameters), exposureEV: exposureEV)
         if photo![keyPath: image].exposure?.key != exposureKey {
             photo![keyPath: image].exposure = nil
         }
@@ -217,7 +265,7 @@ public actor Engine {
         let last = photo![keyPath: image]
         let (logExposure, cmyFilm, output) = try gpu.run { encoder in
             let logExposure = last.exposure?.texture ?? simulation.encodeExpose(
-                simulation.encodePreprocess(last.texture, autoExposureEV: last.autoExposureEV, on: encoder), on: encoder)
+                simulation.encodePreprocess(last.texture, autoExposureEV: exposureEV, on: encoder), on: encoder)
             let cmyFilm = last.film?.texture ?? simulation.encodeDevelop(logExposure, on: encoder)
             return (logExposure, cmyFilm, simulation.encodePrintAndScan(cmyFilm, on: encoder))
         }
@@ -261,8 +309,6 @@ public actor Engine {
         parameters.io.inputColorSpace = inputColorSpace
         parameters.io.outputCctfEncoding = mode == .export  // the display is colour-managed: linear
         parameters.io.scanFilm = controls.scanFilm
-        parameters.camera.autoExposure = controls.autoExposure
-        parameters.camera.exposureCompensationEv = controls.exposureCompensationEV
         parameters.enlarger.printExposure = controls.printExposure
         parameters.enlarger.yFilterShift = controls.yFilterShift
         parameters.enlarger.mFilterShift = controls.mFilterShift

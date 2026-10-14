@@ -273,8 +273,8 @@ func reservedMemoryRendersMatchFresh(caseName: String) throws {
     let changes: [(String, (inout Controls) -> Void)] = [
         ("defaults", { _ in }), ("Y filter", { $0.yFilterShift = 12 }), ("print exposure", { $0.printExposure = 1.3 }),
         ("paper", { $0.paper = "fujifilm_crystal_archive_typeii" }), ("negative", { $0.scanFilm = true }),
-        ("print", { $0.scanFilm = false }), ("exposure", { $0.exposureCompensationEV = 1.25 }),
-        ("auto-exposure off", { $0.autoExposure = false }), ("grain off", { $0.grain = false }),
+        ("print", { $0.scanFilm = false }), ("exposure", { $0.exposureOffsetEV = 1.25 }),
+        ("as shot", { $0.exposureMark = .asShot }), ("faces", { $0.exposureMark = .faces }), ("grain off", { $0.grain = false }),
         ("halation off", { $0.halation = false }), ("film", { $0.film = "kodak_gold_200" }),
     ]
     for (name, change) in changes {
@@ -289,11 +289,10 @@ func reservedMemoryRendersMatchFresh(caseName: String) throws {
 }
 
 /// The engine's render, in steps from the photo kept on the GPU, is exactly the parity-tested
-/// chain from the image, grain and auto-exposure included.
+/// chain from the image, grain and auto-exposure (the Centre-weighted mark) included.
 @Test func engineRenderIsTheChain() async throws {
     let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
-    var controls = Controls()
-    controls.exposureCompensationEV = 0.75
+    let controls = Controls()
     let engine = try Engine()
     _ = try await engine.open(image.ciImage)
     let rendered = try await engine.render(controls: controls, mode: .full)
@@ -398,8 +397,8 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     controls.film = "kodak_vision3_500t"
     controls.paper = "kodak_2383"
     controls.scanFilm = true
-    controls.autoExposure = false
-    controls.exposureCompensationEV = -0.75
+    controls.exposureMark = .people
+    controls.exposureOffsetEV = -0.75
     controls.printExposure = 1.24
     controls.yFilterShift = -7
     controls.mFilterShift = 12
