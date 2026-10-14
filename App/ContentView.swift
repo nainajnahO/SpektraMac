@@ -344,6 +344,10 @@ private struct ImageCanvas: View {
             zoom = 1
             offset = .zero
         }
+        // With the pointer anywhere over the canvas, where scrolling zooms.
+        .onChange(of: pointer != nil || zoom > 1, initial: true) { _, wants in
+            model.wantsFullResolution = wants
+        }
     }
 
     /// While the Exposure slider is held on a mark: the region that mark meters, tinted.
@@ -416,8 +420,10 @@ private struct StatusBar: View {
                 ProgressView().controlSize(.mini)
                 Text(model.isRenderingFullResolution ? "Rendering full resolution…" : "Rendering…")
             } else if let photo = model.photo {
-                if model.showsFullResolution {
+                if model.shownMode == .full {
                     Label("Full resolution, \(photo.width) × \(photo.height)", systemImage: "photo")
+                } else if model.shownMode == .reduced {
+                    Label("Reduced size, \(photo.previewWidth) × \(photo.previewHeight)", systemImage: "photo")
                 } else {
                     Label("Preview, \(photo.previewWidth) × \(photo.previewHeight)", systemImage: "eye")
                 }

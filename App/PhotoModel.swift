@@ -26,6 +26,9 @@ final class PhotoModel {
         let metering: MeteringReadings
         /// The region each mark meters, white with the weight as alpha.
         let meteringOverlays: [MeteringMark: CGImage]
+
+        /// Whether the preview is scaled down from the photo, so the photo has a reduced size.
+        var isLargerThanPreview: Bool { width > previewWidth || height > previewHeight }
     }
     /// A new photo renders at once.
     private(set) var photo: Photo? {
@@ -89,8 +92,19 @@ final class PhotoModel {
     var isAdjustingExposure = false
     /// Display-sized rendering of the last simulation.
     private(set) var displayImage: CGImage?
-    /// Whether `displayImage` comes from the full-resolution render rather than the preview.
-    private(set) var showsFullResolution = false
+    /// The render `displayImage` comes from.
+    private(set) var shownMode: RenderMode?
+    /// Whether the canvas may show the photo larger than its reduced size: the pointer is over it,
+    /// or it's zoomed in. Only then does the whole photo render.
+    var wantsFullResolution = false {
+        didSet {
+            if wantsFullResolution && awaitsFullResolution {
+                render(fullResolutionOnly: true)
+            }
+        }
+    }
+    /// The reduced render is on screen and the controls haven't changed since.
+    private var awaitsFullResolution = false
     private(set) var isLoading = false
     private(set) var isRendering = false
     private(set) var isRenderingFullResolution = false
@@ -134,6 +148,7 @@ final class PhotoModel {
                 renderTask?.cancel()
                 isRendering = false
                 isRenderingFullResolution = false
+                awaitsFullResolution = false
                 let opened = try await engine.open(image)
                 self.metadata = metadata
                 photo = Photo(name: url.lastPathComponent, width: opened.width, height: opened.height,
@@ -153,7 +168,7 @@ final class PhotoModel {
 
     // MARK: Rendering
 
-    /// How long the controls stay still before the whole photo renders.
+    /// How long the controls stay still before the blurs and grain render.
     private static let fullRenderDelay = Duration.milliseconds(500)
 
     /// Renders once per main-actor turn, however many settings changed in it.
@@ -166,11 +181,14 @@ final class PhotoModel {
         }
     }
 
-    /// Renders the preview, then, once the controls have been still for `fullRenderDelay`, the
-    /// whole photo with the blurs and grain the preview leaves out. A newer change cancels both.
-    private func render() {
+    /// Renders the preview, then, once the controls have been still for `fullRenderDelay`, with
+    /// the blurs and grain the preview leaves out: at the preview's size, and the whole photo once
+    /// ``wantsFullResolution``. A photo no larger than its preview renders whole at once. A newer
+    /// change cancels them.
+    private func render(fullResolutionOnly: Bool = false) {
         renderTask?.cancel()
         isRenderingFullResolution = false
+        awaitsFullResolution = false
         guard let photo, let engine else {
             displayImage = nil
             isRendering = false
@@ -180,13 +198,21 @@ final class PhotoModel {
         let controls = controls
         renderTask = Task {
             do {
-                try await show(controls: controls, mode: .preview, engine: engine,
-                               size: "\(photo.previewWidth) × \(photo.previewHeight)")
-                isRendering = false
-                try await Task.sleep(for: Self.fullRenderDelay)
-                isRendering = true
-                isRenderingFullResolution = true
-                try await show(controls: controls, mode: .full, engine: engine, size: "\(photo.width) × \(photo.height)")
+                if !fullResolutionOnly {
+                    try await show(controls: controls, mode: .preview, engine: engine, photo: photo)
+                    isRendering = false
+                    try await Task.sleep(for: Self.fullRenderDelay)
+                    isRendering = true
+                    if photo.isLargerThanPreview {
+                        try await show(controls: controls, mode: .reduced, engine: engine, photo: photo)
+                    }
+                }
+                if wantsFullResolution || !photo.isLargerThanPreview {
+                    isRenderingFullResolution = true
+                    try await show(controls: controls, mode: .full, engine: engine, photo: photo)
+                } else {
+                    awaitsFullResolution = true
+                }
             } catch {
                 guard !Task.isCancelled else { return }
                 fail("Could not render", error)
@@ -196,16 +222,21 @@ final class PhotoModel {
         }
     }
 
-    /// Renders the photo and puts it on screen, unless a newer change has made it stale. `size`
-    /// is the rendered size, for the log.
-    private func show(controls: Controls, mode: RenderMode, engine: Engine, size: String) async throws {
+    /// Renders the photo and puts it on screen, unless a newer change has made it stale.
+    private func show(controls: Controls, mode: RenderMode, engine: Engine, photo: Photo) async throws {
         let start = ContinuousClock.now
         let display = try await engine.display(controls: controls, mode: mode)
         try Task.checkCancellation()
         displayImage = display
-        showsFullResolution = mode == .full
+        shownMode = mode
         let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
-        note("Rendered \(mode == .full ? "full resolution" : "preview") (\(size)) in \(elapsed)")
+        let size = mode == .full ? "\(photo.width) × \(photo.height)" : "\(photo.previewWidth) × \(photo.previewHeight)"
+        let name = switch mode {
+        case .preview: "preview"
+        case .reduced: "reduced size"
+        case .full, .export: "full resolution"
+        }
+        note("Rendered \(name) (\(size)) in \(elapsed)")
     }
 
     // MARK: Saving and cancelling

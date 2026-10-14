@@ -70,10 +70,10 @@ func tiffDecodesAsCoreImageReadsIt(bits: Int, tagged: Bool) throws {
     #expect(decoded.pixels.map(\.bitPattern) == expected.map(\.bitPattern))
 }
 
-/// Opening renders the decoded photo straight onto the GPU: its renders, full and preview, are
-/// exactly the parity-tested chain on the photo decoded to an `RGBImage` and on that scaled down as
-/// the preview was made before (Core Image's Lanczos from the CPU copy). A Display P3 8-bit PNG
-/// and 16-bit TIFF larger than the preview, and the synthetic DNG.
+/// Opening renders the decoded photo straight onto the GPU: its renders, full, preview and
+/// reduced, are exactly the parity-tested chain on the photo decoded to an `RGBImage` and on that
+/// scaled down as the preview was made before (Core Image's Lanczos from the CPU copy). A Display
+/// P3 8-bit PNG and 16-bit TIFF larger than the preview, and the synthetic DNG.
 @Test(arguments: ["png", "tif", "dng"])
 func openRendersTheDecodedPhoto(format: String) async throws {
     let url: URL
@@ -113,7 +113,7 @@ func openRendersTheDecodedPhoto(format: String) async throws {
     let controls = Controls()
     let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
     let (gpu, tables, database) = (try GPU(), try Tables.load(), try Tables.loadNeutralPrintFilters())
-    for (mode, image) in [(RenderMode.full, decoded), (.preview, preview)] {
+    for (mode, image) in [(RenderMode.full, decoded), (.preview, preview), (.reduced, preview)] {
         let rendered = try await engine.render(controls: controls, mode: mode)
         let parameters = Engine.parameters(for: controls, film: film, print: paper, database: database, mode: mode)
         let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: tables)
@@ -279,7 +279,7 @@ func reservedMemoryRendersMatchFresh(caseName: String) throws {
     ]
     for (name, change) in changes {
         change(&controls)
-        for mode in [RenderMode.preview, .full, .export] {
+        for mode in [RenderMode.preview, .reduced, .full, .export] {
             _ = try await fresh.open(image.ciImage)
             let expected = try await fresh.render(controls: controls, mode: mode).pixels.map(\.bitPattern)
             let cached = try await engine.render(controls: controls, mode: mode).pixels.map(\.bitPattern)

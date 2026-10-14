@@ -44,6 +44,9 @@ public enum RenderMode: Sendable {
     /// Each change while editing: Spektrafilm's preview mode (no blurs or grain), on the open
     /// photo's preview. Linear, in ``Engine/outputColorSpace``.
     case preview
+    /// The open photo's preview with every effect: the finished look, at the preview's size.
+    /// Linear, in ``Engine/outputColorSpace``.
+    case reduced
     /// The whole open photo with every effect. Linear, in ``Engine/outputColorSpace``.
     case full
     /// As `full`, encoded for a file in ``Engine/exportColorSpace`` (Spektrafilm's default output).
@@ -72,8 +75,9 @@ public actor Engine {
     private var simulation: Simulation?
     /// The photo renders work on (``open(_:)``).
     private var photo: Photo?
-    /// The live preview's long side. Larger than Spektrafilm's `preview_max_size` (640), which is
-    /// soft on a Retina display: about 0.1 s per change on an M1 Pro, preview mode and display.
+    /// The preview's long side, for the live preview and reduced renders. Larger than
+    /// Spektrafilm's `preview_max_size` (640), which is soft on a Retina display: about 0.1 s per
+    /// change on an M1 Pro, preview mode and display.
     private nonisolated let previewMaxSize = 1600
 
     /// The colour space of preview and full renders: linear sRGB, Spektrafilm's default output
@@ -247,7 +251,7 @@ public actor Engine {
                                         cache: cache)
             self.simulation = simulation
         }
-        let image: WritableKeyPath<Photo, PhotoImage> = mode == .preview ? \.preview : \.full
+        let image: WritableKeyPath<Photo, PhotoImage> = mode == .preview || mode == .reduced ? \.preview : \.full
 
         let exposureEV = photo![keyPath: image].metering.reading(resolving: controls.exposureMark).ev
             + controls.exposureOffsetEV
