@@ -33,7 +33,7 @@ final class PhotoModel {
     }
     /// The photo's EXIF, GPS and IPTC records, for saved renderings.
     @ObservationIgnored private var metadata: PhotoMetadata?
-    /// What the sidebar and the Film | Negative switch set; every change re-renders the preview.
+    /// What the sidebar and the Print | Film switch set; every change re-renders the preview.
     var controls = Controls() {
         didSet { scheduleRender() }
     }
@@ -51,6 +51,9 @@ final class PhotoModel {
         }
     }
     var filmName: String { films.first { $0.stock == controls.film }?.name ?? controls.film }
+    /// A slide is viewed, never printed: every paper is negative-working, so a printed slide
+    /// comes out as a negative image.
+    var isSlideFilm: Bool { films.first { $0.stock == controls.film }?.type == .positive }
     var films: [ProfileInfo] { engine?.films ?? [] }
     var papers: [ProfileInfo] { engine?.papers ?? [] }
     /// The exposure the slider shows, in stops over the photo as shot: the controls' mark's
