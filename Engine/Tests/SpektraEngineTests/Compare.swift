@@ -8,7 +8,7 @@ let goldenDirectory = URL(filePath: #filePath)
 
 struct MissingGoldenData: Error, CustomStringConvertible {
     let path: String
-    var description: String { "\(path) not found; run tools/golden.py (see README)" }
+    var description: String { "\(path) not found: the parity tests need the reference data (see README)" }
 }
 
 /// One tap of a golden case, e.g. `golden("chart-kodak_portra_400-kodak_portra_endura", "rgb_out")`.
