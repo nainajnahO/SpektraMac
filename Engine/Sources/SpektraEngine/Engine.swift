@@ -230,7 +230,7 @@ public actor Engine {
     }
 
     /// Renders from the first step `controls` change since the last render of the same image: a
-    /// new paper, enlarger setting or Film | Negative choice prints and scans the developed film
+    /// new paper, enlarger setting or Print | Film choice prints and scans the developed film
     /// again; switching grain develops the film's exposure again; the rest starts over. The same
     /// kernels run as for a render from scratch, so the result is the same.
     private func renderTexture(controls: Controls, mode: RenderMode) throws -> any MTLTexture {

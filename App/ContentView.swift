@@ -21,10 +21,12 @@ struct ContentView: View {
                 .toolbar {
                     ToolbarItemGroup(placement: .principal) {
                         Picker("Show", selection: $model.controls.scanFilm) {
-                            Text("Film").tag(false)
-                            Text("Negative").tag(true)
+                            Text("Print").tag(false)
+                                .selectionDisabled(model.isSlideFilm)
+                            Text("Film").tag(true)
                         }
                         .pickerStyle(.segmented)
+                        .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
                     }
                     ToolbarItemGroup(placement: .primaryAction) {
                         Button("Open…", systemImage: "folder") { model.isImporting = true }
