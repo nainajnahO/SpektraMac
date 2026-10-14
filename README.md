@@ -4,8 +4,9 @@ A native macOS port of [Spektrafilm](https://github.com/andreavolpato/spektrafil
 physically based simulation of analog colour photography (negative → print → scan), rewritten in
 Swift with the image pipeline on the GPU via Metal.
 
-**Status:** early work in progress. See [PLAN.md](PLAN.md) for the porting plan and the
-[issues](../../issues) for the day-by-day progress.
+**Status:** version 1.0: the whole Spektrafilm 0.3.4 engine is ported and parity-tested. See the
+[releases](../../releases) for what's in it, [PLAN.md](PLAN.md) for the porting plan and the
+[issues](../../issues) for what's next.
 
 ## Goals
 
