@@ -6,7 +6,7 @@ import Metal
 
 /// What the app's controls set (PLAN.md, Day 31). Everything else stays at Spektrafilm's defaults
 /// for the film and paper. A preset is these values as JSON.
-public struct Controls: Codable, Sendable, Equatable {
+public struct Controls: Codable, Sendable, Hashable {
     /// Stock names (`profiles/<stock>.json`).
     public var film = "kodak_portra_400"
     public var paper = "kodak_portra_endura"
