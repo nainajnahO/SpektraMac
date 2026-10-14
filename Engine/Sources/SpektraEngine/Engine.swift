@@ -16,11 +16,25 @@ public struct Controls: Codable, Sendable, Hashable {
     /// `exposureOffsetEV` stops. A new photo opens at the same mark's own reading.
     public var exposureMark = MeteringMark.centreWeighted
     public var exposureOffsetEV = 0.0
+    /// Stops the brightest highlights are raised by before they reach the film, rebuilding light
+    /// the camera clipped (0 is off).
+    public var highlightBoost = 0.0
     /// The enlarger's exposure time, relative to the one that prints a mid-grey neutral.
     public var printExposure = 1.0
     /// Enlarger filters, in Kodak CC units away from the film and paper's neutral ones.
     public var yFilterShift = 0.0
     public var mFilterShift = 0.0
+    /// A flash of the bare enlarger light on the paper before the print, as a fraction of the
+    /// clear film base's exposure: it darkens light tones more than white or the shadows.
+    public var preflash = 0.0
+    /// The paper's contrast, as a multiplier of its curves' gamma around mid-grey.
+    public var printContrast = 1.0
+    /// Stray light over the print when it's viewed: its mean in percent of the light, its spread
+    /// relative to that, and its blur in pixels.
+    public var glare = true
+    public var glareAmount = 0.03
+    public var glareRoughness = 0.7
+    public var glareSoftness = 0.5
     public var halation = true
     /// Multipliers over the film's halation preset (Spektrafilm's high-level halation scalars):
     /// the glow from light bouncing off the film base, and light spreading inside the emulsion
@@ -29,6 +43,11 @@ public struct Controls: Codable, Sendable, Hashable {
     public var halationSize = 1.0
     public var scatterAmount = 1.0
     public var scatterSize = 1.0
+    /// The DIR couplers' inhibition between layers (saturation) and within each (edge
+    /// contrast), as multipliers of the film's own.
+    public var couplers = true
+    public var couplerSaturation = 1.0
+    public var couplerEdgeContrast = 1.0
     public var grain = true
     /// Area of one silver halide particle in µm², and the grain's final blur in pixels.
     public var grainSize = 0.2
@@ -356,11 +375,23 @@ public actor Engine {
         parameters.enlarger.printExposure = controls.printExposure
         parameters.enlarger.yFilterShift = controls.yFilterShift
         parameters.enlarger.mFilterShift = controls.mFilterShift
+        parameters.enlarger.preflashExposure = controls.preflash
+        // Off at 1: Python's default, which the morph at 1 renders identically.
+        parameters.printRender.densityCurvesMorph.active = controls.printContrast != 1
+        parameters.printRender.densityCurvesMorph.gammaFactor = controls.printContrast
+        parameters.printRender.glare.active = controls.glare
+        parameters.printRender.glare.percent = controls.glareAmount
+        parameters.printRender.glare.roughness = controls.glareRoughness
+        parameters.printRender.glare.blur = controls.glareSoftness
+        parameters.filmRender.halation.boostEv = controls.highlightBoost
         parameters.filmRender.halation.active = controls.halation
         parameters.filmRender.halation.halationAmount = controls.halationAmount
         parameters.filmRender.halation.halationSpatialScale = controls.halationSize
         parameters.filmRender.halation.scatterAmount = controls.scatterAmount
         parameters.filmRender.halation.scatterSpatialScale = controls.scatterSize
+        parameters.filmRender.dirCouplers.active = controls.couplers
+        parameters.filmRender.dirCouplers.inhibitionInterlayer = controls.couplerSaturation
+        parameters.filmRender.dirCouplers.inhibitionSamelayer = controls.couplerEdgeContrast
         parameters.filmRender.grain.active = controls.grain
         parameters.filmRender.grain.particleAreaUm2 = controls.grainSize
         parameters.filmRender.grain.blur = controls.grainSoftness

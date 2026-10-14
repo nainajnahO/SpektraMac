@@ -218,10 +218,20 @@ func controlsDigestLikePython(caseName: String) throws {
     #expect(parameters == golden.params)
 }
 
-/// The halation and grain sliders set Spektrafilm's high-level halation scalars (the film's own
-/// halation preset stays), and the grain's particle area and blur; nothing else.
+/// The effect sliders set their Spektrafilm parameters (over the film's own halation preset and
+/// coupler strengths, which stay) and nothing else; print contrast turns the curve morph on.
 @Test func effectControlsSetTheirParameters() throws {
     var controls = Controls()
+    controls.highlightBoost = 3
+    controls.preflash = 0.02
+    controls.printContrast = 0.8
+    controls.glare = false
+    controls.glareAmount = 0.2
+    controls.glareRoughness = 0.5
+    controls.glareSoftness = 1.5
+    controls.couplers = false
+    controls.couplerSaturation = 1.4
+    controls.couplerEdgeContrast = 0.6
     controls.halationAmount = 2
     controls.halationSize = 0.5
     controls.scatterAmount = 0.25
@@ -231,6 +241,14 @@ func controlsDigestLikePython(caseName: String) throws {
     let (film, paper, database) = (try Profile.load(controls.film), try Profile.load(controls.paper),
                                    try Tables.loadNeutralPrintFilters())
     var expected = Engine.parameters(for: Controls(), film: film, print: paper, database: database, mode: .full)
+    expected.filmRender.halation.boostEv = 3
+    expected.enlarger.preflashExposure = 0.02
+    expected.printRender.densityCurvesMorph.active = true
+    expected.printRender.densityCurvesMorph.gammaFactor = 0.8
+    expected.printRender.glare = Parameters.Glare(active: false, percent: 0.2, roughness: 0.5, blur: 1.5)
+    expected.filmRender.dirCouplers.active = false
+    expected.filmRender.dirCouplers.inhibitionInterlayer = 1.4
+    expected.filmRender.dirCouplers.inhibitionSamelayer = 0.6
     expected.filmRender.halation.halationAmount = 2
     expected.filmRender.halation.halationSpatialScale = 0.5
     expected.filmRender.halation.scatterAmount = 0.25
@@ -427,6 +445,16 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     controls.printExposure = 1.24
     controls.yFilterShift = -7
     controls.mFilterShift = 12
+    controls.highlightBoost = 2
+    controls.preflash = 0.01
+    controls.printContrast = 1.2
+    controls.glare = false
+    controls.glareAmount = 0.1
+    controls.glareRoughness = 0.4
+    controls.glareSoftness = 1
+    controls.couplers = false
+    controls.couplerSaturation = 1.3
+    controls.couplerEdgeContrast = 0.7
     controls.halation = false
     controls.halationAmount = 1.5
     controls.halationSize = 0.8
