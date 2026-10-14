@@ -68,14 +68,6 @@ private struct SettingsSidebar: View {
     var body: some View {
         @Bindable var model = model
         Form {
-            Section("Photo") {
-                if let photo = model.photo {
-                    LabeledContent("File", value: photo.name)
-                    LabeledContent("Size", value: "\(photo.width) × \(photo.height)")
-                } else {
-                    LabeledContent("File") { Text("None").foregroundStyle(.secondary) }
-                }
-            }
             Section("Simulation") {
                 Picker("Film", selection: $model.film) {
                     ForEach(model.films, id: \.stock) { Text($0.name).tag($0.stock) }
