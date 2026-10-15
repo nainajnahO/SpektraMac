@@ -11,7 +11,7 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var model = model
-        ImageCanvas(covered: showsSettings ? settingsWidth : 0)
+        ImageCanvas()
             .safeAreaInset(edge: .bottom, spacing: 0) { StatusBar() }
             .navigationTitle(model.photo?.name ?? "SpektraMac")
             .toolbar {
@@ -36,9 +36,8 @@ struct ContentView: View {
                         .help("Show or hide the settings")
                 }
             }
-            // The canvas doesn't scroll under the toolbar, so the window would otherwise
-            // draw a hard separator line beneath it.
-            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+            // The toolbar's own translucent background, as the photo reaches under it (``ImageCanvas``).
+            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
             // On the right over the photo, as Photos' Adjust panel: the photo fits beside it and
             // shows through it, blurred, when zoomed or moved under it (``ImageCanvas``). An
             // inspector is a column of its own, which the photo can't reach under.
@@ -771,18 +770,19 @@ private struct ThumbnailStrip: View {
 
 // MARK: - Canvas
 
-/// The photo fitted to the canvas beside the settings panel. Scrolling (or pinching) zooms around
-/// the pointer, dragging moves the zoomed photo, and double-clicking shows all of it again. The
-/// canvas reaches under the panel, so a zoomed photo shows through it.
+/// The photo fitted to the canvas below the toolbar and beside the settings panel. Scrolling (or
+/// pinching) zooms around the pointer, dragging moves the zoomed photo, and double-clicking shows
+/// all of it again. The canvas reaches under the toolbar and the panel, so a zoomed photo shows
+/// through them, as in Photos.
 private struct ImageCanvas: View {
     @Environment(PhotoModel.self) private var model
     /// Magnification over the photo fitted to the canvas (1 shows all of it), and how far the
     /// zoomed photo is moved from the centre, in points.
     @State private var zoom: CGFloat = 1
     @State private var offset: CGSize = .zero
-    /// How much of the canvas's right side the settings panel covers.
-    let covered: CGFloat
     @State private var canvasSize: CGSize = .zero
+    /// How much of the canvas the toolbar (top) and the settings panel (trailing) cover.
+    @State private var insets = EdgeInsets()
     /// Where the pointer is over the photo: scrolling zooms around it.
     @State private var pointer: CGPoint?
     /// The offset when the drag began, and the pinch's magnification so far.
@@ -791,23 +791,30 @@ private struct ImageCanvas: View {
     @State private var scrollMonitor: Any?
     @Environment(\.displayScale) private var displayScale
 
-    init(covered: CGFloat) {
-        self.covered = covered
+    var body: some View {
+        // Takes the canvas below the toolbar and beside the panel, whose geometry gives their sizes
+        // (the safe area's insets); the canvas itself reaches under them.
+        Color.clear
+            .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets in
+                self.insets = insets
+                offset = clamped(offset)
+            }
+            .overlay { canvas.ignoresSafeArea(.container, edges: [.top, .trailing]) }
     }
 
-    var body: some View {
+    private var canvas: some View {
         Group {
             if let image = model.displayImage {
                 // The reader takes the canvas's size and passes nothing back: a frame sized by the
                 // photo would make that the window's minimum.
-                GeometryReader { geometry in
+                GeometryReader { _ in
                     let fitted = fittedSize(in: visibleSize)
                     Image(decorative: image, scale: 1)
                         .resizable()
                         .interpolation(.high)
                         .overlay { meteringOverlay }
                         .frame(width: fitted.width * zoom, height: fitted.height * zoom)
-                        .position(x: visibleSize.width / 2 + offset.width, y: geometry.size.height / 2 + offset.height)
+                        .position(x: visibleCentre.x + offset.width, y: visibleCentre.y + offset.height)
                 }
                 .contentShape(Rectangle())
                 .gesture(DragGesture()
@@ -860,7 +867,8 @@ private struct ImageCanvas: View {
                 } actions: {
                     Button("Open…") { model.isImporting = true }
                 }
-                .padding(.trailing, covered)
+                .padding(.top, insets.top)
+                .padding(.trailing, insets.trailing)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -868,9 +876,6 @@ private struct ImageCanvas: View {
         .background(.black.opacity(0.05))
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
             canvasSize = size
-            offset = clamped(offset)
-        }
-        .onChange(of: covered) {
             offset = clamped(offset)
         }
         .onChange(of: model.photo?.id) {
@@ -884,12 +889,15 @@ private struct ImageCanvas: View {
         .onChange(of: pointer != nil || zoom > 1, initial: true) { _, wants in
             model.wantsFullResolution = wants
         }
-        .ignoresSafeArea(.container, edges: .trailing)
     }
 
-    /// The canvas beside the settings panel.
+    /// The canvas below the toolbar and beside the panel.
     private var visibleSize: CGSize {
-        CGSize(width: max(0, canvasSize.width - covered), height: canvasSize.height)
+        CGSize(width: max(0, canvasSize.width - insets.trailing), height: max(0, canvasSize.height - insets.top))
+    }
+
+    private var visibleCentre: CGPoint {
+        CGPoint(x: visibleSize.width / 2, y: insets.top + visibleSize.height / 2)
     }
 
     /// While the Exposure slider is held on a mark: the region that mark meters, tinted.
@@ -933,14 +941,14 @@ private struct ImageCanvas: View {
         let newZoom = min(max(zoom * factor, 1), max(1, 4 * CGFloat(photo.width) / fitted.width))
         let applied = newZoom / zoom
         // The anchor's distance from the photo's centre scales with the zoom.
-        let fromCentre = CGSize(width: anchor.x - visibleSize.width / 2, height: anchor.y - visibleSize.height / 2)
+        let fromCentre = CGSize(width: anchor.x - visibleCentre.x, height: anchor.y - visibleCentre.y)
         zoom = newZoom
         offset = clamped(CGSize(width: fromCentre.width - (fromCentre.width - offset.width) * applied,
                                 height: fromCentre.height - (fromCentre.height - offset.height) * applied))
     }
 
-    /// `offset` limited so the zoomed photo fills the canvas beside the panel where it's larger,
-    /// and stays centred there where it's smaller.
+    /// `offset` limited so the zoomed photo fills the canvas below the toolbar and beside the panel
+    /// where it's larger, and stays centred there where it's smaller.
     private func clamped(_ offset: CGSize) -> CGSize {
         let fitted = fittedSize(in: visibleSize)
         let slack = CGSize(width: max(0, (fitted.width * zoom - visibleSize.width) / 2),
