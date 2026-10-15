@@ -72,32 +72,34 @@ private func bottomHalfRegions(faces: [CGRect] = []) -> MeteringRegions {
     #expect(weights.reduce(0, +) == 4)
 }
 
-/// Opening the golden portrait, its sides brightened like a bright background, finds her face and
-/// reads it brighter than the frame; choosing the Faces mark re-renders, as the exposure is part
-/// of what the engine keeps between renders.
-@Test func openingAPortraitFindsTheFace() async throws {
-    let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
-    let backlit = image.pixels.enumerated().map { index, value in
-        let column = index / 3 % image.width
-        return column < image.width / 4 || column >= image.width * 3 / 4 ? value * 3 : value
-    }
-    // The golden photo is sRGB-encoded (extended: Core Image takes float bitmaps only in extended spaces).
-    let rgba = rgba(fromRGB: backlit, width: image.width, height: image.height, alpha: 1)
-    let ciImage = CIImage(bitmapData: Data(bytes: rgba, count: rgba.count * 4), bytesPerRow: image.width * 16,
-                          size: CGSize(width: image.width, height: image.height), format: .RGBAf,
-                          colorSpace: CGColorSpace(name: CGColorSpace.extendedSRGB)!)
-    let engine = try Engine()
-    let opened = try await engine.open(ciImage)
-    print("Backlit portrait readings by mark: \(opened.metering.ev)")
-    let face = try #require(opened.metering.ev[MeteringMark.faces.rawValue])
-    #expect(face > opened.metering.ev[MeteringMark.centreWeighted.rawValue]! + 0.5)
-    #expect(Set(opened.meteringOverlays.keys).isSuperset(of: [.centreWeighted, .faces]))
-    #expect(opened.meteringOverlays[.asShot] == nil)
-    #expect(opened.meteringOverlays.values.allSatisfy { $0.width == image.width && $0.height == image.height })
+extension PhotoOpeningTests {
+    /// Opening the golden portrait, its sides brightened like a bright background, finds her face and
+    /// reads it brighter than the frame; choosing the Faces mark re-renders, as the exposure is part
+    /// of what the engine keeps between renders.
+    @Test func openingAPortraitFindsTheFace() async throws {
+        let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
+        let backlit = image.pixels.enumerated().map { index, value in
+            let column = index / 3 % image.width
+            return column < image.width / 4 || column >= image.width * 3 / 4 ? value * 3 : value
+        }
+        // The golden photo is sRGB-encoded (extended: Core Image takes float bitmaps only in extended spaces).
+        let rgba = rgba(fromRGB: backlit, width: image.width, height: image.height, alpha: 1)
+        let ciImage = CIImage(bitmapData: Data(bytes: rgba, count: rgba.count * 4), bytesPerRow: image.width * 16,
+                              size: CGSize(width: image.width, height: image.height), format: .RGBAf,
+                              colorSpace: CGColorSpace(name: CGColorSpace.extendedSRGB)!)
+        let engine = try Engine()
+        let opened = try await engine.open(ciImage)
+        print("Backlit portrait readings by mark: \(opened.metering.ev)")
+        let face = try #require(opened.metering.ev[MeteringMark.faces.rawValue])
+        #expect(face > opened.metering.ev[MeteringMark.centreWeighted.rawValue]! + 0.5)
+        #expect(Set(opened.meteringOverlays.keys).isSuperset(of: [.centreWeighted, .faces]))
+        #expect(opened.meteringOverlays[.asShot] == nil)
+        #expect(opened.meteringOverlays.values.allSatisfy { $0.width == image.width && $0.height == image.height })
 
-    var controls = Controls()
-    let centreWeighted = try await engine.render(controls: controls, mode: .preview)
-    controls.exposureMark = .faces
-    let faces = try await engine.render(controls: controls, mode: .preview)
-    #expect(centreWeighted.pixels != faces.pixels)
+        var controls = Controls()
+        let centreWeighted = try await engine.render(controls: controls, mode: .preview)
+        controls.exposureMark = .faces
+        let faces = try await engine.render(controls: controls, mode: .preview)
+        #expect(centreWeighted.pixels != faces.pixels)
+    }
 }
