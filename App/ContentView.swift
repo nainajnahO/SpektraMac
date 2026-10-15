@@ -44,6 +44,9 @@ struct ContentView: View {
                             ForEach(SettingsCategory.allCases, id: \.self) { Text($0.rawValue) }
                         }
                         .pickerStyle(.segmented)
+                        // The panel's width less the toolbar's margin (8 pt, measured) either side,
+                        // so the tabs sit centred over the panel.
+                        .frame(width: settingsWidth - 16)
                     }
                 }
             }
