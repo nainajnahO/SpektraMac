@@ -7,8 +7,6 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
     @SceneStorage("showsSettings") private var showsSettings = true
     @SceneStorage("settingsCategory") private var category = SettingsCategory.film
-    /// The settings panel's width, over the canvas's right side.
-    private let settingsWidth: CGFloat = 290
 
     var body: some View {
         @Bindable var model = model
@@ -25,7 +23,7 @@ struct ContentView: View {
                     .pickerStyle(.segmented)
                     .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
                 }
-                // Next to Print | Film; the settings' tabs go to the far right, over the panel.
+                // Next to Print | Film.
                 ToolbarItemGroup {
                     Button("Open…", systemImage: "folder") { model.isImporting = true }
                     if model.canCancel {
@@ -38,26 +36,27 @@ struct ContentView: View {
                         .help("Show or hide the settings")
                 }
                 ToolbarSpacer(.flexible)
-                if showsSettings {
-                    ToolbarItem {
-                        // The panel's width less the toolbar's margin (8 pt, measured) either side,
-                        // so the tabs span the panel under them.
-                        SettingsTabs(selection: $category)
-                            .frame(width: settingsWidth - 16)
-                    }
-                }
             }
             // The toolbar's own translucent background, as the photo reaches under it (``ImageCanvas``).
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
             // On the right over the photo, as Photos' Adjust panel: the photo fits beside it and
-            // shows through it, blurred, when zoomed or moved under it (``ImageCanvas``). An
-            // inspector is a column of its own, which the photo can't reach under.
-            .safeAreaInset(edge: .trailing, spacing: 0) {
-                if showsSettings {
-                    SettingsPanel(category: category)
-                        .frame(width: settingsWidth)
-                        .background(.regularMaterial)
-                }
+            // shows through it, blurred, when zoomed or moved under it (``ImageCanvas``), as the
+            // inspector lies over the canvas rather than beside it.
+            .inspector(isPresented: $showsSettings) {
+                SettingsPanel(category: category)
+                    .background(.regularMaterial)
+                    .inspectorColumnWidth(290)
+                    // In the inspector's own part of the toolbar, so centred over the panel.
+                    .toolbar {
+                        ToolbarSpacer(.flexible)
+                        ToolbarItem {
+                            Picker("Settings", selection: $category) {
+                                ForEach(SettingsCategory.allCases, id: \.self) { Text($0.rawValue) }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        ToolbarSpacer(.flexible)
+                    }
             }
             .dropDestination(for: URL.self) { urls, _ in
                 guard let url = urls.first else { return false }
@@ -79,45 +78,6 @@ struct ContentView: View {
 /// panel: the camera's exposure, the film, and the print made from it.
 private enum SettingsCategory: String, CaseIterable {
     case camera = "Camera", film = "Film", print = "Print"
-}
-
-/// The settings' tabs, filling their width in equal segments. AppKit's segmented control
-/// (`fillEqually`): SwiftUI's segmented picker keeps its own width inside a wider frame, leaving
-/// the toolbar's glass around it empty.
-private struct SettingsTabs: NSViewRepresentable {
-    @Binding var selection: SettingsCategory
-
-    func makeNSView(context: Context) -> NSSegmentedControl {
-        let control = NSSegmentedControl(labels: SettingsCategory.allCases.map(\.rawValue), trackingMode: .selectOne,
-                                         target: context.coordinator, action: #selector(Coordinator.choose(_:)))
-        control.segmentDistribution = .fillEqually
-        control.setAccessibilityLabel("Settings")
-        return control
-    }
-
-    func updateNSView(_ control: NSSegmentedControl, context: Context) {
-        context.coordinator.selection = $selection
-        control.selectedSegment = SettingsCategory.allCases.firstIndex(of: selection)!
-    }
-
-    /// The width it's given, at its own height.
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView control: NSSegmentedControl, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? control.intrinsicContentSize.width, height: control.intrinsicContentSize.height)
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
-
-    final class Coordinator: NSObject {
-        var selection: Binding<SettingsCategory>
-
-        init(selection: Binding<SettingsCategory>) {
-            self.selection = selection
-        }
-
-        @objc func choose(_ control: NSSegmentedControl) {
-            selection.wrappedValue = SettingsCategory.allCases[control.selectedSegment]
-        }
-    }
 }
 
 /// The settings of one step of the process, laid out as Photos' Adjust panel: a group per effect.
