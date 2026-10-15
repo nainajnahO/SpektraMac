@@ -40,13 +40,10 @@ struct ContentView: View {
                 ToolbarSpacer(.flexible)
                 if showsSettings {
                     ToolbarItem {
-                        Picker("Settings", selection: $category) {
-                            ForEach(SettingsCategory.allCases, id: \.self) { Text($0.rawValue) }
-                        }
-                        .pickerStyle(.segmented)
                         // The panel's width less the toolbar's margin (8 pt, measured) either side,
-                        // so the tabs sit centred over the panel.
-                        .frame(width: settingsWidth - 16)
+                        // so the tabs span the panel under them.
+                        SettingsTabs(selection: $category)
+                            .frame(width: settingsWidth - 16)
                     }
                 }
             }
@@ -82,6 +79,45 @@ struct ContentView: View {
 /// panel: the camera's exposure, the film, and the print made from it.
 private enum SettingsCategory: String, CaseIterable {
     case camera = "Camera", film = "Film", print = "Print"
+}
+
+/// The settings' tabs, filling their width in equal segments. AppKit's segmented control
+/// (`fillEqually`): SwiftUI's segmented picker keeps its own width inside a wider frame, leaving
+/// the toolbar's glass around it empty.
+private struct SettingsTabs: NSViewRepresentable {
+    @Binding var selection: SettingsCategory
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl(labels: SettingsCategory.allCases.map(\.rawValue), trackingMode: .selectOne,
+                                         target: context.coordinator, action: #selector(Coordinator.choose(_:)))
+        control.segmentDistribution = .fillEqually
+        control.setAccessibilityLabel("Settings")
+        return control
+    }
+
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+        context.coordinator.selection = $selection
+        control.selectedSegment = SettingsCategory.allCases.firstIndex(of: selection)!
+    }
+
+    /// The width it's given, at its own height.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView control: NSSegmentedControl, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? control.intrinsicContentSize.width, height: control.intrinsicContentSize.height)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
+
+    final class Coordinator: NSObject {
+        var selection: Binding<SettingsCategory>
+
+        init(selection: Binding<SettingsCategory>) {
+            self.selection = selection
+        }
+
+        @objc func choose(_ control: NSSegmentedControl) {
+            selection.wrappedValue = SettingsCategory.allCases[control.selectedSegment]
+        }
+    }
 }
 
 /// The settings of one step of the process, laid out as Photos' Adjust panel: a group per effect.
