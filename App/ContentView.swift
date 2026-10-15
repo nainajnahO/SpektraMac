@@ -6,14 +6,16 @@ struct ContentView: View {
     @Environment(PhotoModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @SceneStorage("showsSettings") private var showsSettings = true
+    /// The settings panel's width, over the canvas's right side.
+    private let settingsWidth: CGFloat = 290
 
     var body: some View {
         @Bindable var model = model
-        ImageCanvas()
+        ImageCanvas(covered: showsSettings ? settingsWidth : 0)
             .safeAreaInset(edge: .bottom) { StatusBar() }
             .navigationTitle(model.photo?.name ?? "SpektraMac")
             .toolbar {
-                ToolbarItemGroup(placement: .principal) {
+                ToolbarItem(placement: .principal) {
                     Picker("Show", selection: $model.controls.scanFilm) {
                         Text("Print").tag(false)
                             .selectionDisabled(model.isSlideFilm)
@@ -21,7 +23,11 @@ struct ContentView: View {
                     }
                     .pickerStyle(.segmented)
                     .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
+                    // Centred over the photo beside the panel rather than over the window.
+                    .padding(.trailing, showsSettings ? settingsWidth : 0)
                 }
+                // The glass behind toolbar items would take in the padding.
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button("Open…", systemImage: "folder") { model.isImporting = true }
                     if model.canCancel {
@@ -43,7 +49,7 @@ struct ContentView: View {
             .safeAreaInset(edge: .trailing, spacing: 0) {
                 if showsSettings {
                     SettingsPanel()
-                        .frame(width: 290)
+                        .frame(width: settingsWidth)
                         .background(.regularMaterial)
                 }
             }
@@ -778,9 +784,9 @@ private struct ImageCanvas: View {
     /// zoomed photo is moved from the centre, in points.
     @State private var zoom: CGFloat = 1
     @State private var offset: CGSize = .zero
-    @State private var canvasSize: CGSize = .zero
     /// How much of the canvas's right side the settings panel covers.
-    @State private var covered: CGFloat = 0
+    let covered: CGFloat
+    @State private var canvasSize: CGSize = .zero
     /// Where the pointer is over the photo: scrolling zooms around it.
     @State private var pointer: CGPoint?
     /// The offset when the drag began, and the pinch's magnification so far.
@@ -788,6 +794,10 @@ private struct ImageCanvas: View {
     @State private var pinched: CGFloat = 1
     @State private var scrollMonitor: Any?
     @Environment(\.displayScale) private var displayScale
+
+    init(covered: CGFloat) {
+        self.covered = covered
+    }
 
     var body: some View {
         Group {
@@ -864,8 +874,7 @@ private struct ImageCanvas: View {
             canvasSize = size
             offset = clamped(offset)
         }
-        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { width in
-            covered = width
+        .onChange(of: covered) {
             offset = clamped(offset)
         }
         .onChange(of: model.photo?.id) {
