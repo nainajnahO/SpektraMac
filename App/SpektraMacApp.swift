@@ -40,5 +40,12 @@ struct SpektraMacApp: App {
                 .disabled(!model.canUsePresets)
             }
         }
+
+        // A window of its own: the settings have the main window's inspector.
+        Window("Log", id: "log") {
+            LogView()
+                .environment(model)
+        }
+        .defaultSize(width: 420, height: 480)
     }
 }

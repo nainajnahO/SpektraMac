@@ -4,53 +4,49 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Environment(PhotoModel.self) private var model
-    @State private var showLog = false
+    @Environment(\.openWindow) private var openWindow
+    @SceneStorage("showsSettings") private var showsSettings = true
 
     var body: some View {
         @Bindable var model = model
-        NavigationSplitView {
-            SettingsSidebar()
-                .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 420)
-        } detail: {
-            // Toolbar, inspector and status bar belong to the detail column. Attaching them
-            // to the split view itself spans them across the sidebar and loses the
-            // full-height floating sidebar treatment.
-            ImageCanvas()
-                .safeAreaInset(edge: .bottom) { StatusBar() }
-                .navigationTitle(model.photo?.name ?? "SpektraMac")
-                .toolbar {
-                    ToolbarItemGroup(placement: .principal) {
-                        Picker("Show", selection: $model.controls.scanFilm) {
-                            Text("Print").tag(false)
-                                .selectionDisabled(model.isSlideFilm)
-                            Text("Film").tag(true)
-                        }
-                        .pickerStyle(.segmented)
-                        .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
+        ImageCanvas()
+            .safeAreaInset(edge: .bottom) { StatusBar() }
+            .navigationTitle(model.photo?.name ?? "SpektraMac")
+            .toolbar {
+                ToolbarItemGroup(placement: .principal) {
+                    Picker("Show", selection: $model.controls.scanFilm) {
+                        Text("Print").tag(false)
+                            .selectionDisabled(model.isSlideFilm)
+                        Text("Film").tag(true)
                     }
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        Button("Open…", systemImage: "folder") { model.isImporting = true }
-                        if model.canCancel {
-                            Button("Cancel", systemImage: "xmark.circle") { model.cancel() }
-                        }
-                        Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
-                            .disabled(!model.canSave)
-                        Toggle("Log", systemImage: "list.bullet.rectangle", isOn: $showLog)
+                    .pickerStyle(.segmented)
+                    .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button("Open…", systemImage: "folder") { model.isImporting = true }
+                    if model.canCancel {
+                        Button("Cancel", systemImage: "xmark.circle") { model.cancel() }
                     }
+                    Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
+                        .disabled(!model.canSave)
+                    Button("Log", systemImage: "list.bullet.rectangle") { openWindow(id: "log") }
+                    Toggle("Adjust", systemImage: "slider.horizontal.3", isOn: $showsSettings)
+                        .help("Show or hide the settings")
                 }
-                // The canvas doesn't scroll under the toolbar, so the window would otherwise
-                // draw a hard separator line beneath it.
-                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-                .inspector(isPresented: $showLog) {
-                    LogView()
-                        .inspectorColumnWidth(min: 260, ideal: 340)
-                }
-                .dropDestination(for: URL.self) { urls, _ in
-                    guard let url = urls.first else { return false }
-                    model.open(url)
-                    return true
-                }
-        }
+            }
+            // The canvas doesn't scroll under the toolbar, so the window would otherwise
+            // draw a hard separator line beneath it.
+            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+            // On the right, where Photos has its Adjust panel.
+            .inspector(isPresented: $showsSettings) {
+                SettingsPanel()
+                    .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
+            }
+            .dropDestination(for: URL.self) { urls, _ in
+                guard let url = urls.first else { return false }
+                model.open(url)
+                return true
+            }
         .fileImporter(isPresented: $model.isImporting, allowedContentTypes: [.image]) { result in
             switch result {
             case .success(let url): model.open(url)
@@ -60,11 +56,11 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Sidebar
+// MARK: - Settings
 
 /// The settings, one step of the process at a time, chosen at the top: the camera's exposure,
 /// the film, and the print made from it.
-private struct SettingsSidebar: View {
+private struct SettingsPanel: View {
     @Environment(PhotoModel.self) private var model
     @SceneStorage("settingsCategory") private var category = Category.film
 
@@ -681,7 +677,7 @@ private struct StatusBar: View {
     }
 }
 
-private struct LogView: View {
+struct LogView: View {
     @Environment(PhotoModel.self) private var model
 
     var body: some View {
