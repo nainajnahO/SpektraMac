@@ -20,25 +20,36 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int) throws -> URL 
     return url
 }
 
-@Test func photoDecodesRendersAndDisplays() async throws {
-    // Mid grey and pure red, side by side.
-    let url = try writePNG([128, 128, 128, 255, 0, 0], width: 2, height: 1)
-    defer { try? FileManager.default.removeItem(at: url) }
+/// The tests that open a photo, run one at a time (`openingAPortraitFindsTheFace`, in
+/// MeteringTests, is one too). Opening asks Vision for people, objects and faces in one call
+/// (``MeteringRegions/init(finding:)``). Vision runs requests in a fixed number of slots shared by
+/// the whole process, and person segmentation holds its slot while it waits for a second one for
+/// the requests it builds on. With about a dozen photos opening at once, every slot is held by a
+/// segmentation waiting for another, and Vision hangs for good, as these tests did in parallel.
+/// The app can't get there: its one `Engine` opens one photo at a time.
+@Suite(.serialized) struct PhotoOpeningTests {}
 
-    let image = try RGBImage(contentsOf: url)
-    #expect(image.width == 2 && image.height == 1)
-    // colour-science: sRGB decode, then sRGB → BT.2020 primaries.
-    let expected: [Double] = [0.2158799901529247, 0.21585396096747733, 0.215848923573429,
-                              0.6274413720579783, 0.0690276171470781, 0.016364235071680725]
-    #expect(Difference(image.pixels, expected).maxAbsolute < 2e-4)
+extension PhotoOpeningTests {
+    @Test func photoDecodesRendersAndDisplays() async throws {
+        // Mid grey and pure red, side by side.
+        let url = try writePNG([128, 128, 128, 255, 0, 0], width: 2, height: 1)
+        defer { try? FileManager.default.removeItem(at: url) }
 
-    let engine = try Engine()
-    _ = try await engine.open(RGBImage.decode(contentsOf: url))
-    let rendered = try await engine.render(controls: Controls(), mode: .full)
-    #expect(rendered.width == 2 && rendered.height == 1)
+        let image = try RGBImage(contentsOf: url)
+        #expect(image.width == 2 && image.height == 1)
+        // colour-science: sRGB decode, then sRGB → BT.2020 primaries.
+        let expected: [Double] = [0.2158799901529247, 0.21585396096747733, 0.215848923573429,
+                                  0.6274413720579783, 0.0690276171470781, 0.016364235071680725]
+        #expect(Difference(image.pixels, expected).maxAbsolute < 2e-4)
 
-    let display = try await engine.display(controls: Controls(), mode: .full)
-    #expect(display.width == 2 && display.height == 1)
+        let engine = try Engine()
+        _ = try await engine.open(RGBImage.decode(contentsOf: url))
+        let rendered = try await engine.render(controls: Controls(), mode: .full)
+        #expect(rendered.width == 2 && rendered.height == 1)
+
+        let display = try await engine.display(controls: Controls(), mode: .full)
+        #expect(display.width == 2 && display.height == 1)
+    }
 }
 
 /// TIFFs, which reach Core Image through ImageIO, decode as Core Image reads them from the file,
@@ -70,129 +81,131 @@ func tiffDecodesAsCoreImageReadsIt(bits: Int, tagged: Bool) throws {
     #expect(decoded.pixels.map(\.bitPattern) == expected.map(\.bitPattern))
 }
 
-/// Opening renders the decoded photo straight onto the GPU: its renders, full, preview, reduced
-/// and thumbnail, are exactly the parity-tested chain on the photo decoded to an `RGBImage` and on
-/// that scaled down as the preview was made before (Core Image's Lanczos from the CPU copy), to the
-/// preview's size, a reduced render's and a thumbnail's. A Display P3 8-bit PNG and 16-bit TIFF larger than the
-/// preview, and the synthetic DNG.
-@Test(arguments: ["png", "tif", "dng"])
-func openRendersTheDecodedPhoto(format: String) async throws {
-    let url: URL
-    if format == "dng" {
-        url = goldenDirectory.appending(components: "raw", "patches.dng")
-    } else {
-        // Gradients in red and green, a fine pattern in blue.
-        let (width, height, bits) = (2400, 1600, format == "tif" ? 16 : 8)
-        let values = (0..<(width * height)).flatMap { pixel in
-            let (x, y) = (pixel % width, pixel / width)
-            return [x * 65535 / width, y * 65535 / height, (x * 7 + y * 13) % 65536]
+extension PhotoOpeningTests {
+    /// Opening renders the decoded photo straight onto the GPU: its renders, full, preview, reduced
+    /// and thumbnail, are exactly the parity-tested chain on the photo decoded to an `RGBImage` and on
+    /// that scaled down as the preview was made before (Core Image's Lanczos from the CPU copy), to the
+    /// preview's size, a reduced render's and a thumbnail's. A Display P3 8-bit PNG and 16-bit TIFF
+    /// larger than the preview, and the synthetic DNG.
+    @Test(arguments: ["png", "tif", "dng"])
+    func openRendersTheDecodedPhoto(format: String) async throws {
+        let url: URL
+        if format == "dng" {
+            url = goldenDirectory.appending(components: "raw", "patches.dng")
+        } else {
+            // Gradients in red and green, a fine pattern in blue.
+            let (width, height, bits) = (2400, 1600, format == "tif" ? 16 : 8)
+            let values = (0..<(width * height)).flatMap { pixel in
+                let (x, y) = (pixel % width, pixel / width)
+                return [x * 65535 / width, y * 65535 / height, (x * 7 + y * 13) % 65536]
+            }
+            let data = bits == 16 ? values.map { UInt16($0) }.withUnsafeBytes { Data($0) } : Data(values.map { UInt8($0 >> 8) })
+            let image = CGImage(width: width, height: height, bitsPerComponent: bits, bitsPerPixel: 3 * bits,
+                                bytesPerRow: width * 3 * bits / 8, space: CGColorSpace(name: CGColorSpace.displayP3)!,
+                                bitmapInfo: bits == 16 ? .byteOrder16Little : [],
+                                provider: CGDataProvider(data: data as CFData)!, decode: nil, shouldInterpolate: false,
+                                intent: .defaultIntent)!
+            url = FileManager.default.temporaryDirectory.appending(component: "\(UUID()).\(format)")
+            let type = format == "tif" ? UTType.tiff : .png
+            let destination = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil)!
+            CGImageDestinationAddImage(destination, image, nil)
+            #expect(CGImageDestinationFinalize(destination))
         }
-        let data = bits == 16 ? values.map { UInt16($0) }.withUnsafeBytes { Data($0) } : Data(values.map { UInt8($0 >> 8) })
-        let image = CGImage(width: width, height: height, bitsPerComponent: bits, bitsPerPixel: 3 * bits,
-                            bytesPerRow: width * 3 * bits / 8, space: CGColorSpace(name: CGColorSpace.displayP3)!,
-                            bitmapInfo: bits == 16 ? .byteOrder16Little : [],
-                            provider: CGDataProvider(data: data as CFData)!, decode: nil, shouldInterpolate: false,
-                            intent: .defaultIntent)!
-        url = FileManager.default.temporaryDirectory.appending(component: "\(UUID()).\(format)")
-        let type = format == "tif" ? UTType.tiff : .png
-        let destination = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil)!
-        CGImageDestinationAddImage(destination, image, nil)
-        #expect(CGImageDestinationFinalize(destination))
-    }
-    defer { if format != "dng" { try? FileManager.default.removeItem(at: url) } }
+        defer { if format != "dng" { try? FileManager.default.removeItem(at: url) } }
 
-    let engine = try Engine()
-    _ = try await engine.open(RGBImage.decode(contentsOf: url))
-    let decoded = try RGBImage(contentsOf: url)
-    func scaled(to maxPixels: Int) -> RGBImage {
-        let scaled = RGBImage.scaledDown(decoded.ciImage, maxPixels: maxPixels)
-        let (width, height) = (Int(scaled.extent.width), Int(scaled.extent.height))
-        var rgba = [Float](repeating: 0, count: width * height * 4)
-        RGBImage.makeContext().render(scaled, toBitmap: &rgba, rowBytes: width * 16, bounds: scaled.extent,
-                                      format: .RGBAf, colorSpace: RGBImage.workingColorSpace)
-        return RGBImage(width: width, height: height, pixels: (0..<(width * height)).flatMap { rgba[($0 * 4)..<($0 * 4 + 3)] })
+        let engine = try Engine()
+        _ = try await engine.open(RGBImage.decode(contentsOf: url))
+        let decoded = try RGBImage(contentsOf: url)
+        func scaled(to maxPixels: Int) -> RGBImage {
+            let scaled = RGBImage.scaledDown(decoded.ciImage, maxPixels: maxPixels)
+            let (width, height) = (Int(scaled.extent.width), Int(scaled.extent.height))
+            var rgba = [Float](repeating: 0, count: width * height * 4)
+            RGBImage.makeContext().render(scaled, toBitmap: &rgba, rowBytes: width * 16, bounds: scaled.extent,
+                                          format: .RGBAf, colorSpace: RGBImage.workingColorSpace)
+            return RGBImage(width: width, height: height, pixels: (0..<(width * height)).flatMap { rgba[($0 * 4)..<($0 * 4 + 3)] })
+        }
+
+        let controls = Controls()
+        let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
+        let (gpu, tables, database) = (try GPU(), try Tables.load(), try Tables.loadNeutralPrintFilters())
+        for (mode, image) in [(RenderMode.full, decoded), (.preview, scaled(to: 1600)), (.reduced(longSide: 1000), scaled(to: 1000)),
+                              (.thumbnail, scaled(to: 256))] {
+            let rendered = try await engine.render(controls: controls, mode: mode)
+            let parameters = Engine.parameters(for: controls, film: film, print: paper, database: database, mode: mode)
+            let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: tables)
+            let chain = gpu.download(try gpu.run { simulation.encode(image, on: $0) })
+            #expect(rendered.width == image.width && rendered.height == image.height, "\(mode)")
+            #expect(rendered.pixels.map(\.bitPattern) == chain.map(\.bitPattern), "\(mode)")
+        }
     }
 
-    let controls = Controls()
-    let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
-    let (gpu, tables, database) = (try GPU(), try Tables.load(), try Tables.loadNeutralPrintFilters())
-    for (mode, image) in [(RenderMode.full, decoded), (.preview, scaled(to: 1600)), (.reduced(longSide: 1000), scaled(to: 1000)),
-                          (.thumbnail, scaled(to: 256))] {
-        let rendered = try await engine.render(controls: controls, mode: mode)
-        let parameters = Engine.parameters(for: controls, film: film, print: paper, database: database, mode: mode)
-        let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: tables)
-        let chain = gpu.download(try gpu.run { simulation.encode(image, on: $0) })
-        #expect(rendered.width == image.width && rendered.height == image.height, "\(mode)")
-        #expect(rendered.pixels.map(\.bitPattern) == chain.map(\.bitPattern), "\(mode)")
-    }
-}
-
-/// What the screen shows is the render, upright, in 8-bit sRGB (within a unit of rounding), and
-/// scaled down to fit `maxPixels`.
-@Test func displayShowsTheRender() async throws {
-    let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
-    let engine = try Engine()
-    _ = try await engine.open(image.ciImage)
-    let rendered = try await engine.render(controls: Controls(), mode: .full)
-    let display = try await engine.display(controls: Controls(), mode: .full)
-    #expect(display.width == image.width && display.height == image.height)
-    let bytes = try #require(display.dataProvider?.data as Data?)
-    func encoded(_ linear: Float) -> Int {
-        let v = Double(min(max(linear, 0), 1))
-        return Int(((v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1 / 2.4) - 0.055) * 255).rounded())
-    }
-    var worst = 0
-    for y in 0..<image.height {
-        for x in 0..<image.width {
-            for channel in 0..<3 {
-                let shown = Int(bytes[y * display.bytesPerRow + x * 4 + channel])
-                worst = max(worst, abs(shown - encoded(rendered.pixels[(y * image.width + x) * 3 + channel])))
+    /// What the screen shows is the render, upright, in 8-bit sRGB (within a unit of rounding), and
+    /// scaled down to fit `maxPixels`.
+    @Test func displayShowsTheRender() async throws {
+        let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
+        let engine = try Engine()
+        _ = try await engine.open(image.ciImage)
+        let rendered = try await engine.render(controls: Controls(), mode: .full)
+        let display = try await engine.display(controls: Controls(), mode: .full)
+        #expect(display.width == image.width && display.height == image.height)
+        let bytes = try #require(display.dataProvider?.data as Data?)
+        func encoded(_ linear: Float) -> Int {
+            let v = Double(min(max(linear, 0), 1))
+            return Int(((v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1 / 2.4) - 0.055) * 255).rounded())
+        }
+        var worst = 0
+        for y in 0..<image.height {
+            for x in 0..<image.width {
+                for channel in 0..<3 {
+                    let shown = Int(bytes[y * display.bytesPerRow + x * 4 + channel])
+                    worst = max(worst, abs(shown - encoded(rendered.pixels[(y * image.width + x) * 3 + channel])))
+                }
             }
         }
-    }
-    print("display vs render: max difference \(worst)/255")
-    #expect(worst <= 1)
+        print("display vs render: max difference \(worst)/255")
+        #expect(worst <= 1)
 
-    let small = try await engine.display(controls: Controls(), mode: .full, maxPixels: 100)
-    #expect(max(small.width, small.height) == 100)
-}
-
-/// The synthetic DNG `tools/golden.py` writes (camera RGB = linear sRGB): developed linearly, its
-/// grey patches keep their raw values, which grey keeps in BT.2020 too. Then it renders.
-@Test func rawDecodesLinearlyAndRenders() async throws {
-    let image = try RGBImage(contentsOf: goldenDirectory.appending(components: "raw", "patches.dng"))
-    #expect(image.width == 512 && image.height == 256)
-    for (patch, raw) in [0.05, 0.1, 0.2, 0.4].enumerated() {
-        let index = (128 * image.width + patch * 128 + 64) * 3
-        let rgb = image.pixels[index..<(index + 3)].map(Double.init)
-        print("raw \(raw): \(rgb)")
-        #expect(rgb.allSatisfy { abs($0 / raw - 1) < 0.005 })
+        let small = try await engine.display(controls: Controls(), mode: .full, maxPixels: 100)
+        #expect(max(small.width, small.height) == 100)
     }
 
-    let engine = try Engine()
-    _ = try await engine.open(RGBImage.decode(contentsOf: goldenDirectory.appending(components: "raw", "patches.dng")))
-    let rendered = try await engine.render(controls: Controls(), mode: .full)
-    #expect(rendered.width == 512 && rendered.height == 256)
-    let finite = rendered.pixels.allSatisfy { $0.isFinite }
-    #expect(finite)
-}
+    /// The synthetic DNG `tools/golden.py` writes (camera RGB = linear sRGB): developed linearly, its
+    /// grey patches keep their raw values, which grey keeps in BT.2020 too. Then it renders.
+    @Test func rawDecodesLinearlyAndRenders() async throws {
+        let image = try RGBImage(contentsOf: goldenDirectory.appending(components: "raw", "patches.dng"))
+        #expect(image.width == 512 && image.height == 256)
+        for (patch, raw) in [0.05, 0.1, 0.2, 0.4].enumerated() {
+            let index = (128 * image.width + patch * 128 + 64) * 3
+            let rgb = image.pixels[index..<(index + 3)].map(Double.init)
+            print("raw \(raw): \(rgb)")
+            #expect(rgb.allSatisfy { abs($0 / raw - 1) < 0.005 })
+        }
 
-/// The preview's parameters are Python's `digest_params` with `preview_mode`, and its image is
-/// down-sized to the app's preview size, 1600 px on the long side.
-@Test func previewMatchesPython() async throws {
-    var parameters = try GoldenCase("photo-kodak_portra_400-kodak_portra_endura").params
-    parameters.applyPreviewMode()
-    #expect(parameters == (try GoldenCase("preview-kodak_portra_400-kodak_portra_endura").params))
+        let engine = try Engine()
+        _ = try await engine.open(RGBImage.decode(contentsOf: goldenDirectory.appending(components: "raw", "patches.dng")))
+        let rendered = try await engine.render(controls: Controls(), mode: .full)
+        #expect(rendered.width == 512 && rendered.height == 256)
+        let finite = rendered.pixels.allSatisfy { $0.isFinite }
+        #expect(finite)
+    }
 
-    let image = RGBImage(width: 3000, height: 2000, pixels: [Float](repeating: 0.18, count: 3000 * 2000 * 3))
-    let engine = try Engine()
-    let opened = try await engine.open(image.ciImage)
-    #expect(opened.width == 3000 && opened.height == 2000)
-    #expect(opened.previewWidth == 1600 && opened.previewHeight == 1067)
-    var controls = Controls()
-    controls.scanFilm = true
-    let rendered = try await engine.render(controls: controls, mode: .preview)
-    #expect(rendered.width == 1600 && rendered.height == 1067)
+    /// The preview's parameters are Python's `digest_params` with `preview_mode`, and its image is
+    /// down-sized to the app's preview size, 1600 px on the long side.
+    @Test func previewMatchesPython() async throws {
+        var parameters = try GoldenCase("photo-kodak_portra_400-kodak_portra_endura").params
+        parameters.applyPreviewMode()
+        #expect(parameters == (try GoldenCase("preview-kodak_portra_400-kodak_portra_endura").params))
+
+        let image = RGBImage(width: 3000, height: 2000, pixels: [Float](repeating: 0.18, count: 3000 * 2000 * 3))
+        let engine = try Engine()
+        let opened = try await engine.open(image.ciImage)
+        #expect(opened.width == 3000 && opened.height == 2000)
+        #expect(opened.previewWidth == 1600 && opened.previewHeight == 1067)
+        var controls = Controls()
+        controls.scanFilm = true
+        let rendered = try await engine.render(controls: controls, mode: .preview)
+        #expect(rendered.width == 1600 && rendered.height == 1067)
+    }
 }
 
 /// The app's export parameters for each golden photo case's film and paper, and its preview
@@ -319,47 +332,49 @@ func reservedMemoryRendersMatchFresh(caseName: String) throws {
     #expect(try render(on: gpu) == fresh)
 }
 
-/// A render that starts from the last render's steps is exactly a render from scratch, through
-/// a run of control changes in every mode. (Opening the photo again forgets the steps.)
-@Test func cachedRendersMatchFresh() async throws {
-    let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
-    let (engine, fresh) = (try Engine(), try Engine())
-    _ = try await engine.open(image.ciImage)
-    var controls = Controls()
-    let changes: [(String, (inout Controls) -> Void)] = [
-        ("defaults", { _ in }), ("Y filter", { $0.yFilterShift = 12 }), ("print exposure", { $0.printExposure = 1.3 }),
-        ("paper", { $0.paper = "fujifilm_crystal_archive_typeii" }), ("negative", { $0.scanFilm = true }),
-        ("print", { $0.scanFilm = false }), ("exposure", { $0.exposureOffsetEV = 1.25 }),
-        ("as shot", { $0.exposureMark = .asShot }), ("faces", { $0.exposureMark = .faces }), ("grain off", { $0.grain = false }),
-        ("halation off", { $0.halation = false }), ("film", { $0.film = "kodak_gold_200" }),
-    ]
-    for (name, change) in changes {
-        change(&controls)
-        for mode in [RenderMode.preview, .reduced(longSide: 300), .full, .export] {
-            _ = try await fresh.open(image.ciImage)
-            let expected = try await fresh.render(controls: controls, mode: mode).pixels.map(\.bitPattern)
-            let cached = try await engine.render(controls: controls, mode: mode).pixels.map(\.bitPattern)
-            #expect(cached == expected, "\(name), \(mode)")
+extension PhotoOpeningTests {
+    /// A render that starts from the last render's steps is exactly a render from scratch, through
+    /// a run of control changes in every mode. (Opening the photo again forgets the steps.)
+    @Test func cachedRendersMatchFresh() async throws {
+        let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
+        let (engine, fresh) = (try Engine(), try Engine())
+        _ = try await engine.open(image.ciImage)
+        var controls = Controls()
+        let changes: [(String, (inout Controls) -> Void)] = [
+            ("defaults", { _ in }), ("Y filter", { $0.yFilterShift = 12 }), ("print exposure", { $0.printExposure = 1.3 }),
+            ("paper", { $0.paper = "fujifilm_crystal_archive_typeii" }), ("negative", { $0.scanFilm = true }),
+            ("print", { $0.scanFilm = false }), ("exposure", { $0.exposureOffsetEV = 1.25 }),
+            ("as shot", { $0.exposureMark = .asShot }), ("faces", { $0.exposureMark = .faces }), ("grain off", { $0.grain = false }),
+            ("halation off", { $0.halation = false }), ("film", { $0.film = "kodak_gold_200" }),
+        ]
+        for (name, change) in changes {
+            change(&controls)
+            for mode in [RenderMode.preview, .reduced(longSide: 300), .full, .export] {
+                _ = try await fresh.open(image.ciImage)
+                let expected = try await fresh.render(controls: controls, mode: mode).pixels.map(\.bitPattern)
+                let cached = try await engine.render(controls: controls, mode: mode).pixels.map(\.bitPattern)
+                #expect(cached == expected, "\(name), \(mode)")
+            }
         }
     }
-}
 
-/// The engine's render, in steps from the photo kept on the GPU, is exactly the parity-tested
-/// chain from the image, grain and auto-exposure (the Centre-weighted mark) included.
-@Test func engineRenderIsTheChain() async throws {
-    let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
-    let controls = Controls()
-    let engine = try Engine()
-    _ = try await engine.open(image.ciImage)
-    let rendered = try await engine.render(controls: controls, mode: .full)
+    /// The engine's render, in steps from the photo kept on the GPU, is exactly the parity-tested
+    /// chain from the image, grain and auto-exposure (the Centre-weighted mark) included.
+    @Test func engineRenderIsTheChain() async throws {
+        let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
+        let controls = Controls()
+        let engine = try Engine()
+        _ = try await engine.open(image.ciImage)
+        let rendered = try await engine.render(controls: controls, mode: .full)
 
-    let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
-    let parameters = Engine.parameters(for: controls, film: film, print: paper,
-                                       database: try Tables.loadNeutralPrintFilters(), mode: .full)
-    let gpu = try GPU()
-    let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: try Tables.load())
-    let chain = gpu.download(try gpu.run { simulation.encode(image, on: $0) })
-    #expect(rendered.pixels.map(\.bitPattern) == chain.map(\.bitPattern))
+        let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
+        let parameters = Engine.parameters(for: controls, film: film, print: paper,
+                                           database: try Tables.loadNeutralPrintFilters(), mode: .full)
+        let gpu = try GPU()
+        let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: try Tables.load())
+        let chain = gpu.download(try gpu.run { simulation.encode(image, on: $0) })
+        #expect(rendered.pixels.map(\.bitPattern) == chain.map(\.bitPattern))
+    }
 }
 
 /// Exported files carry 16 bits (TIFF, PNG) or 8 (JPEG), the sRGB profile and the photo's
@@ -438,13 +453,15 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     }
 }
 
-/// A cancelled render stops encoding kernels and throws.
-@Test func renderStopsWhenCancelled() async throws {
-    let engine = try Engine()
-    _ = try await engine.open(RGBImage(width: 2000, height: 2000, pixels: [Float](repeating: 0.18, count: 2000 * 2000 * 3)).ciImage)
-    let render = Task { try await engine.render(controls: Controls(), mode: .full) }
-    render.cancel()
-    await #expect(throws: CancellationError.self) { try await render.value }
+extension PhotoOpeningTests {
+    /// A cancelled render stops encoding kernels and throws.
+    @Test func renderStopsWhenCancelled() async throws {
+        let engine = try Engine()
+        _ = try await engine.open(RGBImage(width: 2000, height: 2000, pixels: [Float](repeating: 0.18, count: 2000 * 2000 * 3)).ciImage)
+        let render = Task { try await engine.render(controls: Controls(), mode: .full) }
+        render.cancel()
+        await #expect(throws: CancellationError.self) { try await render.value }
+    }
 }
 
 /// A preset written and read back is the same controls; its JSON names them plainly.
@@ -485,47 +502,49 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     #expect(throws: DecodingError.self) { try Controls(preset: Data("{\"film\": 1}".utf8)) }
 }
 
-/// A LUT entry is what a render of a photo of that one sRGB colour gives, exposed the same (the
-/// As shot mark plus the offset), when nothing that depends on other pixels is on: patches of
-/// lattice colours, black, white, grey and some in between, through the app's own path. Within a
-/// quarter of an 8-bit level (measured: 3.7e-4): the photo's render still runs its blurs, through
-/// half-float intermediates. Its `.cube` is the comments, the title, the size and the entries,
-/// red fastest.
-@Test func lutEntriesAreUniformRenders() async throws {
-    let size = 5
-    var controls = Controls()
-    controls.exposureMark = .asShot
-    controls.exposureOffsetEV = 0.7
-    controls.grain = false
-    controls.glare = false
-    let engine = try Engine()
-    let lut = try await engine.lut(controls: controls, exposureEV: controls.exposureOffsetEV, size: size)
-    #expect(lut.values.count == size * size * size * 3)
+extension PhotoOpeningTests {
+    /// A LUT entry is what a render of a photo of that one sRGB colour gives, exposed the same (the
+    /// As shot mark plus the offset), when nothing that depends on other pixels is on: patches of
+    /// lattice colours, black, white, grey and some in between, through the app's own path. Within a
+    /// quarter of an 8-bit level (measured: 3.7e-4): the photo's render still runs its blurs, through
+    /// half-float intermediates. Its `.cube` is the comments, the title, the size and the entries,
+    /// red fastest.
+    @Test func lutEntriesAreUniformRenders() async throws {
+        let size = 5
+        var controls = Controls()
+        controls.exposureMark = .asShot
+        controls.exposureOffsetEV = 0.7
+        controls.grain = false
+        controls.glare = false
+        let engine = try Engine()
+        let lut = try await engine.lut(controls: controls, exposureEV: controls.exposureOffsetEV, size: size)
+        #expect(lut.values.count == size * size * size * 3)
 
-    let colours: [SIMD3<Int>] = [[0, 0, 0], [4, 4, 4], [2, 2, 2], [4, 0, 0], [0, 4, 0], [0, 0, 4], [1, 3, 2], [3, 1, 4]]
-    let patch = 32
-    let width = patch * colours.count
-    var rgba = [Float](repeating: 1, count: width * patch * 4)
-    for y in 0..<patch {
-        for x in 0..<width {
-            let colour = SIMD3<Float>(colours[x / patch]) / Float(size - 1)
-            (rgba[(y * width + x) * 4], rgba[(y * width + x) * 4 + 1], rgba[(y * width + x) * 4 + 2]) = (colour.x, colour.y, colour.z)
+        let colours: [SIMD3<Int>] = [[0, 0, 0], [4, 4, 4], [2, 2, 2], [4, 0, 0], [0, 4, 0], [0, 0, 4], [1, 3, 2], [3, 1, 4]]
+        let patch = 32
+        let width = patch * colours.count
+        var rgba = [Float](repeating: 1, count: width * patch * 4)
+        for y in 0..<patch {
+            for x in 0..<width {
+                let colour = SIMD3<Float>(colours[x / patch]) / Float(size - 1)
+                (rgba[(y * width + x) * 4], rgba[(y * width + x) * 4 + 1], rgba[(y * width + x) * 4 + 2]) = (colour.x, colour.y, colour.z)
+            }
         }
-    }
-    let photo = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
-                        size: CGSize(width: width, height: patch), format: .RGBAf, colorSpace: Engine.exportColorSpace)
-    _ = try await engine.open(photo)
-    let rendered = try await engine.render(controls: controls, mode: .export)
-    for (index, colour) in colours.enumerated() {
-        let pixel = (patch / 2 * width + index * patch + patch / 2) * 3
-        let entry = ((colour.z * size + colour.y) * size + colour.x) * 3
-        let expected = (0..<3).map { min(max(rendered.pixels[pixel + $0], 0), 1) }
-        #expect(Difference(Array(lut.values[entry..<(entry + 3)]), expected.map(Double.init)).maxAbsolute < 1e-3, "\(colour): \(lut.values[entry..<(entry + 3)]) vs \(expected)")
-    }
+        let photo = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+                            size: CGSize(width: width, height: patch), format: .RGBAf, colorSpace: Engine.exportColorSpace)
+        _ = try await engine.open(photo)
+        let rendered = try await engine.render(controls: controls, mode: .export)
+        for (index, colour) in colours.enumerated() {
+            let pixel = (patch / 2 * width + index * patch + patch / 2) * 3
+            let entry = ((colour.z * size + colour.y) * size + colour.x) * 3
+            let expected = (0..<3).map { min(max(rendered.pixels[pixel + $0], 0), 1) }
+            #expect(Difference(Array(lut.values[entry..<(entry + 3)]), expected.map(Double.init)).maxAbsolute < 1e-3, "\(colour): \(lut.values[entry..<(entry + 3)]) vs \(expected)")
+        }
 
-    let lines = String(decoding: lut.cube(title: "Test \"LUT\"", comments: ["Film: Portra 400"]), as: UTF8.self)
-        .split(separator: "\n")
-    #expect(Array(lines.prefix(3)) == ["# Film: Portra 400", "TITLE \"Test 'LUT'\"", "LUT_3D_SIZE 5"])
-    #expect(lines.count == 3 + size * size * size)
-    #expect(lines[3] == Substring(String(format: "%.6f %.6f %.6f", lut.values[0], lut.values[1], lut.values[2])))
+        let lines = String(decoding: lut.cube(title: "Test \"LUT\"", comments: ["Film: Portra 400"]), as: UTF8.self)
+            .split(separator: "\n")
+        #expect(Array(lines.prefix(3)) == ["# Film: Portra 400", "TITLE \"Test 'LUT'\"", "LUT_3D_SIZE 5"])
+        #expect(lines.count == 3 + size * size * size)
+        #expect(lines[3] == Substring(String(format: "%.6f %.6f %.6f", lut.values[0], lut.values[1], lut.values[2])))
+    }
 }
