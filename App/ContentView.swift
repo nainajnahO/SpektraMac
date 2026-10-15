@@ -37,8 +37,10 @@ struct ContentView: View {
                 }
                 ToolbarSpacer(.flexible)
             }
-            // The toolbar's own translucent background, as the photo reaches under it (``ImageCanvas``).
-            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+            // No toolbar background, so the inspector's glass is even to the top: macOS draws one for
+            // each column, over the inspector a dark fade behind the tabs. The zoomed photo shows
+            // under the toolbar's glass instead (``ImageCanvas``).
+            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
             // On the right over the photo, as Photos' Adjust panel: the photo fits beside it and
             // shows through the inspector's glass when zoomed or moved under it (``ImageCanvas``),
             // as the inspector lies over the canvas rather than beside it.
