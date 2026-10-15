@@ -40,11 +40,10 @@ struct ContentView: View {
             // The toolbar's own translucent background, as the photo reaches under it (``ImageCanvas``).
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
             // On the right over the photo, as Photos' Adjust panel: the photo fits beside it and
-            // shows through it, blurred, when zoomed or moved under it (``ImageCanvas``), as the
-            // inspector lies over the canvas rather than beside it.
+            // shows through the inspector's glass when zoomed or moved under it (``ImageCanvas``),
+            // as the inspector lies over the canvas rather than beside it.
             .inspector(isPresented: $showsSettings) {
                 SettingsPanel(category: category)
-                    .background(.regularMaterial)
                     .inspectorColumnWidth(290)
                     // In the inspector's own part of the toolbar, so centred over the panel.
                     .toolbar {
