@@ -510,6 +510,7 @@ private struct ValueSlider: View {
     @State private var dragStart: Double?
     @State private var isHovered = false
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.displayScale) private var displayScale
 
     init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double, neutral: Double? = nil,
          format: FloatingPointFormatStyle<Double>, unit: String = "") {
@@ -523,39 +524,42 @@ private struct ValueSlider: View {
     }
 
     var body: some View {
+        // Sizes, and shades as the primary style's opacity, measured from Photos' (macOS 26) screenshots.
         HStack {
             Text(title)
             Spacer(minLength: 8)
             Text(unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)")
                 .monospacedDigit()
         }
-        .padding(.horizontal, 10)
-        .frame(height: 28)
+        .foregroundStyle(.primary.opacity(0.7))
+        .padding(.horizontal, 8)
+        .frame(height: 22)
         .background {
             let x = fraction(of: value) * width, origin = fraction(of: neutral ?? range.lowerBound) * width
             let isActive = isHovered || dragStart != nil
             ZStack(alignment: .leading) {
-                Rectangle().fill(.quaternary)
-                Rectangle().fill(.tertiary)
+                Rectangle().fill(.primary.opacity(0.065))
+                Rectangle().fill(.primary.opacity(0.19))
                     .frame(width: abs(x - origin))
                     .offset(x: min(x, origin))
+                Rectangle().fill(isActive ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary.opacity(0.22)))
+                    .frame(width: 3)
+                    .offset(x: min(max(x - 1.5, 0), width - 3))
                 if isActive {
-                    // Photos' ruler: forty divisions, the quarters longer.
+                    // Photos' ruler, over the line: a hairline every 6 pt either side of the neutral
+                    // value, every fifth longer and every tenth brighter.
                     Canvas { context, size in
-                        for tick in 1..<40 {
-                            let tickX = size.width * CGFloat(tick) / 40
-                            let length: CGFloat = tick % 10 == 0 ? 6 : 3
-                            context.fill(Path(CGRect(x: tickX - 0.5, y: 0, width: 1, height: length)),
-                                         with: .style(.secondary))
+                        let hairline = 1 / displayScale
+                        for tick in -Int(origin / 6)...Int((size.width - origin) / 6) {
+                            let tickX = ((origin + CGFloat(tick) * 6) * displayScale).rounded() / displayScale
+                            context.fill(Path(CGRect(x: tickX, y: 0, width: hairline, height: tick % 5 == 0 ? 5 : 3)),
+                                         with: .style(.primary.opacity(tick % 10 == 0 ? 0.7 : 0.3)))
                         }
                     }
                 }
-                Rectangle().fill(isActive ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                    .frame(width: 2)
-                    .offset(x: min(max(x - 1, 0), width - 2))
             }
         }
-        .clipShape(.rect(cornerRadius: 6))
+        .clipShape(.rect(cornerRadius: 5))
         .opacity(isEnabled ? 1 : 0.5)
         .onHover { isHovered = $0 }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
