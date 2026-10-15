@@ -492,7 +492,8 @@ private extension MeteringMark {
 }
 
 /// A slider as Photos draws its adjustments: the name and value inside a bar that fills from
-/// `neutral` (the lower bound unless given) to the value. Dragging anywhere on it moves the value
+/// `neutral` (the lower bound unless given) to the value; under the pointer, a ruler along its top
+/// and the value's line in the accent colour. Dragging anywhere on it moves the value
 /// from where it was, the bar's width for the whole range; with Full Keyboard Access the arrow
 /// keys step it. SwiftUI's `Slider` can't be restyled (there's no slider style to conform to), so
 /// the bar is drawn here, with the system slider standing in for VoiceOver.
@@ -507,6 +508,7 @@ private struct ValueSlider: View {
     @State private var width: CGFloat = 0
     /// The value when the drag began.
     @State private var dragStart: Double?
+    @State private var isHovered = false
     @Environment(\.isEnabled) private var isEnabled
 
     init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double, neutral: Double? = nil,
@@ -531,18 +533,31 @@ private struct ValueSlider: View {
         .frame(height: 28)
         .background {
             let x = fraction(of: value) * width, origin = fraction(of: neutral ?? range.lowerBound) * width
+            let isActive = isHovered || dragStart != nil
             ZStack(alignment: .leading) {
                 Rectangle().fill(.quaternary)
                 Rectangle().fill(.tertiary)
                     .frame(width: abs(x - origin))
                     .offset(x: min(x, origin))
-                Rectangle().fill(.secondary)
+                if isActive {
+                    // Photos' ruler: forty divisions, the quarters longer.
+                    Canvas { context, size in
+                        for tick in 1..<40 {
+                            let tickX = size.width * CGFloat(tick) / 40
+                            let length: CGFloat = tick % 10 == 0 ? 6 : 3
+                            context.fill(Path(CGRect(x: tickX - 0.5, y: 0, width: 1, height: length)),
+                                         with: .style(.secondary))
+                        }
+                    }
+                }
+                Rectangle().fill(isActive ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                     .frame(width: 2)
                     .offset(x: min(max(x - 1, 0), width - 2))
             }
         }
         .clipShape(.rect(cornerRadius: 6))
         .opacity(isEnabled ? 1 : 0.5)
+        .onHover { isHovered = $0 }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .contentShape(.rect)
         .gesture(DragGesture(minimumDistance: 0)
