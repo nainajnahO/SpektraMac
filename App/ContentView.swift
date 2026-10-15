@@ -85,17 +85,17 @@ private struct SettingsPanel: View {
                     StockRow(title: "Film", stocks: model.films, selection: $model.film, controls: $model.controls)
                     AdjustmentGroup("Halation", systemImage: "sun.haze", adjustment: .halation,
                                     isOn: $model.controls.halation) {
-                        ValueSlider("Strength", value: $model.controls.halationAmount, in: 0...3, step: 0.05,
+                        ValueSlider("Strength", value: $model.controls.halationAmount, in: 0...3, step: 0.05, neutral: 1,
                                     format: .number.precision(.fractionLength(2)))
                             .help("The glow from light bouncing back off the film base, over the film's own.")
                     } options: {
-                        ValueSlider("Size", value: $model.controls.halationSize, in: 0...3, step: 0.05,
+                        ValueSlider("Size", value: $model.controls.halationSize, in: 0...3, step: 0.05, neutral: 1,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How far the glow reaches, over the film's own.")
                         ValueSlider("Scatter", value: $model.controls.scatterAmount, in: 0...1, step: 0.05,
                                     format: .number.precision(.fractionLength(2)))
                             .help("Light spreading inside the emulsion, which softens fine detail.")
-                        ValueSlider("Scatter size", value: $model.controls.scatterSize, in: 0...3, step: 0.05,
+                        ValueSlider("Scatter size", value: $model.controls.scatterSize, in: 0...3, step: 0.05, neutral: 1,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How far light spreads inside the emulsion, over the film's own.")
                     }
@@ -103,11 +103,11 @@ private struct SettingsPanel: View {
                     // curves corrected for it, greys and all, in Python as here.
                     AdjustmentGroup("Couplers", systemImage: "drop.halffull", adjustment: .couplers,
                                     isOn: $model.controls.couplers) {
-                        ValueSlider("Saturation", value: $model.controls.couplerSaturation, in: 0...1.5, step: 0.05,
+                        ValueSlider("Saturation", value: $model.controls.couplerSaturation, in: 0...1.5, step: 0.05, neutral: 1,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
                     } options: {
-                        ValueSlider("Edge contrast", value: $model.controls.couplerEdgeContrast, in: 0...1.5, step: 0.05,
+                        ValueSlider("Edge contrast", value: $model.controls.couplerEdgeContrast, in: 0...1.5, step: 0.05, neutral: 1,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How strongly each layer holds back its own development nearby: more gives crisper edges in fine detail. The overall contrast stays the film's.")
                     }
@@ -132,25 +132,25 @@ private struct SettingsPanel: View {
                         StockRow(title: "Paper", stocks: model.papers, selection: $model.controls.paper,
                                  controls: $model.controls)
                         AdjustmentGroup("Contrast", systemImage: "circle.lefthalf.filled", adjustment: .contrast) {
-                            ValueSlider("Contrast", value: $model.controls.printContrast, in: 0.5...2, step: 0.05,
+                            ValueSlider("Contrast", value: $model.controls.printContrast, in: 0.5...2, step: 0.05, neutral: 1,
                                         format: .number.precision(.fractionLength(2)))
                                 .help("The paper's contrast around mid-grey: lower brings a bright sky and dark faces closer together.")
                         } options: {
                             ValueSlider("Highlight contrast", value: $model.controls.printHighlightContrast, in: 0.5...2,
-                                        step: 0.05, format: .number.precision(.fractionLength(2)))
+                                        step: 0.05, neutral: 1, format: .number.precision(.fractionLength(2)))
                                 .help("The paper's contrast in the light tones alone: lower keeps more detail in a bright sky.")
                             ValueSlider("Shadow contrast", value: $model.controls.printShadowContrast, in: 0.5...2,
-                                        step: 0.05, format: .number.precision(.fractionLength(2)))
+                                        step: 0.05, neutral: 1, format: .number.precision(.fractionLength(2)))
                                 .help("The paper's contrast in the dark tones alone: lower opens up faces in shadow.")
                         }
                         AdjustmentGroup("Enlarger", systemImage: "lightbulb", adjustment: .enlarger) {
-                            ValueSlider("Print exposure", value: $model.controls.printExposure, in: 0...2, step: 0.02,
+                            ValueSlider("Print exposure", value: $model.controls.printExposure, in: 0...2, step: 0.02, neutral: 1,
                                         format: .number.precision(.fractionLength(2)))
                         } options: {
-                            ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: -100...100, step: 1,
+                            ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: -100...100, step: 1, neutral: 0,
                                         format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
                                         unit: "CC")
-                            ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: -100...100, step: 1,
+                            ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: -100...100, step: 1, neutral: 0,
                                         format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
                                         unit: "CC")
                             ValueSlider("Preflash", value: $model.controls.preflash, in: 0...0.05, step: 0.001,
@@ -501,35 +501,89 @@ private extension MeteringMark {
     }
 }
 
-/// A slider with its value written out beside it (SwiftUI's `Slider` doesn't show its value).
+/// A slider as Photos draws its adjustments: the name and value inside a bar that fills from
+/// `neutral` (the lower bound unless given) to the value. Dragging anywhere on it moves the value
+/// from where it was, the bar's width for the whole range; with Full Keyboard Access the arrow
+/// keys step it. SwiftUI's `Slider` can't be restyled (there's no slider style to conform to), so
+/// the bar is drawn here, with the system slider standing in for VoiceOver.
 private struct ValueSlider: View {
     let title: String
     @Binding var value: Double
     let range: ClosedRange<Double>
     let step: Double
+    let neutral: Double?
     let format: FloatingPointFormatStyle<Double>
     let unit: String
+    @State private var width: CGFloat = 0
+    /// The value when the drag began.
+    @State private var dragStart: Double?
+    @Environment(\.isEnabled) private var isEnabled
 
-    init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double,
+    init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double, neutral: Double? = nil,
          format: FloatingPointFormatStyle<Double>, unit: String = "") {
         self.title = title
         _value = value
         self.range = range
         self.step = step
+        self.neutral = neutral
         self.format = format
         self.unit = unit
     }
 
     var body: some View {
-        LabeledContent(title) {
-            HStack {
-                Slider(value: $value, in: range, step: step)
-                    .labelsHidden()
-                Text(unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)")
-                    .monospacedDigit()
-                    .frame(minWidth: 64, alignment: .trailing)
+        HStack {
+            Text(title)
+            Spacer(minLength: 8)
+            Text(unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)")
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background {
+            let x = fraction(of: value) * width, origin = fraction(of: neutral ?? range.lowerBound) * width
+            ZStack(alignment: .leading) {
+                Rectangle().fill(.quaternary)
+                Rectangle().fill(.tertiary)
+                    .frame(width: abs(x - origin))
+                    .offset(x: min(x, origin))
+                Rectangle().fill(.secondary)
+                    .frame(width: 2)
+                    .offset(x: min(max(x - 1, 0), width - 2))
             }
         }
+        .clipShape(.rect(cornerRadius: 6))
+        .opacity(isEnabled ? 1 : 0.5)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .contentShape(.rect)
+        .gesture(DragGesture(minimumDistance: 0)
+            .onChanged { drag in
+                let start = dragStart ?? value
+                dragStart = start
+                guard width > 0 else { return }
+                set(start + drag.translation.width / width * (range.upperBound - range.lowerBound))
+            }
+            .onEnded { _ in dragStart = nil })
+        .focusable(interactions: .activate)
+        .onMoveCommand { direction in
+            switch direction {
+            case .left: set(value - step)
+            case .right: set(value + step)
+            default: break
+            }
+        }
+        .accessibilityRepresentation {
+            Slider(value: $value, in: range, step: step) { Text(title) }
+        }
+    }
+
+    private func fraction(of value: Double) -> Double {
+        (value - range.lowerBound) / (range.upperBound - range.lowerBound)
+    }
+
+    /// Sets the value to the nearest step, within the range.
+    private func set(_ newValue: Double) {
+        let stepped = range.lowerBound + ((newValue - range.lowerBound) / step).rounded() * step
+        value = min(max(stepped, range.lowerBound), range.upperBound)
     }
 }
 
