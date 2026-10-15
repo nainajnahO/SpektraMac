@@ -11,8 +11,8 @@ struct ContentView: View {
     var body: some View {
         @Bindable var model = model
         ImageCanvas()
-            .safeAreaInset(edge: .bottom, spacing: 0) { StatusBar() }
             .navigationTitle(model.photo?.name ?? "SpektraMac")
+            .navigationSubtitle(status)
             .toolbar {
                 ToolbarItemGroup(placement: .principal) {
                     Picker("Show", selection: $model.controls.scanFilm) {
@@ -69,6 +69,24 @@ struct ContentView: View {
             case .success(let url): model.open(url)
             case .failure(let error): model.importFailed(error)
             }
+        }
+    }
+
+    /// What the app is doing, else the last error (until a photo is opened), else what the canvas
+    /// shows: under the window's title.
+    private var status: String {
+        if model.isLoading { return "Opening…" }
+        if let phase = model.savePhase { return phase }
+        if model.isRendering { return model.isRenderingFullResolution ? "Rendering full resolution…" : "Rendering…" }
+        if let message = model.errorMessage { return message }
+        // Without one, the canvas says so.
+        guard let photo = model.photo else { return "" }
+        if model.shownMode == .full {
+            return "Full resolution, \(photo.width.formatted()) × \(photo.height.formatted())"
+        } else if case .reduced? = model.shownMode, let image = model.displayImage {
+            return "Screen size, \(image.width.formatted()) × \(image.height.formatted())"
+        } else {
+            return "Preview, \(photo.previewWidth.formatted()) × \(photo.previewHeight.formatted())"
         }
     }
 }
@@ -962,49 +980,7 @@ private struct ImageCanvas: View {
     }
 }
 
-// MARK: - Status bar & log
-
-private struct StatusBar: View {
-    @Environment(PhotoModel.self) private var model
-
-    var body: some View {
-        // Mini spinners keep the bar the labels' height: a small one makes it a point taller, and
-        // the photo above would shrink each time a render starts and grow when it ends.
-        HStack(spacing: 12) {
-            if model.isLoading {
-                ProgressView().controlSize(.mini)
-                Text("Opening…")
-            } else if let phase = model.savePhase {
-                ProgressView().controlSize(.mini)
-                Text(phase)
-            } else if model.isRendering {
-                ProgressView().controlSize(.mini)
-                Text(model.isRenderingFullResolution ? "Rendering full resolution…" : "Rendering…")
-            } else if let photo = model.photo {
-                if model.shownMode == .full {
-                    Label("Full resolution, \(photo.width) × \(photo.height)", systemImage: "photo")
-                } else if case .reduced? = model.shownMode, let image = model.displayImage {
-                    Label("Screen size, \(image.width) × \(image.height)", systemImage: "photo")
-                } else {
-                    Label("Preview, \(photo.previewWidth) × \(photo.previewHeight)", systemImage: "eye")
-                }
-            } else {
-                Label("No photo", systemImage: "photo")
-            }
-            Spacer()
-            if let message = model.errorMessage {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-        }
-        .font(.callout)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 3)
-        .background(.bar)
-    }
-}
+// MARK: - Log
 
 struct LogView: View {
     @Environment(PhotoModel.self) private var model
