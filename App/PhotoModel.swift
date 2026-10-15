@@ -351,7 +351,7 @@ final class PhotoModel {
     enum Strip: CaseIterable {
         case exposure, couplerSaturation, printContrast, printExposure
     }
-    static let framesPerStrip = 6
+    static let framesPerStrip = 5
     /// Each strip's frames, left to right. A strip whose control changes nothing the controls show
     /// (a print setting while the film shows, say) has none.
     private(set) var strips: [Strip: [CGImage]] = [:]

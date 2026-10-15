@@ -37,10 +37,15 @@ struct ContentView: View {
             // The canvas doesn't scroll under the toolbar, so the window would otherwise
             // draw a hard separator line beneath it.
             .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-            // On the right, where Photos has its Adjust panel.
-            .inspector(isPresented: $showsSettings) {
-                SettingsPanel()
-                    .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
+            // On the right over the photo, as Photos' Adjust panel: the photo fits beside it and
+            // shows through it, blurred, when zoomed or moved under it (``ImageCanvas``). An
+            // inspector is a column of its own, which the photo can't reach under.
+            .safeAreaInset(edge: .trailing, spacing: 0) {
+                if showsSettings {
+                    SettingsPanel()
+                        .frame(width: 290)
+                        .background(.regularMaterial)
+                }
             }
             .dropDestination(for: URL.self) { urls, _ in
                 guard let url = urls.first else { return false }
@@ -71,12 +76,15 @@ private struct SettingsPanel: View {
     var body: some View {
         @Bindable var model = model
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
                 switch category {
                 case .camera:
                     AdjustmentGroup("Exposure", systemImage: "plusminus.circle", adjustment: .exposure) {
                         ExposureStrip()
                     } options: {
+                        ValueSlider("Exposure", value: $model.exposureEV, in: model.exposureRange, step: 0.1, neutral: 0,
+                                    format: ExposureStrip.stops, unit: "EV")
+                            .disabled(model.photo == nil)
                         ValueSlider("Highlight boost", value: $model.controls.highlightBoost, in: 0...10, step: 0.5,
                                     format: .number.precision(.fractionLength(1)), unit: "EV")
                             .help("Raises the brightest highlights before they reach the film, rebuilding light the camera clipped, so bright lights glow more.")
@@ -104,10 +112,13 @@ private struct SettingsPanel: View {
                     AdjustmentGroup("Couplers", systemImage: "drop.halffull", adjustment: .couplers,
                                     isOn: $model.controls.couplers) {
                         ThumbnailStrip("Saturation", value: $model.controls.couplerSaturation,
-                                       in: model.range(of: .couplerSaturation), step: 0.05,
-                                       format: .number.precision(.fractionLength(2)), frames: model.strips[.couplerSaturation])
+                                       in: model.range(of: .couplerSaturation), step: 0.05, frames: model.strips[.couplerSaturation])
                             .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
                     } options: {
+                        ValueSlider("Saturation", value: $model.controls.couplerSaturation,
+                                    in: model.range(of: .couplerSaturation), step: 0.05, neutral: 1,
+                                    format: .number.precision(.fractionLength(2)))
+                            .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
                         ValueSlider("Edge contrast", value: $model.controls.couplerEdgeContrast, in: 0...1.5, step: 0.05, neutral: 1,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How strongly each layer holds back its own development nearby: more gives crisper edges in fine detail. The overall contrast stays the film's.")
@@ -134,10 +145,12 @@ private struct SettingsPanel: View {
                                  controls: $model.controls)
                         AdjustmentGroup("Contrast", systemImage: "circle.lefthalf.filled", adjustment: .contrast) {
                             ThumbnailStrip("Contrast", value: $model.controls.printContrast,
-                                           in: model.range(of: .printContrast), step: 0.05,
-                                           format: .number.precision(.fractionLength(2)), frames: model.strips[.printContrast])
+                                           in: model.range(of: .printContrast), step: 0.05, frames: model.strips[.printContrast])
                                 .help("The paper's contrast around mid-grey: lower brings a bright sky and dark faces closer together.")
                         } options: {
+                            ValueSlider("Contrast", value: $model.controls.printContrast, in: model.range(of: .printContrast),
+                                        step: 0.05, neutral: 1, format: .number.precision(.fractionLength(2)))
+                                .help("The paper's contrast around mid-grey: lower brings a bright sky and dark faces closer together.")
                             ValueSlider("Highlight contrast", value: $model.controls.printHighlightContrast, in: 0.5...2,
                                         step: 0.05, neutral: 1, format: .number.precision(.fractionLength(2)))
                                 .help("The paper's contrast in the light tones alone: lower keeps more detail in a bright sky.")
@@ -147,9 +160,10 @@ private struct SettingsPanel: View {
                         }
                         AdjustmentGroup("Enlarger", systemImage: "lightbulb", adjustment: .enlarger) {
                             ThumbnailStrip("Print exposure", value: $model.controls.printExposure,
-                                           in: model.range(of: .printExposure), step: 0.02,
-                                           format: .number.precision(.fractionLength(2)), frames: model.strips[.printExposure])
+                                           in: model.range(of: .printExposure), step: 0.02, frames: model.strips[.printExposure])
                         } options: {
+                            ValueSlider("Print exposure", value: $model.controls.printExposure, in: model.range(of: .printExposure),
+                                        step: 0.02, neutral: 1, format: .number.precision(.fractionLength(2)))
                             ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: -100...100, step: 1, neutral: 0,
                                         format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
                                         unit: "CC")
@@ -176,7 +190,9 @@ private struct SettingsPanel: View {
                     .disabled(model.controls.scanFilm)
                 }
             }
-            .padding()
+            .padding(.vertical)
+            .padding(.leading, 15)
+            .padding(.trailing, 20)
         }
         .safeAreaInset(edge: .top) {
             Picker("Settings", selection: $category) {
@@ -191,7 +207,8 @@ private struct SettingsPanel: View {
 
 /// A group of settings as Photos lays out an adjustment: a disclosure headed by its symbol and
 /// name, a reset arrow and, where the effect can be off, an on/off circle; its main control, then
-/// the rest under Options. Whether each is open is kept with the window.
+/// the rest under Options. Whether each is open is kept with the window. Sizes and shades measured
+/// from Photos' (macOS 26) screenshots.
 private struct AdjustmentGroup<Main: View, Options: View>: View {
     @Environment(PhotoModel.self) private var model
     let title: String
@@ -217,23 +234,33 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
                 main
-                DisclosureGroup("Options", isExpanded: $showsOptions) {
+                DisclosureGroup(isExpanded: $showsOptions) {
                     VStack(spacing: 6) { options }
-                        .padding(.top, 4)
+                        .padding(.top, 7)
+                        .padding(.bottom, 14)
+                } label: {
+                    Text("Options")
+                        .foregroundStyle(.secondary)
                 }
+                .disclosureGroupStyle(PhotosDisclosureStyle(contentIndent: 0))
             }
             .padding(.top, 6)
             .disabled(isOn?.wrappedValue == false)
         } label: {
-            HStack {
-                Label(title, systemImage: systemImage)
-                    .font(.title3)
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                Text(title)
+                    .font(.system(size: 14))
                 Spacer()
                 Button("Reset \(title)", systemImage: "arrow.uturn.backward") { model.reset(adjustment) }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
+                    .font(.system(size: 12))
                     .disabled(model.isAtDefaults(adjustment))
                     .help("Back to the film's defaults")
                 if let isOn {
@@ -241,6 +268,47 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
                         .toggleStyle(CircleToggleStyle())
                         .help(isOn.wrappedValue ? "Turn off" : "Turn on")
                 }
+            }
+            .foregroundStyle(.secondary)
+        }
+        .disclosureGroupStyle(PhotosDisclosureStyle(contentIndent: 14))
+    }
+}
+
+/// Photos' disclosure: a small grey chevron before the label that turns as it opens, the label
+/// also opening it, and the content under it, indented by `contentIndent`. A group (indented)
+/// closed has a line under it, from its symbol.
+private struct PhotosDisclosureStyle: DisclosureGroupStyle {
+    let contentIndent: CGFloat
+
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                Button {
+                    withAnimation(.snappy) { configuration.isExpanded.toggle() }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
+                        .foregroundStyle(.primary.opacity(0.65))
+                        .frame(width: 15, height: 22, alignment: .leading)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(configuration.isExpanded ? "Close" : "Open")
+                configuration.label
+                    .contentShape(.rect)
+                    .onTapGesture {
+                        withAnimation(.snappy) { configuration.isExpanded.toggle() }
+                    }
+            }
+            .frame(minHeight: 22)
+            if configuration.isExpanded {
+                configuration.content
+                    .padding(.leading, contentIndent)
+            } else if contentIndent > 0 {
+                Divider()
+                    .padding(.leading, 15)
             }
         }
     }
@@ -253,7 +321,8 @@ private struct CircleToggleStyle: ToggleStyle {
             configuration.isOn.toggle()
         } label: {
             Image(systemName: configuration.isOn ? "checkmark.circle.fill" : "circle")
-                .imageScale(.large)
+                .resizable()
+                .frame(width: 14, height: 14)
                 .foregroundStyle(.tint)
         }
         .buttonStyle(.borderless)
@@ -411,8 +480,8 @@ private struct ExposureStrip: View {
         let here = model.marksAtExposure
         let range = model.exposureRange
         VStack(alignment: .leading, spacing: 6) {
-            ThumbnailStrip("Exposure", value: $model.exposureEV, in: range, step: 0.1, format: Self.stops, unit: "EV",
-                           frames: model.strips[.exposure], marks: Set(readings).sorted()) {
+            ThumbnailStrip("Exposure", value: $model.exposureEV, in: range, step: 0.1, frames: model.strips[.exposure],
+                           marks: Set(readings).sorted()) {
                 model.isAdjustingExposure = $0
             }
             .sensoryFeedback(.alignment, trigger: here) { _, new in model.isAdjustingExposure && !new.isEmpty }
@@ -426,7 +495,7 @@ private struct ExposureStrip: View {
         .disabled(model.photo == nil)
     }
 
-    private static let stops = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))
+    static let stops = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))
         .sign(strategy: .always(includingZero: false))
 
     /// What the mark the exposure is on meters, or how far it is from the nearest one.
@@ -531,7 +600,8 @@ private struct ValueSlider: View {
             Text(unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)")
                 .monospacedDigit()
         }
-        .foregroundStyle(.primary.opacity(0.7))
+        .font(.callout)
+        .foregroundStyle(.primary.opacity(0.65))
         .padding(.horizontal, 8)
         .frame(height: 22)
         .background {
@@ -596,18 +666,16 @@ private struct ValueSlider: View {
     }
 }
 
-/// A control as Photos shows its main adjustments: its name and value over frames of the photo
-/// across its range (``PhotoModel/Strip``), with a line at the value; `marks` are dots under it.
-/// Clicking or dragging along it sets the value there; with Full Keyboard Access the arrow keys
-/// step it, and the system slider stands in for VoiceOver. Drawn here, as Photos' strip isn't
-/// one of SwiftUI's or AppKit's controls.
+/// A control as Photos shows its main adjustments: frames of the photo across its range
+/// (``PhotoModel/Strip``), with a line at the value; `marks` are dots under it. As in Photos, the
+/// value itself shows on the control's bar under Options. Clicking or dragging along it sets the
+/// value there; with Full Keyboard Access the arrow keys step it, and the system slider stands in
+/// for VoiceOver. Drawn here, as Photos' strip isn't one of SwiftUI's or AppKit's controls.
 private struct ThumbnailStrip: View {
     let title: String
     @Binding var value: Double
     let range: ClosedRange<Double>
     let step: Double
-    let format: FloatingPointFormatStyle<Double>
-    let unit: String
     /// None until the model has made them.
     let frames: [CGImage]?
     let marks: [Double]
@@ -616,15 +684,12 @@ private struct ThumbnailStrip: View {
     @State private var isDragging = false
     @Environment(\.isEnabled) private var isEnabled
 
-    init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double,
-         format: FloatingPointFormatStyle<Double>, unit: String = "", frames: [CGImage]?, marks: [Double] = [],
-         onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+    init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double, frames: [CGImage]?,
+         marks: [Double] = [], onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
         self.title = title
         _value = value
         self.range = range
         self.step = step
-        self.format = format
-        self.unit = unit
         self.frames = frames
         self.marks = marks
         self.onEditingChanged = onEditingChanged
@@ -632,14 +697,6 @@ private struct ThumbnailStrip: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            HStack {
-                Text(title)
-                Spacer(minLength: 8)
-                Text(unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)")
-                    .monospacedDigit()
-            }
-            .font(.callout)
-            .foregroundStyle(.secondary)
             HStack(spacing: 0) {
                 if let frames {
                     ForEach(frames.indices, id: \.self) { index in
@@ -651,14 +708,14 @@ private struct ThumbnailStrip: View {
                     Rectangle().fill(.quaternary)
                 }
             }
-            .frame(height: 44)
+            .frame(height: 38)
             .overlay(alignment: .leading) {
                 Rectangle().fill(.white)
                     .frame(width: 2)
                     .shadow(radius: 1)
                     .offset(x: min(max(fraction(of: value) * width - 1, 0), width - 2))
             }
-            .clipShape(.rect(cornerRadius: 6))
+            .clipShape(.rect(cornerRadius: 5))
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .contentShape(.rect)
             .gesture(DragGesture(minimumDistance: 0)
@@ -712,8 +769,9 @@ private struct ThumbnailStrip: View {
 
 // MARK: - Canvas
 
-/// The photo fitted to the canvas. Scrolling (or pinching) zooms around the pointer, dragging
-/// moves the zoomed photo, and double-clicking shows all of it again.
+/// The photo fitted to the canvas beside the settings panel. Scrolling (or pinching) zooms around
+/// the pointer, dragging moves the zoomed photo, and double-clicking shows all of it again. The
+/// canvas reaches under the panel, so a zoomed photo shows through it.
 private struct ImageCanvas: View {
     @Environment(PhotoModel.self) private var model
     /// Magnification over the photo fitted to the canvas (1 shows all of it), and how far the
@@ -721,6 +779,8 @@ private struct ImageCanvas: View {
     @State private var zoom: CGFloat = 1
     @State private var offset: CGSize = .zero
     @State private var canvasSize: CGSize = .zero
+    /// How much of the canvas's right side the settings panel covers.
+    @State private var covered: CGFloat = 0
     /// Where the pointer is over the photo: scrolling zooms around it.
     @State private var pointer: CGPoint?
     /// The offset when the drag began, and the pinch's magnification so far.
@@ -733,16 +793,15 @@ private struct ImageCanvas: View {
         Group {
             if let image = model.displayImage {
                 // The reader takes the canvas's size and passes nothing back: a frame sized by the
-                // photo would make that the window's minimum, which the split view then chases
-                // until AppKit gives up (an exception when a photo opens).
+                // photo would make that the window's minimum.
                 GeometryReader { geometry in
-                    let fitted = fittedSize(in: geometry.size)
+                    let fitted = fittedSize(in: visibleSize)
                     Image(decorative: image, scale: 1)
                         .resizable()
                         .interpolation(.high)
                         .overlay { meteringOverlay }
                         .frame(width: fitted.width * zoom, height: fitted.height * zoom)
-                        .position(x: geometry.size.width / 2 + offset.width, y: geometry.size.height / 2 + offset.height)
+                        .position(x: visibleSize.width / 2 + offset.width, y: geometry.size.height / 2 + offset.height)
                 }
                 .contentShape(Rectangle())
                 .gesture(DragGesture()
@@ -795,6 +854,7 @@ private struct ImageCanvas: View {
                 } actions: {
                     Button("Open…") { model.isImporting = true }
                 }
+                .padding(.trailing, covered)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -802,6 +862,10 @@ private struct ImageCanvas: View {
         .background(.black.opacity(0.05))
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
             canvasSize = size
+            offset = clamped(offset)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { width in
+            covered = width
             offset = clamped(offset)
         }
         .onChange(of: model.photo?.id) {
@@ -815,6 +879,12 @@ private struct ImageCanvas: View {
         .onChange(of: pointer != nil || zoom > 1, initial: true) { _, wants in
             model.wantsFullResolution = wants
         }
+        .ignoresSafeArea(.container, edges: .trailing)
+    }
+
+    /// The canvas beside the settings panel.
+    private var visibleSize: CGSize {
+        CGSize(width: max(0, canvasSize.width - covered), height: canvasSize.height)
     }
 
     /// While the Exposure slider is held on a mark: the region that mark meters, tinted.
@@ -845,7 +915,7 @@ private struct ImageCanvas: View {
 
     /// The fitted photo's long side in screen pixels.
     private var fittedLongSide: Int {
-        let fitted = fittedSize(in: canvasSize)
+        let fitted = fittedSize(in: visibleSize)
         return Int((max(fitted.width, fitted.height) * displayScale).rounded(.up))
     }
 
@@ -853,23 +923,23 @@ private struct ImageCanvas: View {
     /// is: from all of the photo to 4 points per photo pixel.
     private func zoom(by factor: CGFloat, at anchor: CGPoint) {
         guard let photo = model.photo else { return }
-        let fitted = fittedSize(in: canvasSize)
+        let fitted = fittedSize(in: visibleSize)
         guard fitted.width > 0 else { return }
         let newZoom = min(max(zoom * factor, 1), max(1, 4 * CGFloat(photo.width) / fitted.width))
         let applied = newZoom / zoom
         // The anchor's distance from the photo's centre scales with the zoom.
-        let fromCentre = CGSize(width: anchor.x - canvasSize.width / 2, height: anchor.y - canvasSize.height / 2)
+        let fromCentre = CGSize(width: anchor.x - visibleSize.width / 2, height: anchor.y - visibleSize.height / 2)
         zoom = newZoom
         offset = clamped(CGSize(width: fromCentre.width - (fromCentre.width - offset.width) * applied,
                                 height: fromCentre.height - (fromCentre.height - offset.height) * applied))
     }
 
-    /// `offset` limited so the zoomed photo fills the canvas where it's larger, and stays
-    /// centred where it's smaller.
+    /// `offset` limited so the zoomed photo fills the canvas beside the panel where it's larger,
+    /// and stays centred there where it's smaller.
     private func clamped(_ offset: CGSize) -> CGSize {
-        let fitted = fittedSize(in: canvasSize)
-        let slack = CGSize(width: max(0, (fitted.width * zoom - canvasSize.width) / 2),
-                           height: max(0, (fitted.height * zoom - canvasSize.height) / 2))
+        let fitted = fittedSize(in: visibleSize)
+        let slack = CGSize(width: max(0, (fitted.width * zoom - visibleSize.width) / 2),
+                           height: max(0, (fitted.height * zoom - visibleSize.height) / 2))
         return CGSize(width: min(max(offset.width, -slack.width), slack.width),
                       height: min(max(offset.height, -slack.height), slack.height))
     }
