@@ -101,6 +101,9 @@ public enum RenderMode: Sendable, Equatable {
     case reduced(longSide: Int)
     /// The whole open photo with every effect. Linear, in ``Engine/outputColorSpace``.
     case full
+    /// As `preview`, on an image of the open photo at most 256 px on its long side: the frames of
+    /// the app's thumbnail strips.
+    case thumbnail
     /// As `full`, encoded for a file in ``Engine/exportColorSpace`` (Spektrafilm's default output).
     case export
 }
@@ -130,6 +133,8 @@ public actor Engine {
     /// The live preview's long side. Larger than Spektrafilm's `preview_max_size` (640), which is
     /// soft on a Retina display: about 0.1 s per change on an M1 Pro, preview mode and display.
     private nonisolated let previewMaxSize = 1600
+    /// The long side of the image thumbnails render from.
+    private nonisolated let thumbnailMaxSize = 256
 
     /// The colour space of preview and full renders: linear sRGB, Spektrafilm's default output
     /// space, for the colour-managed display.
@@ -151,10 +156,11 @@ public actor Engine {
         papers = infos.filter { $0.stage == .printing }
     }
 
-    /// The open photo on the GPU, at full size and as its preview.
+    /// The open photo on the GPU, at full size, as its preview and as its thumbnail.
     private struct Photo {
         var full: PhotoImage
         var preview: PhotoImage
+        var thumbnail: PhotoImage
         /// The last `reduced` render's image of the photo.
         var reduced: PhotoImage
         /// What Vision found in the photo, for metering the images made later.
@@ -197,9 +203,9 @@ public actor Engine {
 
     /// Makes `image` (``RGBImage/decode(contentsOf:)``) the photo renders work on: Core Image
     /// renders it once into a texture, and its preview (at most ``previewMaxSize`` on the long side)
-    /// from that on the GPU. Vision looks for the metering marks' regions in the preview, and each
-    /// image is metered once at every mark, in place. Sets aside the GPU memory renders of its
-    /// size need.
+    /// and thumbnail (``thumbnailMaxSize``) from that on the GPU. Vision looks for the metering
+    /// marks' regions in the preview, and each image is metered once at every mark, in place. Sets
+    /// aside the GPU memory renders of its size need.
     public func open(_ image: CIImage) throws -> OpenedPhoto {
         let extent = image.extent.integral
         let (width, height) = (Int(extent.width), Int(extent.height))
@@ -217,7 +223,10 @@ public actor Engine {
         let previewImage = PhotoImage(texture: preview, metering: MeteringReadings(
             luminance: previewLuminance.y, width: previewLuminance.width, height: previewLuminance.height, regions: regions))
         let fullImage = full === preview ? previewImage : metered(full, regions: regions)
-        photo = Photo(full: fullImage, preview: previewImage, reduced: previewImage, regions: regions)
+        let thumbnail = try scaled(full, toLongSide: thumbnailMaxSize)
+        let thumbnailImage = thumbnail === full ? fullImage : metered(thumbnail, regions: regions)
+        photo = Photo(full: fullImage, preview: previewImage, thumbnail: thumbnailImage, reduced: previewImage,
+                      regions: regions)
         return OpenedPhoto(width: width, height: height, previewWidth: preview.width, previewHeight: preview.height,
                            metering: previewImage.metering,
                            meteringOverlays: regions.overlays(for: previewImage.metering, width: width, height: height))
@@ -319,6 +328,8 @@ public actor Engine {
         switch mode {
         case .preview:
             image = \.preview
+        case .thumbnail:
+            image = \.thumbnail
         case .reduced(let longSide):
             let full = photo!.full.texture
             if longSide >= max(full.width, full.height) {
@@ -460,7 +471,7 @@ public actor Engine {
         parameters.filmRender.grain.particleAreaUm2 = controls.grainSize
         parameters.filmRender.grain.blur = controls.grainSoftness
         parameters.applyNeutralPrintFilters(film: film, print: print, database: database)
-        if mode == .preview {
+        if mode == .preview || mode == .thumbnail {
             parameters.applyPreviewMode()
         }
         parameters.applyFilmSpecifics(film)

@@ -82,11 +82,11 @@ func tiffDecodesAsCoreImageReadsIt(bits: Int, tagged: Bool) throws {
 }
 
 extension PhotoOpeningTests {
-    /// Opening renders the decoded photo straight onto the GPU: its renders, full, preview and
-    /// reduced, are exactly the parity-tested chain on the photo decoded to an `RGBImage` and on that
-    /// scaled down as the preview was made before (Core Image's Lanczos from the CPU copy), to the
-    /// preview's size and a reduced render's. A Display P3 8-bit PNG and 16-bit TIFF larger than the
-    /// preview, and the synthetic DNG.
+    /// Opening renders the decoded photo straight onto the GPU: its renders, full, preview, reduced
+    /// and thumbnail, are exactly the parity-tested chain on the photo decoded to an `RGBImage` and on
+    /// that scaled down as the preview was made before (Core Image's Lanczos from the CPU copy), to the
+    /// preview's size, a reduced render's and a thumbnail's. A Display P3 8-bit PNG and 16-bit TIFF
+    /// larger than the preview, and the synthetic DNG.
     @Test(arguments: ["png", "tif", "dng"])
     func openRendersTheDecodedPhoto(format: String) async throws {
         let url: URL
@@ -128,7 +128,8 @@ extension PhotoOpeningTests {
         let controls = Controls()
         let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
         let (gpu, tables, database) = (try GPU(), try Tables.load(), try Tables.loadNeutralPrintFilters())
-        for (mode, image) in [(RenderMode.full, decoded), (.preview, scaled(to: 1600)), (.reduced(longSide: 1000), scaled(to: 1000))] {
+        for (mode, image) in [(RenderMode.full, decoded), (.preview, scaled(to: 1600)), (.reduced(longSide: 1000), scaled(to: 1000)),
+                              (.thumbnail, scaled(to: 256))] {
             let rendered = try await engine.render(controls: controls, mode: mode)
             let parameters = Engine.parameters(for: controls, film: film, print: paper, database: database, mode: mode)
             let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: tables)
