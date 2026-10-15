@@ -75,7 +75,7 @@ private struct SettingsPanel: View {
                 switch category {
                 case .camera:
                     AdjustmentGroup("Exposure", systemImage: "plusminus.circle", adjustment: .exposure) {
-                        ExposureSlider()
+                        ExposureStrip()
                     } options: {
                         ValueSlider("Highlight boost", value: $model.controls.highlightBoost, in: 0...10, step: 0.5,
                                     format: .number.precision(.fractionLength(1)), unit: "EV")
@@ -103,8 +103,9 @@ private struct SettingsPanel: View {
                     // curves corrected for it, greys and all, in Python as here.
                     AdjustmentGroup("Couplers", systemImage: "drop.halffull", adjustment: .couplers,
                                     isOn: $model.controls.couplers) {
-                        ValueSlider("Saturation", value: $model.controls.couplerSaturation, in: 0...1.5, step: 0.05, neutral: 1,
-                                    format: .number.precision(.fractionLength(2)))
+                        ThumbnailStrip("Saturation", value: $model.controls.couplerSaturation,
+                                       in: model.range(of: .couplerSaturation), step: 0.05,
+                                       format: .number.precision(.fractionLength(2)), frames: model.strips[.couplerSaturation])
                             .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
                     } options: {
                         ValueSlider("Edge contrast", value: $model.controls.couplerEdgeContrast, in: 0...1.5, step: 0.05, neutral: 1,
@@ -132,8 +133,9 @@ private struct SettingsPanel: View {
                         StockRow(title: "Paper", stocks: model.papers, selection: $model.controls.paper,
                                  controls: $model.controls)
                         AdjustmentGroup("Contrast", systemImage: "circle.lefthalf.filled", adjustment: .contrast) {
-                            ValueSlider("Contrast", value: $model.controls.printContrast, in: 0.5...2, step: 0.05, neutral: 1,
-                                        format: .number.precision(.fractionLength(2)))
+                            ThumbnailStrip("Contrast", value: $model.controls.printContrast,
+                                           in: model.range(of: .printContrast), step: 0.05,
+                                           format: .number.precision(.fractionLength(2)), frames: model.strips[.printContrast])
                                 .help("The paper's contrast around mid-grey: lower brings a bright sky and dark faces closer together.")
                         } options: {
                             ValueSlider("Highlight contrast", value: $model.controls.printHighlightContrast, in: 0.5...2,
@@ -144,8 +146,9 @@ private struct SettingsPanel: View {
                                 .help("The paper's contrast in the dark tones alone: lower opens up faces in shadow.")
                         }
                         AdjustmentGroup("Enlarger", systemImage: "lightbulb", adjustment: .enlarger) {
-                            ValueSlider("Print exposure", value: $model.controls.printExposure, in: 0...2, step: 0.02, neutral: 1,
-                                        format: .number.precision(.fractionLength(2)))
+                            ThumbnailStrip("Print exposure", value: $model.controls.printExposure,
+                                           in: model.range(of: .printExposure), step: 0.02,
+                                           format: .number.precision(.fractionLength(2)), frames: model.strips[.printExposure])
                         } options: {
                             ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: -100...100, step: 1, neutral: 0,
                                         format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
@@ -395,28 +398,23 @@ private struct StockMenu: NSViewRepresentable {
 }
 
 /// The exposure, in stops over the photo as shot. Its dots are where each way of metering puts
-/// it for this photo (``MeteringMark``); a mark's name shows only while the slider is on it, so
+/// it for this photo (``MeteringMark``); a mark's name shows only while the exposure is on it, so
 /// marks a fraction of a stop apart don't crowd, and the trackpad clicks as it lands on one.
-private struct ExposureSlider: View {
+private struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
 
     var body: some View {
         @Bindable var model = model
         let readings = model.photo.map { photo in
-            MeteringMark.allCases.compactMap { mark in photo.metering.ev[mark.rawValue].map { (mark: mark, ev: $0) } }
+            MeteringMark.allCases.compactMap { mark in photo.metering.ev[mark.rawValue] }
         } ?? []
         let here = model.marksAtExposure
-        let range = range(readings.map(\.ev) + [model.exposureEV])
+        let range = model.exposureRange
         VStack(alignment: .leading, spacing: 6) {
-            LabeledContent("Exposure") {
-                Text("\(model.exposureEV.formatted(Self.stops)) EV").monospacedDigit()
+            ThumbnailStrip("Exposure", value: $model.exposureEV, in: range, step: 0.1, format: Self.stops, unit: "EV",
+                           frames: model.strips[.exposure], marks: Set(readings).sorted()) {
+                model.isAdjustingExposure = $0
             }
-            Slider(value: $model.exposureEV, in: range) {
-                Text("Exposure")
-            } ticks: {
-                SliderTickContentForEach(Set(readings.map(\.ev)).sorted(), id: \.self) { SliderTick($0) }
-            } onEditingChanged: { model.isAdjustingExposure = $0 }
-            .labelsHidden()
             .sensoryFeedback(.alignment, trigger: here) { _, new in model.isAdjustingExposure && !new.isEmpty }
             MarkName(name: here.map(\.name).formatted(.list(type: .and)),
                      fraction: (model.exposureEV - range.lowerBound) / (range.upperBound - range.lowerBound))
@@ -431,12 +429,7 @@ private struct ExposureSlider: View {
     private static let stops = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))
         .sign(strategy: .always(includingZero: false))
 
-    /// −4…+8 stops, widened to whole stops past any reading outside it.
-    private func range(_ values: [Double]) -> ClosedRange<Double> {
-        min(-4, (values.min() ?? 0).rounded(.down) - 1)...max(8, (values.max() ?? 0).rounded(.up) + 1)
-    }
-
-    /// What the mark the slider is on meters, or how far it is from the nearest one.
+    /// What the mark the exposure is on meters, or how far it is from the nearest one.
     private func description(here: [MeteringMark]) -> String {
         guard let photo = model.photo else {
             return "\(model.controls.exposureMark.name): \(model.controls.exposureMark.about)."
@@ -454,20 +447,17 @@ private struct ExposureSlider: View {
     }
 }
 
-/// The name of the mark the slider is on, under its dot. A slider tick's own label would be the
-/// built-in way, but SwiftUI (macOS 26) draws it once and keeps its first text however it
-/// changes, so the name is a text of its own at the dot: the slider's track ends 10 pt in from
-/// each side (its knob's radius), measured. Kept inside the row at the ends.
+/// The name of the mark the exposure is on, under its dot on the strip, kept inside the row at
+/// the ends.
 private struct MarkName: View {
     let name: String
-    /// Where the dot is along the slider, 0 at its minimum.
+    /// Where the dot is along the strip, 0 at its minimum.
     let fraction: Double
     @State private var width: CGFloat = 0
 
     var body: some View {
         GeometryReader { geometry in
-            let inset = 10.0
-            let x = inset + fraction * (geometry.size.width - 2 * inset)
+            let x = fraction * geometry.size.width
             Text(name)
                 .foregroundStyle(.tint)
                 .fixedSize()
@@ -563,6 +553,120 @@ private struct ValueSlider: View {
                 set(start + drag.translation.width / width * (range.upperBound - range.lowerBound))
             }
             .onEnded { _ in dragStart = nil })
+        .focusable(interactions: .activate)
+        .onMoveCommand { direction in
+            switch direction {
+            case .left: set(value - step)
+            case .right: set(value + step)
+            default: break
+            }
+        }
+        .accessibilityRepresentation {
+            Slider(value: $value, in: range, step: step) { Text(title) }
+        }
+    }
+
+    private func fraction(of value: Double) -> Double {
+        (value - range.lowerBound) / (range.upperBound - range.lowerBound)
+    }
+
+    /// Sets the value to the nearest step, within the range.
+    private func set(_ newValue: Double) {
+        let stepped = range.lowerBound + ((newValue - range.lowerBound) / step).rounded() * step
+        value = min(max(stepped, range.lowerBound), range.upperBound)
+    }
+}
+
+/// A control as Photos shows its main adjustments: its name and value over frames of the photo
+/// across its range (``PhotoModel/Strip``), with a line at the value; `marks` are dots under it.
+/// Clicking or dragging along it sets the value there; with Full Keyboard Access the arrow keys
+/// step it, and the system slider stands in for VoiceOver. Drawn here, as Photos' strip isn't
+/// one of SwiftUI's or AppKit's controls.
+private struct ThumbnailStrip: View {
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let format: FloatingPointFormatStyle<Double>
+    let unit: String
+    /// None until the model has made them.
+    let frames: [CGImage]?
+    let marks: [Double]
+    let onEditingChanged: (Bool) -> Void
+    @State private var width: CGFloat = 0
+    @State private var isDragging = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double,
+         format: FloatingPointFormatStyle<Double>, unit: String = "", frames: [CGImage]?, marks: [Double] = [],
+         onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+        self.title = title
+        _value = value
+        self.range = range
+        self.step = step
+        self.format = format
+        self.unit = unit
+        self.frames = frames
+        self.marks = marks
+        self.onEditingChanged = onEditingChanged
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer(minLength: 8)
+                Text(unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)")
+                    .monospacedDigit()
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            HStack(spacing: 0) {
+                if let frames {
+                    ForEach(frames.indices, id: \.self) { index in
+                        Color.clear
+                            .overlay { Image(decorative: frames[index], scale: 1).resizable().scaledToFill() }
+                            .clipped()
+                    }
+                } else {
+                    Rectangle().fill(.quaternary)
+                }
+            }
+            .frame(height: 44)
+            .overlay(alignment: .leading) {
+                Rectangle().fill(.white)
+                    .frame(width: 2)
+                    .shadow(radius: 1)
+                    .offset(x: min(max(fraction(of: value) * width - 1, 0), width - 2))
+            }
+            .clipShape(.rect(cornerRadius: 6))
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            .contentShape(.rect)
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { drag in
+                    if !isDragging {
+                        isDragging = true
+                        onEditingChanged(true)
+                    }
+                    guard width > 0 else { return }
+                    set(range.lowerBound + drag.location.x / width * (range.upperBound - range.lowerBound))
+                }
+                .onEnded { _ in
+                    isDragging = false
+                    onEditingChanged(false)
+                })
+            if !marks.isEmpty {
+                ZStack(alignment: .leading) {
+                    ForEach(marks, id: \.self) { mark in
+                        Circle().fill(.secondary)
+                            .frame(width: 4, height: 4)
+                            .offset(x: fraction(of: mark) * width - 2)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 4, maxHeight: 4, alignment: .leading)
+            }
+        }
+        .opacity(isEnabled ? 1 : 0.5)
         .focusable(interactions: .activate)
         .onMoveCommand { direction in
             switch direction {

@@ -27,10 +27,12 @@ final class PhotoModel {
         /// The region each mark meters, white with the weight as alpha.
         let meteringOverlays: [MeteringMark: CGImage]
     }
-    /// A new photo empties the kept renders and renders at once.
+    /// A new photo empties the kept renders and the strips, and renders at once.
     private(set) var photo: Photo? {
         didSet {
             finishedRenders.removeAllObjects()
+            strips = [:]
+            stripControls = nil
             scheduleRender()
         }
     }
@@ -80,6 +82,11 @@ final class PhotoModel {
     }
     /// How close to a mark the slider lands on it, in stops.
     static let snap = 0.15
+    /// The exposure's range: −4…+8 stops, widened to whole stops past any reading outside it.
+    var exposureRange: ClosedRange<Double> {
+        let values = (photo?.metering.ev.compactMap { $0 } ?? []) + [exposureEV]
+        return min(-4, (values.min() ?? 0).rounded(.down) - 1)...max(8, (values.max() ?? 0).rounded(.up) + 1)
+    }
     /// The marks the exposure is on: those whose reading for this photo rounds to it.
     var marksAtExposure: [MeteringMark] {
         guard let photo else { return [] }
@@ -166,6 +173,8 @@ final class PhotoModel {
                 }.value
                 // The engine opens the photo once it's done rendering the last one: stop that.
                 renderTask?.cancel()
+                stripTask?.cancel()
+                stripTask = nil
                 isRendering = false
                 isRenderingFullResolution = false
                 awaitsFullResolution = false
@@ -216,6 +225,10 @@ final class PhotoModel {
         // of a slider would leave none on screen until the slider pauses.
         guard start != .preview || !isPreviewing else { return }
         renderTask?.cancel()
+        if start == .preview {
+            stripTask?.cancel()
+            stripTask = nil
+        }
         isPreviewing = false
         isRenderingFullResolution = false
         awaitsFullResolution = false
@@ -258,6 +271,7 @@ final class PhotoModel {
                     isRenderingFullResolution = true
                     try await show(controls: controls, mode: .full, engine: engine, photo: photo)
                 }
+                renderStrips(photo: photo, engine: engine)
             } catch {
                 guard !Task.isCancelled else { return }
                 fail("Could not render", error)
@@ -300,6 +314,7 @@ final class PhotoModel {
         let size = mode == .full ? "\(photo.width) × \(photo.height)" : "\(display.width) × \(display.height)"
         let name = switch mode {
         case .preview: "preview"
+        case .thumbnail: "thumbnail"
         case .reduced: "screen size"
         case .full, .export: "full resolution"
         }
@@ -326,6 +341,99 @@ final class PhotoModel {
             hasher.combine(longSide)
             return hasher.finalize()
         }
+    }
+
+    // MARK: Thumbnail strips
+
+    /// A control shown as Photos shows its main adjustments: the photo across the control's range,
+    /// a frame each, rendered in preview mode on a small image of the photo (``RenderMode/thumbnail``).
+    /// Halation, grain and glare barely show at that size, so they have none.
+    enum Strip: CaseIterable {
+        case exposure, couplerSaturation, printContrast, printExposure
+    }
+    static let framesPerStrip = 6
+    /// Each strip's frames, left to right. A strip whose control changes nothing the controls show
+    /// (a print setting while the film shows, say) has none.
+    private(set) var strips: [Strip: [CGImage]] = [:]
+    /// The controls the strips were made for.
+    @ObservationIgnored private var stripControls: Controls?
+    /// Makes the strips for the controls; a change to them stops it (``render(from:)``).
+    @ObservationIgnored private var stripTask: Task<Void, Never>?
+
+    /// The range a strip's control spans.
+    func range(of strip: Strip) -> ClosedRange<Double> {
+        switch strip {
+        case .exposure: exposureRange
+        case .couplerSaturation: 0...1.5
+        case .printContrast: 0.5...2
+        case .printExposure: 0...2
+        }
+    }
+
+    /// Renders the strips for the controls, unless they show them or are being made for them. Each
+    /// frame is a render of its own, so a change's preview waits on one frame at most; each strip
+    /// shows once all its frames are done.
+    private func renderStrips(photo: Photo, engine: Engine) {
+        let controls = controls
+        guard controls != stripControls, stripTask == nil else { return }
+        stripTask = Task {
+            let start = ContinuousClock.now
+            var count = 0
+            do {
+                for strip in Strip.allCases {
+                    guard applies(strip, to: controls) else {
+                        strips[strip] = nil
+                        continue
+                    }
+                    let span = range(of: strip)
+                    var frames: [CGImage] = []
+                    for frame in 0..<Self.framesPerStrip {
+                        // The value at the middle of the frame.
+                        let value = span.lowerBound
+                            + (Double(frame) + 0.5) / Double(Self.framesPerStrip) * (span.upperBound - span.lowerBound)
+                        frames.append(try await engine.display(
+                            controls: frameControls(controls, strip: strip, value: value, photo: photo), mode: .thumbnail))
+                        try Task.checkCancellation()
+                    }
+                    strips[strip] = frames
+                    count += frames.count
+                }
+                stripControls = controls
+                stripTask = nil
+                let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
+                note("Rendered \(count) thumbnails in \(elapsed)")
+            } catch {
+                guard !Task.isCancelled else { return }
+                stripTask = nil
+                fail("Could not render the thumbnails", error)
+            }
+        }
+    }
+
+    /// Whether `strip`'s control changes what `controls` show.
+    private func applies(_ strip: Strip, to controls: Controls) -> Bool {
+        switch strip {
+        case .exposure: true
+        case .couplerSaturation: controls.couplers
+        case .printContrast, .printExposure: !controls.scanFilm
+        }
+    }
+
+    /// `controls` with `strip`'s control at `value`: for the exposure, `value` stops over the
+    /// photo as shot, from the controls' mark.
+    private func frameControls(_ controls: Controls, strip: Strip, value: Double, photo: Photo) -> Controls {
+        var controls = controls
+        switch strip {
+        case .exposure:
+            controls.exposureOffsetEV = value - photo.metering.reading(resolving: controls.exposureMark).ev
+        case .couplerSaturation:
+            controls.couplerSaturation = value
+        case .printContrast:
+            controls.printContrast = value
+        case .printExposure:
+            controls.printExposure = value
+        }
+        return controls
     }
 
     // MARK: Saving and cancelling
