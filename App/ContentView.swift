@@ -6,6 +6,7 @@ struct ContentView: View {
     @Environment(PhotoModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @SceneStorage("showsSettings") private var showsSettings = true
+    @SceneStorage("settingsCategory") private var category = SettingsCategory.film
     /// The settings panel's width, over the canvas's right side.
     private let settingsWidth: CGFloat = 290
 
@@ -24,7 +25,8 @@ struct ContentView: View {
                     .pickerStyle(.segmented)
                     .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
                 }
-                ToolbarItemGroup(placement: .primaryAction) {
+                // Next to Print | Film; the settings' tabs go to the far right, over the panel.
+                ToolbarItemGroup {
                     Button("Open…", systemImage: "folder") { model.isImporting = true }
                     if model.canCancel {
                         Button("Cancel", systemImage: "xmark.circle") { model.cancel() }
@@ -35,6 +37,15 @@ struct ContentView: View {
                     Toggle("Adjust", systemImage: "slider.horizontal.3", isOn: $showsSettings)
                         .help("Show or hide the settings")
                 }
+                ToolbarSpacer(.flexible)
+                if showsSettings {
+                    ToolbarItem {
+                        Picker("Settings", selection: $category) {
+                            ForEach(SettingsCategory.allCases, id: \.self) { Text($0.rawValue) }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
             }
             // The toolbar's own translucent background, as the photo reaches under it (``ImageCanvas``).
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
@@ -43,7 +54,7 @@ struct ContentView: View {
             // inspector is a column of its own, which the photo can't reach under.
             .safeAreaInset(edge: .trailing, spacing: 0) {
                 if showsSettings {
-                    SettingsPanel()
+                    SettingsPanel(category: category)
                         .frame(width: settingsWidth)
                         .background(.regularMaterial)
                 }
@@ -64,15 +75,16 @@ struct ContentView: View {
 
 // MARK: - Settings
 
-/// The settings, one step of the process at a time, chosen at the top: the camera's exposure,
-/// the film, and the print made from it. Laid out as Photos' Adjust panel: a group per effect.
+/// The steps of the process the settings are in, one at a time, chosen in the toolbar over the
+/// panel: the camera's exposure, the film, and the print made from it.
+private enum SettingsCategory: String, CaseIterable {
+    case camera = "Camera", film = "Film", print = "Print"
+}
+
+/// The settings of one step of the process, laid out as Photos' Adjust panel: a group per effect.
 private struct SettingsPanel: View {
     @Environment(PhotoModel.self) private var model
-    @SceneStorage("settingsCategory") private var category = Category.film
-
-    private enum Category: String, CaseIterable {
-        case camera = "Camera", film = "Film", print = "Print"
-    }
+    let category: SettingsCategory
 
     var body: some View {
         @Bindable var model = model
@@ -194,14 +206,6 @@ private struct SettingsPanel: View {
             .padding(.vertical)
             .padding(.leading, 15)
             .padding(.trailing, 20)
-        }
-        .safeAreaInset(edge: .top) {
-            Picker("Settings", selection: $category) {
-                ForEach(Category.allCases, id: \.self) { Text($0.rawValue) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding([.top, .horizontal])
         }
     }
 }
