@@ -490,6 +490,67 @@ final class PhotoModel {
         return controls
     }
 
+    // MARK: Adjustments
+
+    /// The settings' groups, as Photos groups its adjustments: each resets on its own.
+    enum Adjustment {
+        case exposure, halation, couplers, grain, contrast, enlarger, glare
+    }
+
+    /// Whether `adjustment`'s controls are what choosing the film applies.
+    func isAtDefaults(_ adjustment: Adjustment) -> Bool {
+        controls == resetting(adjustment, in: controls)
+    }
+
+    /// Returns `adjustment`'s controls to what choosing the film applies.
+    func reset(_ adjustment: Adjustment) {
+        controls = resetting(adjustment, in: controls)
+    }
+
+    /// `controls` with `adjustment`'s from the film's saved defaults, or the app's own. Saved
+    /// defaults that can't be read were reported when the film was chosen, so here they're the
+    /// app's own.
+    private func resetting(_ adjustment: Adjustment, in controls: Controls) -> Controls {
+        let defaults = UserDefaults.standard.data(forKey: Self.defaultsKey(controls.film))
+            .flatMap { try? Controls(preset: $0) } ?? Controls()
+        var reset = controls
+        switch adjustment {
+        case .exposure:
+            reset.exposureMark = defaults.exposureMark
+            reset.exposureOffsetEV = defaults.exposureOffsetEV
+            reset.highlightBoost = defaults.highlightBoost
+        case .halation:
+            reset.halation = defaults.halation
+            reset.halationAmount = defaults.halationAmount
+            reset.halationSize = defaults.halationSize
+            reset.scatterAmount = defaults.scatterAmount
+            reset.scatterSize = defaults.scatterSize
+        case .couplers:
+            reset.couplers = defaults.couplers
+            reset.couplerSaturation = defaults.couplerSaturation
+            reset.couplerEdgeContrast = defaults.couplerEdgeContrast
+        case .grain:
+            reset.grain = defaults.grain
+            reset.grainSize = defaults.grainSize
+            reset.grainSoftness = defaults.grainSoftness
+        case .contrast:
+            reset.printContrast = defaults.printContrast
+            reset.printHighlightContrast = defaults.printHighlightContrast
+            reset.printShadowContrast = defaults.printShadowContrast
+        case .enlarger:
+            reset.printExposure = defaults.printExposure
+            reset.yFilterShift = defaults.yFilterShift
+            reset.mFilterShift = defaults.mFilterShift
+            reset.preflash = defaults.preflash
+        case .glare:
+            reset.glare = defaults.glare
+            reset.glareAmount = defaults.glareAmount
+            reset.glareRoughness = defaults.glareRoughness
+            reset.glareSoftness = defaults.glareSoftness
+        }
+        return reset
+    }
+
     // MARK: Helpers
 
     private func note(_ message: String) {

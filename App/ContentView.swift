@@ -59,7 +59,7 @@ struct ContentView: View {
 // MARK: - Settings
 
 /// The settings, one step of the process at a time, chosen at the top: the camera's exposure,
-/// the film, and the print made from it.
+/// the film, and the print made from it. Laid out as Photos' Adjust panel: a group per effect.
 private struct SettingsPanel: View {
     @Environment(PhotoModel.self) private var model
     @SceneStorage("settingsCategory") private var category = Category.film
@@ -70,25 +70,25 @@ private struct SettingsPanel: View {
 
     var body: some View {
         @Bindable var model = model
-        Form {
-            switch category {
-            case .camera:
-                Section("Exposure") {
-                    ExposureSlider()
-                    ValueSlider("Highlight boost", value: $model.controls.highlightBoost, in: 0...10, step: 0.5,
-                                format: .number.precision(.fractionLength(1)), unit: "EV")
-                        .help("Raises the brightest highlights before they reach the film, rebuilding light the camera clipped, so bright lights glow more.")
-                }
-            case .film:
-                Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                switch category {
+                case .camera:
+                    AdjustmentGroup("Exposure", systemImage: "plusminus.circle", adjustment: .exposure) {
+                        ExposureSlider()
+                    } options: {
+                        ValueSlider("Highlight boost", value: $model.controls.highlightBoost, in: 0...10, step: 0.5,
+                                    format: .number.precision(.fractionLength(1)), unit: "EV")
+                            .help("Raises the brightest highlights before they reach the film, rebuilding light the camera clipped, so bright lights glow more.")
+                    }
+                case .film:
                     StockRow(title: "Film", stocks: model.films, selection: $model.film, controls: $model.controls)
-                }
-                Section("Halation") {
-                    Toggle("Halation", isOn: $model.controls.halation)
-                    Group {
+                    AdjustmentGroup("Halation", systemImage: "sun.haze", adjustment: .halation,
+                                    isOn: $model.controls.halation) {
                         ValueSlider("Strength", value: $model.controls.halationAmount, in: 0...3, step: 0.05,
                                     format: .number.precision(.fractionLength(2)))
                             .help("The glow from light bouncing back off the film base, over the film's own.")
+                    } options: {
                         ValueSlider("Size", value: $model.controls.halationSize, in: 0...3, step: 0.05,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How far the glow reaches, over the film's own.")
@@ -99,77 +99,69 @@ private struct SettingsPanel: View {
                                     format: .number.precision(.fractionLength(2)))
                             .help("How far light spreads inside the emulsion, over the film's own.")
                     }
-                    .disabled(!model.controls.halation)
-                }
-                Section("Couplers") {
-                    Toggle("Couplers", isOn: $model.controls.couplers)
                     // At most 1.5: much stronger inhibition (both at 2, say) breaks Spektrafilm's
                     // curves corrected for it, greys and all, in Python as here.
-                    Group {
+                    AdjustmentGroup("Couplers", systemImage: "drop.halffull", adjustment: .couplers,
+                                    isOn: $model.controls.couplers) {
                         ValueSlider("Saturation", value: $model.controls.couplerSaturation, in: 0...1.5, step: 0.05,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
+                    } options: {
                         ValueSlider("Edge contrast", value: $model.controls.couplerEdgeContrast, in: 0...1.5, step: 0.05,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How strongly each layer holds back its own development nearby: more gives crisper edges in fine detail. The overall contrast stays the film's.")
                     }
-                    .disabled(!model.controls.couplers)
-                }
-                Section("Grain") {
-                    Toggle("Grain", isOn: $model.controls.grain)
-                    Group {
+                    AdjustmentGroup("Grain", systemImage: "aqi.medium", adjustment: .grain, isOn: $model.controls.grain) {
                         // Not down to 0: the particle count per pixel divides by the area.
                         ValueSlider("Size", value: $model.controls.grainSize, in: 0.05...2, step: 0.05,
                                     format: .number.precision(.fractionLength(2)), unit: "µm²")
                             .help("The area of one silver halide particle: about 0.1 µm² for ISO 100, 0.4 µm² for ISO 400.")
+                    } options: {
                         ValueSlider("Softness", value: $model.controls.grainSoftness, in: 0...2, step: 0.05,
                                     format: .number.precision(.fractionLength(2)), unit: "px")
                             .help("The blur over the grain, in pixels of the render.")
                     }
-                    .disabled(!model.controls.grain)
-                }
-            case .print:
-                if model.controls.scanFilm {
-                    Section {
+                case .print:
+                    if model.controls.scanFilm {
                         Text(model.isSlideFilm
                              ? "A slide is viewed directly, so there's no print."
                              : "The film itself is showing. These settings apply when the toolbar shows Print.")
                             .foregroundStyle(.secondary)
                     }
-                }
-                Group {
-                    Section {
+                    Group {
                         StockRow(title: "Paper", stocks: model.papers, selection: $model.controls.paper,
                                  controls: $model.controls)
-                        ValueSlider("Contrast", value: $model.controls.printContrast, in: 0.5...2, step: 0.05,
-                                    format: .number.precision(.fractionLength(2)))
-                            .help("The paper's contrast around mid-grey: lower brings a bright sky and dark faces closer together.")
-                        ValueSlider("Highlight contrast", value: $model.controls.printHighlightContrast, in: 0.5...2,
-                                    step: 0.05, format: .number.precision(.fractionLength(2)))
-                            .help("The paper's contrast in the light tones alone: lower keeps more detail in a bright sky.")
-                        ValueSlider("Shadow contrast", value: $model.controls.printShadowContrast, in: 0.5...2,
-                                    step: 0.05, format: .number.precision(.fractionLength(2)))
-                            .help("The paper's contrast in the dark tones alone: lower opens up faces in shadow.")
-                    }
-                    Section("Enlarger") {
-                        ValueSlider("Print exposure", value: $model.controls.printExposure, in: 0...2, step: 0.02,
-                                    format: .number.precision(.fractionLength(2)))
-                        ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: -100...100, step: 1,
-                                    format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
-                                    unit: "CC")
-                        ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: -100...100, step: 1,
-                                    format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
-                                    unit: "CC")
-                        ValueSlider("Preflash", value: $model.controls.preflash, in: 0...0.05, step: 0.001,
-                                    format: .number.precision(.fractionLength(3)))
-                            .help("A flash of plain light on the paper before the print, so light tones such as a bright sky gain some tone. It darkens the whole print: lower the print exposure to bring the mid-tones back.")
-                    }
-                    Section("Glare") {
-                        Toggle("Glare", isOn: $model.controls.glare)
-                        Group {
+                        AdjustmentGroup("Contrast", systemImage: "circle.lefthalf.filled", adjustment: .contrast) {
+                            ValueSlider("Contrast", value: $model.controls.printContrast, in: 0.5...2, step: 0.05,
+                                        format: .number.precision(.fractionLength(2)))
+                                .help("The paper's contrast around mid-grey: lower brings a bright sky and dark faces closer together.")
+                        } options: {
+                            ValueSlider("Highlight contrast", value: $model.controls.printHighlightContrast, in: 0.5...2,
+                                        step: 0.05, format: .number.precision(.fractionLength(2)))
+                                .help("The paper's contrast in the light tones alone: lower keeps more detail in a bright sky.")
+                            ValueSlider("Shadow contrast", value: $model.controls.printShadowContrast, in: 0.5...2,
+                                        step: 0.05, format: .number.precision(.fractionLength(2)))
+                                .help("The paper's contrast in the dark tones alone: lower opens up faces in shadow.")
+                        }
+                        AdjustmentGroup("Enlarger", systemImage: "lightbulb", adjustment: .enlarger) {
+                            ValueSlider("Print exposure", value: $model.controls.printExposure, in: 0...2, step: 0.02,
+                                        format: .number.precision(.fractionLength(2)))
+                        } options: {
+                            ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: -100...100, step: 1,
+                                        format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
+                                        unit: "CC")
+                            ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: -100...100, step: 1,
+                                        format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
+                                        unit: "CC")
+                            ValueSlider("Preflash", value: $model.controls.preflash, in: 0...0.05, step: 0.001,
+                                        format: .number.precision(.fractionLength(3)))
+                                .help("A flash of plain light on the paper before the print, so light tones such as a bright sky gain some tone. It darkens the whole print: lower the print exposure to bring the mid-tones back.")
+                        }
+                        AdjustmentGroup("Glare", systemImage: "sun.max", adjustment: .glare, isOn: $model.controls.glare) {
                             ValueSlider("Amount", value: $model.controls.glareAmount, in: 0...1, step: 0.01,
                                         format: .number.precision(.fractionLength(2)), unit: "%")
                                 .help("Stray light over the print as it's viewed, in percent of the light: it lifts the blacks.")
+                        } options: {
                             ValueSlider("Roughness", value: $model.controls.glareRoughness, in: 0...1, step: 0.05,
                                         format: .number.precision(.fractionLength(2)))
                                 .help("How unevenly the stray light falls.")
@@ -177,20 +169,93 @@ private struct SettingsPanel: View {
                                         format: .number.precision(.fractionLength(1)), unit: "px")
                                 .help("The blur over the stray light, in pixels of the render.")
                         }
-                        .disabled(!model.controls.glare)
                     }
+                    .disabled(model.controls.scanFilm)
                 }
-                .disabled(model.controls.scanFilm)
             }
+            .padding()
         }
-        .formStyle(.grouped)
         .safeAreaInset(edge: .top) {
             Picker("Settings", selection: $category) {
                 ForEach(Category.allCases, id: \.self) { Text($0.rawValue) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .padding(.top, 8)
+            .padding([.top, .horizontal])
+        }
+    }
+}
+
+/// A group of settings as Photos lays out an adjustment: a disclosure headed by its symbol and
+/// name, a reset arrow and, where the effect can be off, an on/off circle; its main control, then
+/// the rest under Options. Whether each is open is kept with the window.
+private struct AdjustmentGroup<Main: View, Options: View>: View {
+    @Environment(PhotoModel.self) private var model
+    let title: String
+    let systemImage: String
+    let adjustment: PhotoModel.Adjustment
+    let isOn: Binding<Bool>?
+    let main: Main
+    let options: Options
+    @SceneStorage private var isExpanded: Bool
+    @SceneStorage private var showsOptions: Bool
+
+    init(_ title: String, systemImage: String, adjustment: PhotoModel.Adjustment, isOn: Binding<Bool>? = nil,
+         @ViewBuilder main: () -> Main, @ViewBuilder options: () -> Options) {
+        self.title = title
+        self.systemImage = systemImage
+        self.adjustment = adjustment
+        self.isOn = isOn
+        self.main = main()
+        self.options = options()
+        _isExpanded = SceneStorage(wrappedValue: true, "adjustment.\(title)")
+        _showsOptions = SceneStorage(wrappedValue: false, "adjustment.\(title).options")
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                main
+                DisclosureGroup("Options", isExpanded: $showsOptions) {
+                    VStack(spacing: 6) { options }
+                        .padding(.top, 4)
+                }
+            }
+            .padding(.top, 6)
+            .disabled(isOn?.wrappedValue == false)
+        } label: {
+            HStack {
+                Label(title, systemImage: systemImage)
+                    .font(.title3)
+                Spacer()
+                Button("Reset \(title)", systemImage: "arrow.uturn.backward") { model.reset(adjustment) }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .disabled(model.isAtDefaults(adjustment))
+                    .help("Back to the film's defaults")
+                if let isOn {
+                    Toggle(title, isOn: isOn)
+                        .toggleStyle(CircleToggleStyle())
+                        .help(isOn.wrappedValue ? "Turn off" : "Turn on")
+                }
+            }
+        }
+    }
+}
+
+/// Photos' on/off circle for an adjustment: a ring when it's off, a check when it's on.
+private struct CircleToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            Image(systemName: configuration.isOn ? "checkmark.circle.fill" : "circle")
+                .imageScale(.large)
+                .foregroundStyle(.tint)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityRepresentation {
+            Toggle(isOn: configuration.$isOn) { configuration.label }
         }
     }
 }
