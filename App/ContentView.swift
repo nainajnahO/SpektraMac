@@ -12,10 +12,10 @@ struct ContentView: View {
     var body: some View {
         @Bindable var model = model
         ImageCanvas(covered: showsSettings ? settingsWidth : 0)
-            .safeAreaInset(edge: .bottom) { StatusBar() }
+            .safeAreaInset(edge: .bottom, spacing: 0) { StatusBar() }
             .navigationTitle(model.photo?.name ?? "SpektraMac")
             .toolbar {
-                ToolbarItem(placement: .principal) {
+                ToolbarItemGroup(placement: .principal) {
                     Picker("Show", selection: $model.controls.scanFilm) {
                         Text("Print").tag(false)
                             .selectionDisabled(model.isSlideFilm)
@@ -23,11 +23,7 @@ struct ContentView: View {
                     }
                     .pickerStyle(.segmented)
                     .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
-                    // Centred over the photo beside the panel rather than over the window.
-                    .padding(.trailing, showsSettings ? settingsWidth : 0)
                 }
-                // The glass behind toolbar items would take in the padding.
-                .sharedBackgroundVisibility(.hidden)
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button("Open…", systemImage: "folder") { model.isImporting = true }
                     if model.canCancel {
@@ -993,7 +989,7 @@ private struct StatusBar: View {
         }
         .font(.callout)
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 3)
         .background(.bar)
     }
 }
