@@ -160,7 +160,9 @@ public actor Engine {
     private struct Photo {
         var full: PhotoImage
         var preview: PhotoImage
-        var thumbnail: PhotoImage
+        /// Made for the first thumbnail render rather than as the photo opens: the strips render
+        /// once the photo is on screen.
+        var thumbnail: PhotoImage?
         /// The last `reduced` render's image of the photo.
         var reduced: PhotoImage
         /// What Vision found in the photo, for metering the images made later.
@@ -203,9 +205,9 @@ public actor Engine {
 
     /// Makes `image` (``RGBImage/decode(contentsOf:)``) the photo renders work on: Core Image
     /// renders it once into a texture, and its preview (at most ``previewMaxSize`` on the long side)
-    /// and thumbnail (``thumbnailMaxSize``) from that on the GPU. Vision looks for the metering
-    /// marks' regions in the preview, and each image is metered once at every mark, in place. Sets
-    /// aside the GPU memory renders of its size need.
+    /// from that on the GPU. Vision looks for the metering marks' regions in the preview, and each
+    /// image is metered once at every mark, in place. Sets aside the GPU memory renders of its size
+    /// need.
     public func open(_ image: CIImage) throws -> OpenedPhoto {
         let extent = image.extent.integral
         let (width, height) = (Int(extent.width), Int(extent.height))
@@ -219,17 +221,35 @@ public actor Engine {
         let previewLuminance = meteredLuminance(of: Pixels(preview), colourSpace: space, cctfDecoding: false)
         let centreWeighted = MeteringReadings(luminance: previewLuminance.y, width: previewLuminance.width,
                                               height: previewLuminance.height, regions: nil).reading(resolving: .centreWeighted)
-        let regions = try MeteringRegions(finding: visionView(of: preview, exposure: centreWeighted.ev))
+        // The full image's luminance (about 40 ms at 12 MP, on the CPU) while Vision looks at the
+        // preview: it needs no regions.
+        nonisolated(unsafe) let fullPixels = Pixels(full)
+        nonisolated(unsafe) var fullLuminance: (y: [Double], width: Int, height: Int)?
+        let metering = DispatchGroup()
+        if full !== preview {
+            DispatchQueue.global(qos: .userInitiated).async(group: metering) {
+                fullLuminance = meteredLuminance(of: fullPixels, colourSpace: space, cctfDecoding: false)
+            }
+        }
+        let found = Result { try MeteringRegions(finding: visionView(of: preview, exposure: centreWeighted.ev)) }
+        metering.wait()  // even if Vision failed: the metering reads `full`
+        let regions = try found.get()
         let previewImage = PhotoImage(texture: preview, metering: MeteringReadings(
             luminance: previewLuminance.y, width: previewLuminance.width, height: previewLuminance.height, regions: regions))
-        let fullImage = full === preview ? previewImage : metered(full, regions: regions)
-        let thumbnail = try scaled(full, toLongSide: thumbnailMaxSize)
-        let thumbnailImage = thumbnail === full ? fullImage : metered(thumbnail, regions: regions)
-        photo = Photo(full: fullImage, preview: previewImage, thumbnail: thumbnailImage, reduced: previewImage,
-                      regions: regions)
+        let fullImage = fullLuminance.map { luminance in
+            PhotoImage(texture: full, metering: MeteringReadings(luminance: luminance.y, width: luminance.width,
+                                                                 height: luminance.height, regions: regions))
+        } ?? previewImage
+        photo = Photo(full: fullImage, preview: previewImage, reduced: previewImage, regions: regions)
         return OpenedPhoto(width: width, height: height, previewWidth: preview.width, previewHeight: preview.height,
                            metering: previewImage.metering,
                            meteringOverlays: regions.overlays(for: previewImage.metering, width: width, height: height))
+    }
+
+    /// Loads the models Vision looks for the metering marks' regions with (about 0.2 s on an M1
+    /// Pro), which the first ``open(_:)`` would otherwise wait for: call it at launch.
+    public func loadVision() throws {
+        try MeteringRegions.loadModels()
     }
 
     /// `full` scaled down to `longSide` pixels on its long side as Spektrafilm's preview is made
@@ -329,7 +349,12 @@ public actor Engine {
         case .preview:
             image = \.preview
         case .thumbnail:
-            image = \.thumbnail
+            if photo!.thumbnail == nil {
+                let full = photo!.full
+                let thumbnail = try scaled(full.texture, toLongSide: thumbnailMaxSize)
+                photo!.thumbnail = thumbnail === full.texture ? full : metered(thumbnail, regions: photo!.regions)
+            }
+            image = \.thumbnail!
         case .reduced(let longSide):
             let full = photo!.full.texture
             if longSide >= max(full.width, full.height) {

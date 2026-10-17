@@ -14,20 +14,23 @@ public enum MeteringMark: Int, CaseIterable, Codable, Sendable {
 
 /// What Vision found in a photo for the Objects, People and Faces marks, over the whole frame.
 struct MeteringRegions: Sendable {
-    /// Objectness saliency (Vision's heat map, 68 × 68) and person segmentation (the accurate
-    /// mask): weights 0…1, row 0 at the top.
+    /// Objectness saliency (Vision's heat map, 68 × 68) and person segmentation (the balanced
+    /// mask, 512 × 384 for a 4:3 photo): weights 0…1, row 0 at the top.
     var objects: WeightMap
     var people: WeightMap
     /// Face bounding boxes, normalised, origin at the lower left (Vision's).
     var faces: [CGRect]
 
     /// Runs Vision on `image`, an upright view of the photo exposed so dim scenes are readable:
-    /// about 0.1 s for a 1024 px view on an M1 Pro. The blocking `VNImageRequestHandler` rather
-    /// than Vision's async requests: the engine waits on its own serial queue, and an `await` in
-    /// ``Engine/open(_:)`` would let a waiting render in while no photo is open.
+    /// about 30 ms for a 1024 px view on an M1 Pro once Vision has loaded its models
+    /// (``loadModels()``). The blocking `VNImageRequestHandler` rather than Vision's async
+    /// requests: the engine waits on its own serial queue, and an `await` in ``Engine/open(_:)``
+    /// would let a waiting render in while no photo is open.
     init(finding image: CGImage) throws {
         let people = VNGeneratePersonSegmentationRequest()
-        people.qualityLevel = .accurate
+        // The balanced mask meters people within 0.04 EV of the accurate one (eight photos with
+        // people), in 20 ms rather than 60, and is as large as the overlay drawn from it.
+        people.qualityLevel = .balanced
         people.outputPixelFormat = kCVPixelFormatType_OneComponent32Float
         let objects = VNGenerateObjectnessBasedSaliencyImageRequest()
         let faces = VNDetectFaceRectanglesRequest()
@@ -42,6 +45,15 @@ struct MeteringRegions: Sendable {
 
     init(objects: WeightMap, people: WeightMap, faces: [CGRect]) {
         (self.objects, self.people, self.faces) = (objects, people, faces)
+    }
+
+    /// Runs Vision's requests on a tiny image, so it has loaded their models before a photo
+    /// opens: loading them makes the first ``init(finding:)`` take about 0.2 s more.
+    static func loadModels() throws {
+        let tiny = CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
+                             space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                             bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!.makeImage()!
+        _ = try MeteringRegions(finding: tiny)
     }
 
     struct VisionError: Error, CustomStringConvertible {
@@ -175,7 +187,13 @@ extension MeteringRegions {
                 weights = weights.map { $0 / peak }
             }
             // Premultiplied white: every channel is the alpha.
-            let bytes = weights.flatMap { Array(repeating: UInt8(($0 * 255).rounded()), count: 4) }
+            var bytes = [UInt8](repeating: 0, count: weights.count * 4)
+            for (pixel, weight) in weights.enumerated() {
+                let alpha = UInt8((weight * 255).rounded())
+                for channel in 0..<4 {
+                    bytes[pixel * 4 + channel] = alpha
+                }
+            }
             let image = CGImage(width: overlayWidth, height: overlayHeight, bitsPerComponent: 8, bitsPerPixel: 32,
                                 bytesPerRow: overlayWidth * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                 bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),

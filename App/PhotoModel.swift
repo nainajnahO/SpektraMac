@@ -166,6 +166,14 @@ final class PhotoModel {
             engine = nil
             errorMessage = "Metal is unavailable: \(error.localizedDescription)"
         }
+        // On the engine's queue, so the first photo opened doesn't wait for it.
+        Task { [engine] in
+            do {
+                try await engine?.loadVision()
+            } catch {
+                fail("Could not load Vision", error)
+            }
+        }
     }
 
     // MARK: Opening
