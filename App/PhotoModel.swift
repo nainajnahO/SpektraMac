@@ -40,8 +40,19 @@ final class PhotoModel {
     @ObservationIgnored private var metadata: PhotoMetadata?
     /// What the sidebar and the Print | Film switch set; every change re-renders the preview.
     var controls = Controls() {
-        didSet { scheduleRender() }
+        didSet {
+            showsFilm = controls.scanFilm
+            isSlideFilm = films.first { $0.stock == controls.film }?.type == .positive
+            scheduleRender()
+        }
     }
+    /// What the toolbar's Print | Film switch shows, as the controls have it: apart from them, so
+    /// the switch isn't laid out again at every step of a slider (setting an observed property to
+    /// the value it has notifies no one).
+    private(set) var showsFilm = false
+    /// A slide is viewed, never printed: every paper is negative-working, so a printed slide
+    /// comes out as a negative image.
+    private(set) var isSlideFilm = false
     /// The film. Choosing one applies the defaults made for it, if any; otherwise it picks the
     /// paper the film is meant to be printed on and, as Spektrafilm's GUI does, views slides
     /// directly instead of printing them, keeping the other controls.
@@ -54,9 +65,6 @@ final class PhotoModel {
         savedDefaults(for: film) ?? factoryControls(for: film, from: controls)
     }
     var filmName: String { films.first { $0.stock == controls.film }?.name ?? controls.film }
-    /// A slide is viewed, never printed: every paper is negative-working, so a printed slide
-    /// comes out as a negative image.
-    var isSlideFilm: Bool { films.first { $0.stock == controls.film }?.type == .positive }
     var films: [ProfileInfo] { engine?.films ?? [] }
     var papers: [ProfileInfo] { engine?.papers ?? [] }
     /// The exposure the slider shows, in stops over the photo as shot: the controls' mark's
@@ -122,6 +130,8 @@ final class PhotoModel {
     /// A preview is rendering: a change meanwhile waits for it to show, then renders.
     private var isPreviewing = false
     private(set) var isLoading = false
+    /// A render with the blurs and grain is running. Not a preview: at each step of a slider,
+    /// "Rendering…" would flicker under the window's title, laying out the toolbar each time.
     private(set) var isRendering = false
     private(set) var isRenderingFullResolution = false
     /// What saving is doing, while it runs.
@@ -239,7 +249,7 @@ final class PhotoModel {
             isRendering = false
             return
         }
-        isRendering = true
+        isRendering = start != .preview
         isPreviewing = start == .preview
         renderTask = Task {
             var controls = self.controls
@@ -259,17 +269,18 @@ final class PhotoModel {
                 if start != .full && !isFinished {
                     isRendering = false
                     try await Task.sleep(for: Self.fullRenderDelay)
-                    isRendering = true
                 }
                 // The canvas's size once things are still.
                 let longSide = reducedLongSide(of: photo)
                 let reduces = start != .full && longSide < max(photo.width, photo.height)
                 if reduces && !isFinished {
+                    isRendering = true
                     try await show(controls: controls, mode: .reduced(longSide: longSide), engine: engine, photo: photo)
                 }
                 if reduces && !wantsFullResolution {
                     awaitsFullResolution = true
                 } else {
+                    isRendering = true
                     isRenderingFullResolution = true
                     try await show(controls: controls, mode: .full, engine: engine, photo: photo)
                 }
