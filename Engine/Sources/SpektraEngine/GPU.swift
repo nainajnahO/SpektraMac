@@ -13,8 +13,9 @@ public final class GPU {
     public let device: any MTLDevice
     public let queue: any MTLCommandQueue
     private let pipelines: [String: any MTLComputePipelineState]
-    /// Memory set aside by ``reserveMemory(width:height:)``, where intermediates are made.
-    private(set) var heap: (any MTLHeap)?
+    /// Where intermediates are made while it has room: memory set aside for renders of their size
+    /// (``reservedMemory(width:height:keeping:)``). Without it, each is allocated fresh.
+    public var heap: (any MTLHeap)?
 
     public enum SetupError: Error {
         case noDevice
@@ -62,42 +63,39 @@ public final class GPU {
         makeTexture(width: texture.width, height: texture.height, pixelFormat: texture.pixelFormat)
     }
 
-    /// How many full-size textures ``reserveMemory(width:height:)`` sets aside: what the whole
-    /// chain holds at once with auto-exposure, halation, grain and glare on, and the steps the
-    /// engine keeps for the next render (measured; fewer and some intermediates are allocated
-    /// fresh, more and the memory goes unused).
-    static let reservedTextures = 10
+    /// How many textures of a render's size ``reservedMemory(width:height:keeping:)`` sets aside:
+    /// what the whole chain holds at once with auto-exposure, halation, grain and glare on, and the
+    /// steps the engine keeps for the next render (measured; fewer and some intermediates are
+    /// allocated fresh, more and the memory goes unused).
+    public static let reservedTextures = 10
 
-    /// The most ``reserveMemory(width:height:)`` sets aside: a quarter of the Mac's memory. More
-    /// and the system compresses and pages memory: at 48 MP on 16 GB, 10 textures (7.7 GB)
-    /// rendered slower than 5.
+    /// The most ``reservedMemory(width:height:keeping:)`` sets aside: a quarter of the Mac's
+    /// memory. More and the system compresses and pages memory: at 48 MP on 16 GB, 10 textures
+    /// (7.7 GB) rendered slower than 5.
     static let reserveLimit = Int(ProcessInfo.processInfo.physicalMemory / 4)
 
-    /// Sets aside GPU memory for the intermediates of renders up to `width × height`
-    /// (``reservedTextures`` textures, as many as fit in ``reserveLimit``: 3.8 GB at 24 MP). A
-    /// fresh texture costs more than the kernel writing it — the system clears its pages on first
-    /// use, 14 ms for 24 MP — and a render makes dozens; from this memory (an automatic heap) they
-    /// reuse what earlier ones released. Textures that don't fit are allocated fresh.
-    ///
-    /// What was set aside before is kept when it's as large, so it stays at the largest photo's
-    /// size: new memory for each photo cost the first render after each open 150 ms more.
-    public func reserveMemory(width: Int, height: Int) {
+    /// GPU memory for the intermediates of renders up to `width × height`, for ``heap``: `textures`
+    /// textures of that size, as many as fit in ``reserveLimit`` (3.8 GB for ten at 24 MP), or
+    /// `kept` if that's as large. A fresh texture costs more than the kernel writing it — the
+    /// system clears its pages on first use, 14 ms for 24 MP — and a render makes dozens; from this
+    /// memory (an automatic heap) they reuse what earlier ones released. Textures that don't fit
+    /// are allocated fresh. All its pages become resident as the first texture is made in it.
+    public func reservedMemory(width: Int, height: Int, textures: Int = reservedTextures,
+                               keeping kept: (any MTLHeap)? = nil) -> (any MTLHeap)? {
         let slot = device.heapTextureSizeAndAlign(descriptor: Self.textureDescriptor(width: width, height: height))
-        let textures = min(Self.reservedTextures, Self.reserveLimit / slot.size)
-        guard textures > 0 else {
-            heap = nil
-            return
-        }
-        if let heap, heap.size >= textures * slot.size { return }
+        let textures = min(textures, Self.reserveLimit / slot.size)
+        guard textures > 0 else { return nil }
+        if let kept, kept.size >= textures * slot.size { return kept }
         let descriptor = MTLHeapDescriptor()
         descriptor.size = textures * slot.size
         descriptor.storageMode = .shared
         descriptor.type = .automatic
         descriptor.hazardTrackingMode = .tracked
-        heap = device.makeHeap(descriptor: descriptor)
+        return device.makeHeap(descriptor: descriptor)
     }
 
-    /// GPU memory in use: what's allocated, less what's reserved and free.
+    /// GPU memory in use: what's allocated, less what's free in ``heap`` (other memory set aside
+    /// counts as in use).
     var allocatedSize: Int {
         device.currentAllocatedSize - (heap.map { $0.size - $0.usedSize } ?? 0)
     }
@@ -225,7 +223,7 @@ public final class GPU {
 /// gigabytes of intermediates. So once the commands encoded so far have allocated ``budget``,
 /// they are committed and waited for, and encoding continues in a new command buffer: the
 /// intermediates only that work used are freed, back to the reserved memory
-/// (``GPU/reserveMemory(width:height:)``) for the textures made after. (A heap with aliasing would
+/// (``GPU/heap``) for the textures made after. (A heap with aliasing would
 /// reuse memory within one command buffer, but needs every texture's last use marked by hand.)
 public final class Encoder {
     /// Allocation that triggers a new command buffer: under one 24 MP texture (384 MB), so dead

@@ -20,12 +20,9 @@ import Testing
 
 @Test func reservedMemoryIsKeptWhileItFits() throws {
     let gpu = try GPU()
-    gpu.reserveMemory(width: 600, height: 400)
-    let reserved = try #require(gpu.heap)
-    gpu.reserveMemory(width: 300, height: 200)
-    #expect(gpu.heap === reserved)
-    gpu.reserveMemory(width: 1200, height: 800)
-    #expect(gpu.heap !== reserved)
+    let reserved = try #require(gpu.reservedMemory(width: 600, height: 400))
+    #expect(gpu.reservedMemory(width: 300, height: 200, keeping: reserved) === reserved)
+    #expect(gpu.reservedMemory(width: 1200, height: 800, keeping: reserved) !== reserved)
 }
 
 @Test func deltaE2000MatchesColourScience() {

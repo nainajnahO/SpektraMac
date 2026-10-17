@@ -328,7 +328,7 @@ func reservedMemoryRendersMatchFresh(caseName: String) throws {
     }
     let fresh = try render(on: GPU())
     let gpu = try GPU()
-    gpu.reserveMemory(width: image.width, height: image.height)
+    gpu.heap = gpu.reservedMemory(width: image.width, height: image.height)
     _ = try render(on: gpu)
     #expect(try render(on: gpu) == fresh)
 }
