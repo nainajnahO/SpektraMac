@@ -23,7 +23,6 @@ struct ContentView: View {
                     .pickerStyle(.segmented)
                     .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
                 }
-                // Next to Print | Film.
                 ToolbarItemGroup {
                     Button("Open…", systemImage: "folder") { model.isImporting = true }
                     if model.canCancel {
@@ -35,7 +34,6 @@ struct ContentView: View {
                     Toggle("Adjust", systemImage: "slider.horizontal.3", isOn: $showsSettings)
                         .help("Show or hide the settings")
                 }
-                ToolbarSpacer(.flexible)
             }
             // No toolbar background, so the inspector's glass is even to the top: macOS draws one for
             // each column, over the inspector a dark fade behind the tabs. The zoomed photo shows
@@ -67,6 +65,12 @@ struct ContentView: View {
         .fileImporter(isPresented: $model.isImporting, allowedContentTypes: [.image]) { result in
             switch result {
             case .success(let url): model.open(url)
+            case .failure(let error): model.importFailed(error)
+            }
+        }
+        .fileImporter(isPresented: $model.isImportingPreset, allowedContentTypes: [.json]) { result in
+            switch result {
+            case .success(let url): model.openPreset(url)
             case .failure(let error): model.importFailed(error)
             }
         }
@@ -283,7 +287,7 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
                 Button("Reset \(title)", systemImage: "arrow.uturn.backward") { model.reset(adjustment) }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
-                    .font(.system(size: 12))
+                    .font(.callout)
                     .disabled(model.isAtDefaults(adjustment))
                     .help("Back to the film's defaults")
                 if let isOn {
@@ -313,7 +317,7 @@ private struct PhotosDisclosureStyle: DisclosureGroupStyle {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .bold))
                         .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
-                        .foregroundStyle(.primary.opacity(0.65))
+                        .foregroundStyle(.secondary)
                         .frame(width: 15, height: 22, alignment: .leading)
                         .contentShape(.rect)
                 }
@@ -616,7 +620,8 @@ private struct ValueSlider: View {
     }
 
     var body: some View {
-        // Sizes, and shades as the primary style's opacity, measured from Photos' (macOS 26) screenshots.
+        // Sizes and shades measured from Photos' (macOS 26) screenshots. Shades the system has are its
+        // own (the measured text is `.secondary` in dark mode); the rest as the primary style's opacity.
         HStack {
             Text(title)
             Spacer(minLength: 8)
@@ -624,14 +629,14 @@ private struct ValueSlider: View {
                 .monospacedDigit()
         }
         .font(.callout)
-        .foregroundStyle(.primary.opacity(0.65))
+        .foregroundStyle(.secondary)
         .padding(.horizontal, 8)
         .frame(height: 22)
         .background {
             let x = fraction(of: value) * width, origin = fraction(of: neutral ?? range.lowerBound) * width
             let isActive = isHovered || dragStart != nil
             ZStack(alignment: .leading) {
-                Rectangle().fill(.primary.opacity(0.065))
+                Rectangle().fill(.quinary)
                 Rectangle().fill(.primary.opacity(0.19))
                     .frame(width: abs(x - origin))
                     .offset(x: min(x, origin))
@@ -646,7 +651,7 @@ private struct ValueSlider: View {
                         for tick in -Int(origin / 6)...Int((size.width - origin) / 6) {
                             let tickX = ((origin + CGFloat(tick) * 6) * displayScale).rounded() / displayScale
                             context.fill(Path(CGRect(x: tickX, y: 0, width: hairline, height: tick % 5 == 0 ? 5 : 3)),
-                                         with: .style(.primary.opacity(tick % 10 == 0 ? 0.7 : 0.3)))
+                                         with: .style(tick % 10 == 0 ? AnyShapeStyle(.primary.opacity(0.7)) : AnyShapeStyle(.tertiary)))
                         }
                     }
                 }
@@ -822,10 +827,23 @@ private struct ImageCanvas: View {
                 offset = clamped(offset)
             }
             .overlay { canvas.ignoresSafeArea(.container, edges: [.top, .trailing]) }
+            // Over the canvas below the toolbar and beside the panel, so centred there.
+            .overlay {
+                if model.displayImage == nil {
+                    ContentUnavailableView {
+                        Label("No photo", systemImage: "photo")
+                    } description: {
+                        Text("Drop a photo here or open one to simulate it on film.")
+                    } actions: {
+                        Button("Open…") { model.isImporting = true }
+                    }
+                }
+            }
     }
 
     private var canvas: some View {
-        Group {
+        // A stack, not a group: without a photo, the canvas is still there to measure and to shade.
+        ZStack {
             if let image = model.displayImage {
                 // The reader takes the canvas's size and passes nothing back: a frame sized by the
                 // photo would make that the window's minimum.
@@ -880,17 +898,6 @@ private struct ImageCanvas: View {
                     }
                     scrollMonitor = nil
                 }
-            } else {
-                // Outside the GeometryReader so it fills the canvas and centres itself.
-                ContentUnavailableView {
-                    Label("No photo", systemImage: "photo")
-                } description: {
-                    Text("Drop a photo here or open one to simulate it on film.")
-                } actions: {
-                    Button("Open…") { model.isImporting = true }
-                }
-                .padding(.top, insets.top)
-                .padding(.trailing, insets.trailing)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

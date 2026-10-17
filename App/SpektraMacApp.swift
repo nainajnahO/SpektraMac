@@ -29,7 +29,7 @@ struct SpektraMacApp: App {
             }
             CommandMenu("Preset") {
                 Group {
-                    Button("Open Preset…") { model.openPreset() }
+                    Button("Open Preset…") { model.isImportingPreset = true }
                         .keyboardShortcut("o", modifiers: [.command, .shift])
                     Button("Save Preset…") { model.savePreset() }
                         .keyboardShortcut("s", modifiers: [.command, .shift])
