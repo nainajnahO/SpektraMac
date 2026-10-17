@@ -47,13 +47,11 @@ final class PhotoModel {
     /// directly instead of printing them, keeping the other controls.
     var film: String {
         get { controls.film }
-        set {
-            if let defaults = savedDefaults(for: newValue) {
-                controls = defaults
-            } else {
-                controls = factoryControls(for: newValue, from: controls)
-            }
-        }
+        set { controls = controls(choosing: newValue) }
+    }
+    /// What choosing `film` sets the controls to (``film``).
+    func controls(choosing film: String) -> Controls {
+        savedDefaults(for: film) ?? factoryControls(for: film, from: controls)
     }
     var filmName: String { films.first { $0.stock == controls.film }?.name ?? controls.film }
     /// A slide is viewed, never printed: every paper is negative-working, so a printed slide
@@ -140,7 +138,8 @@ final class PhotoModel {
     private var renderTask: Task<Void, Never>?
     /// Finished renders at the canvas's size for the open photo, by the controls they show: going
     /// back to controls shown before (hovering back to a stock, a slider back at a value) shows
-    /// them at once. Not full-resolution ones (96 MB at 24 MP). `NSCache` drops the oldest past
+    /// them at once, as do the stocks a menu renders ahead (``preload(_:)``). Not
+    /// full-resolution ones (96 MB at 24 MP). `NSCache` drops the oldest past
     /// 512 MB, and all of them when memory runs low.
     private let finishedRenders: NSCache<RenderKey, CGImage> = {
         let cache = NSCache<RenderKey, CGImage>()
@@ -177,6 +176,7 @@ final class PhotoModel {
                 renderTask?.cancel()
                 stripTask?.cancel()
                 stripTask = nil
+                stopPreloading()
                 isRendering = false
                 isRenderingFullResolution = false
                 awaitsFullResolution = false
@@ -436,6 +436,52 @@ final class PhotoModel {
             controls.printExposure = value
         }
         return controls
+    }
+
+    // MARK: Stocks rendered ahead
+
+    /// Renders what a stock menu offers, while it's open (``preload(_:)``).
+    @ObservationIgnored private var preloadTask: Task<Void, Never>?
+
+    /// Renders each of `choices` (what choosing each stock of a menu sets the controls to, in
+    /// order) with every effect at the canvas's size into the kept renders, so the menu shows a
+    /// stock finished the moment the pointer is on it (``showKept(_:photo:)``). One render at a
+    /// time, as the strips are made: a stock the pointer reaches before its turn waits on one
+    /// render at most. As many as fill half the kept renders' memory, so they can't push each
+    /// other out.
+    func preload(_ choices: [Controls]) {
+        stopPreloading()
+        guard let photo, let engine else { return }
+        let longSide = reducedLongSide(of: photo)
+        let scale = min(1, Double(longSide) / Double(max(photo.width, photo.height)))
+        let bytes = Int(Double(photo.width) * scale) * Int(Double(photo.height) * scale) * 4
+        let keys = choices.prefix(finishedRenders.totalCostLimit / 2 / bytes)
+            .map { RenderKey(controls: $0, longSide: longSide) }
+        preloadTask = Task {
+            let start = ContinuousClock.now
+            var count = 0
+            do {
+                for key in keys where finishedRenders.object(forKey: key) == nil {
+                    let display = try await engine.display(controls: key.controls, mode: .reduced(longSide: longSide))
+                    try Task.checkCancellation()
+                    finishedRenders.setObject(display, forKey: key, cost: display.bytesPerRow * display.height)
+                    count += 1
+                }
+                if count > 0 {
+                    let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
+                    note("Rendered \(count) stocks ahead in \(elapsed)")
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                fail("Could not render the stocks ahead", error)
+            }
+        }
+    }
+
+    /// Stops ``preload(_:)``; what it has rendered stays kept.
+    func stopPreloading() {
+        preloadTask?.cancel()
+        preloadTask = nil
     }
 
     // MARK: Saving and cancelling
