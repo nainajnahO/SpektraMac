@@ -49,3 +49,28 @@ kernel void encode_rgb(texture2d<float, access::read> input [[texture(0)]],
     output.write(float4(encode_channel(v.r, transfer, gamma), encode_channel(v.g, transfer, gamma),
                         encode_channel(v.b, transfer, gamma), 1.0f), gid);
 }
+
+// The encoded output as an image file stores it, three channels in rows without padding: clipped
+// to [0, 1] with NaN (outside the colour model) as 0, then × 65535 rounded to nearest even
+// (16 bits) or × 255 rounded half up (8 bits). Bit for bit what vImage's vImageConvert_FTo16U
+// and vImageConvert_PlanarFtoPlanar8 made of it when saving converted on the CPU (checked for
+// every float in [0, 1]).
+kernel void pack_rgb16(texture2d<float, access::read> input [[texture(0)]],
+                       device ushort *output [[buffer(0)]],
+                       uint2 gid [[thread_position_in_grid]]) {
+    float3 v = input.read(gid).rgb;
+    uint pixel = (gid.y * input.get_width() + gid.x) * 3;
+    for (uint c = 0; c < 3; c++) {
+        output[pixel + c] = isnan(v[c]) ? 0 : ushort(rint(clamp(v[c], 0.0f, 1.0f) * 65535.0f));
+    }
+}
+
+kernel void pack_rgb8(texture2d<float, access::read> input [[texture(0)]],
+                      device uchar *output [[buffer(0)]],
+                      uint2 gid [[thread_position_in_grid]]) {
+    float3 v = input.read(gid).rgb;
+    uint pixel = (gid.y * input.get_width() + gid.x) * 3;
+    for (uint c = 0; c < 3; c++) {
+        output[pixel + c] = isnan(v[c]) ? 0 : uchar(trunc(clamp(v[c], 0.0f, 1.0f) * 255.0f + 0.5f));
+    }
+}

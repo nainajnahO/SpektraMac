@@ -114,40 +114,29 @@ public struct RGBImage: Sendable {
         return filter.outputImage!.cropped(to: CGRect(origin: .zero, size: size))
     }
 
+    // Full-float working format: Core Image's default half floats would cost precision. On
+    // `commandQueue` (the engine's, so its work and the kernels' run in order), or on the system
+    // default Metal device, the one ``GPU`` renders on.
+    static func makeContext(commandQueue: (any MTLCommandQueue)? = nil) -> CIContext {
+        let options: [CIContextOption: Any] = [.workingFormat: CIFormat.RGBAf, .cacheIntermediates: false]
+        return commandQueue.map { CIContext(mtlCommandQueue: $0, options: options) } ?? CIContext(options: options)
+    }
+}
+
+extension CGImage {
     public struct EncodeError: Error, CustomStringConvertible {
         public let url: URL
         public var description: String { "Can't write \(url.lastPathComponent)" }
     }
 
-    /// Writes the pixels, already encoded in `colorSpace`, about as `save_image_oiio` does:
-    /// clipped to [0, 1] and rounded to integers (it truncates: at most a level apart), 16-bit
-    /// for TIFF and PNG, 8-bit for JPEG (quality 0.98, OpenImageIO's 98). TIFFs are uncompressed,
-    /// unlike its deflate, which took 2.7 s for 24 MP and saved 4 % on a render with grain. The
-    /// file embeds `colorSpace`'s ICC profile and `metadata`, marked upright since the pixels are.
-    public func write(to url: URL, as type: UTType, colorSpace: CGColorSpace, metadata: PhotoMetadata?) throws {
-        let bits = type.conforms(to: .jpeg) ? 8 : 16
-        // vImage converts planar data, so each row of interleaved RGB is width × 3 values. It
-        // writes NaN (outside the colour model) as black, as NumPy's cast gives.
-        var data = Data(count: pixels.count * bits / 8)
-        pixels.withUnsafeBytes { source in
-            data.withUnsafeMutableBytes { destination in
-                var source = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: source.baseAddress),
-                                           height: vImagePixelCount(height), width: vImagePixelCount(width * 3),
-                                           rowBytes: width * 12)
-                var destination = vImage_Buffer(data: destination.baseAddress, height: vImagePixelCount(height),
-                                                width: vImagePixelCount(width * 3), rowBytes: width * 3 * bits / 8)
-                let flags = vImage_Flags(kvImageNoFlags)
-                let error = bits == 16 ? vImageConvert_FTo16U(&source, &destination, 0, 1 / 65535, flags)
-                                       : vImageConvert_PlanarFtoPlanar8(&source, &destination, 1, 0, flags)
-                precondition(error == kvImageNoError)
-            }
-        }
-        guard let image = CGImage(width: width, height: height, bitsPerComponent: bits, bitsPerPixel: 3 * bits,
-                                  bytesPerRow: width * 3 * bits / 8, space: colorSpace,
-                                  bitmapInfo: bits == 16 ? .byteOrder16Little : [],
-                                  provider: CGDataProvider(data: data as CFData)!, decode: nil,
-                                  shouldInterpolate: false, intent: .defaultIntent),
-              let destination = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil)
+    /// Writes the image, as ``Engine/export(controls:as:)`` makes it, about as `save_image_oiio`
+    /// writes a render: its pixels are clipped and rounded already (it truncates: at most a level
+    /// apart), 16-bit for TIFF and PNG, 8-bit for JPEG at quality 0.98 (OpenImageIO's 98). TIFFs
+    /// are uncompressed, unlike its deflate, which took 2.7 s for 24 MP and saved 4 % on a render
+    /// with grain. The file embeds the image's colour space's ICC profile and `metadata`, marked
+    /// upright since the pixels are.
+    public func write(to url: URL, as type: UTType, metadata: PhotoMetadata?) throws {
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil)
         else { throw EncodeError(url: url) }
         var properties = metadata?.properties ?? [:]
         properties[kCGImagePropertyOrientation] = 1
@@ -159,16 +148,8 @@ public struct RGBImage: Sendable {
             tiff[kCGImagePropertyTIFFCompression] = 1  // none
             properties[kCGImagePropertyTIFFDictionary] = tiff
         }
-        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+        CGImageDestinationAddImage(destination, self, properties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw EncodeError(url: url) }
-    }
-
-    // Full-float working format: Core Image's default half floats would cost precision. On
-    // `commandQueue` (the engine's, so its work and the kernels' run in order), or on the system
-    // default Metal device, the one ``GPU`` renders on.
-    static func makeContext(commandQueue: (any MTLCommandQueue)? = nil) -> CIContext {
-        let options: [CIContextOption: Any] = [.workingFormat: CIFormat.RGBAf, .cacheIntermediates: false]
-        return commandQueue.map { CIContext(mtlCommandQueue: $0, options: options) } ?? CIContext(options: options)
     }
 }
 

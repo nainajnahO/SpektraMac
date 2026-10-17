@@ -1,4 +1,5 @@
 import Accelerate
+import CoreGraphics
 import Foundation
 import Metal
 
@@ -159,6 +160,29 @@ public final class GPU {
             texture.getBytes(&rgba, bytesPerRow: width * 16, from: region, mipmapLevel: 0)
         }
         return rgb(fromRGBA: rgba, width: width, height: height)
+    }
+
+    /// `texture`'s RGB, already encoded in `colorSpace`, as an image file stores it: `bits` (16
+    /// or 8) per channel, three channels, clipped to [0, 1], NaN as black and rounded as vImage
+    /// rounds (`pack_rgb16`, `pack_rgb8`). The GPU makes the integers in memory the image reads in
+    /// place, so no float copy of the photo comes back.
+    public func image(of texture: any MTLTexture, bits: Int, colorSpace: CGColorSpace) throws -> CGImage {
+        precondition(bits == 16 || bits == 8)
+        let bytesPerRow = texture.width * 3 * bits / 8
+        let buffer = device.makeBuffer(length: bytesPerRow * texture.height, options: .storageModeShared)!
+        try run { encoder in
+            encode(bits == 16 ? "pack_rgb16" : "pack_rgb8", on: encoder, textures: [texture], grid: texture.size) {
+                $0.setBuffer(buffer, offset: 0, index: 0)
+            }
+        }
+        // The image keeps the buffer until it's released.
+        let provider = CGDataProvider(dataInfo: Unmanaged.passRetained(buffer).toOpaque(), data: buffer.contents(),
+                                      size: buffer.length) { info, _, _ in
+            Unmanaged<AnyObject>.fromOpaque(info!).release()
+        }!
+        return CGImage(width: texture.width, height: texture.height, bitsPerComponent: bits, bitsPerPixel: 3 * bits,
+                       bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bits == 16 ? .byteOrder16Little : [],
+                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
     }
 
     /// Encodes one kernel over `grid` threads (usually a texture's ``MTLTexture/size``: one per

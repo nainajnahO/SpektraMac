@@ -528,11 +528,11 @@ final class PhotoModel {
             defer { savePhase = nil; saveTask = nil }
             let start = ContinuousClock.now
             do {
-                let output = try await engine.render(controls: controls, mode: .export)
+                let image = try await engine.export(controls: controls, as: type)
                 try Task.checkCancellation()
                 savePhase = "Writing \(url.lastPathComponent)…"
                 try await Task.detached(priority: .userInitiated) {
-                    try output.write(to: url, as: type, colorSpace: Engine.exportColorSpace, metadata: metadata)
+                    try image.write(to: url, as: type, metadata: metadata)
                 }.value
                 let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.seconds, .milliseconds]))
                 note("Saved \(url.lastPathComponent) in \(elapsed)")
