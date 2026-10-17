@@ -1,3 +1,4 @@
+import Accelerate
 import CoreGraphics
 import CoreImage
 import Foundation
@@ -412,8 +413,10 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     }
     pixels.replaceSubrange(0..<3, with: [.nan, .nan, .nan])
     let exported = directory.appending(component: "out").appendingPathExtension(for: type)
-    try RGBImage(width: width, height: height, pixels: pixels)
-        .write(to: exported, as: type, colorSpace: Engine.exportColorSpace, metadata: metadata)
+    let gpu = try GPU()
+    try gpu.image(of: gpu.upload(rgb: pixels, width: width, height: height), bits: type == .jpeg ? 8 : 16,
+                  colorSpace: Engine.exportColorSpace)
+        .write(to: exported, as: type, metadata: metadata)
 
     let source = try #require(CGImageSourceCreateWithURL(exported as CFURL, nil))
     let properties = try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
@@ -450,6 +453,46 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
         print("\(type.preferredFilenameExtension!) \(encoded): read \(read), error \(error)")
         // JPEG: lossy, and its chroma is subsampled.
         #expect(error < (type == .jpeg ? 0.02 : 2e-4))
+    }
+}
+
+/// Saved files store what they stored when saving converted the floats on the CPU, with vImage:
+/// the GPU's integers are vImage's conversions, 16- and 8-bit, on values either side of every
+/// rounding boundary, across [0, 1], and outside it (NaN, infinities, negatives, over 1).
+@Test func savedIntegersAreVImagesConversion() throws {
+    var values: [Float] = [.nan, -.nan, .infinity, -.infinity, -1, -0.0, 0, 1, 1.5, 1e30]
+    for (levels, maximum) in [(65536, Float(65535)), (256, 255)] {
+        for level in 0..<levels {
+            let boundary = (Float(level) + 0.5) / maximum
+            values += [boundary.nextDown.nextDown, boundary.nextDown, boundary, boundary.nextUp, boundary.nextUp.nextUp]
+        }
+    }
+    values += (0...100_000).map { Float($0) / 100_000 }
+    // A texture is at most 16384 wide: rows of 1024 pixels.
+    let width = 1024
+    let height = (values.count / 3 + width - 1) / width
+    values += [Float](repeating: 0, count: width * height * 3 - values.count)
+    let gpu = try GPU()
+    let texture = gpu.upload(rgb: values, width: width, height: height)
+    for bits in [16, 8] {
+        let image = try gpu.image(of: texture, bits: bits, colorSpace: Engine.exportColorSpace)
+        let stored = try #require(image.dataProvider?.data) as Data
+        // As saving converted them: planar, so a row of interleaved RGB is width × 3 values.
+        var converted = Data(count: values.count * bits / 8)
+        values.withUnsafeBytes { source in
+            converted.withUnsafeMutableBytes { destination in
+                var source = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: source.baseAddress),
+                                           height: vImagePixelCount(height), width: vImagePixelCount(width * 3),
+                                           rowBytes: width * 12)
+                var destination = vImage_Buffer(data: destination.baseAddress, height: vImagePixelCount(height),
+                                                width: vImagePixelCount(width * 3), rowBytes: width * 3 * bits / 8)
+                let flags = vImage_Flags(kvImageNoFlags)
+                let error = bits == 16 ? vImageConvert_FTo16U(&source, &destination, 0, 1 / 65535, flags)
+                                       : vImageConvert_PlanarFtoPlanar8(&source, &destination, 1, 0, flags)
+                #expect(error == kvImageNoError)
+            }
+        }
+        #expect(stored == converted, "\(bits)-bit")
     }
 }
 

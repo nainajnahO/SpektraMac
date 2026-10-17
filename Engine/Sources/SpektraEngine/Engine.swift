@@ -3,6 +3,7 @@ import CoreImage
 import Dispatch
 import Foundation
 import Metal
+import UniformTypeIdentifiers
 
 /// What the app's controls set (PLAN.md, Day 31). Everything else stays at Spektrafilm's defaults
 /// for the film and paper. A preset is these values as JSON.
@@ -302,6 +303,14 @@ public actor Engine {
     public func render(controls: Controls, mode: RenderMode) throws -> RGBImage {
         let output = try renderTexture(controls: controls, mode: mode)
         return RGBImage(width: output.width, height: output.height, pixels: gpu.download(output))
+    }
+
+    /// The photo rendered for a file of `type` (``RenderMode/export``) as the file stores it: 16
+    /// bits per channel for TIFF and PNG, 8 for JPEG, in ``exportColorSpace``
+    /// (``GPU/image(of:bits:colorSpace:)``). Throws `CancellationError` when the task is cancelled.
+    public func export(controls: Controls, as type: UTType) throws -> CGImage {
+        try gpu.image(of: renderTexture(controls: controls, mode: .export), bits: type.conforms(to: .jpeg) ? 8 : 16,
+                      colorSpace: Self.exportColorSpace)
     }
 
     /// ``render(controls:mode:)`` for the screen: 8-bit sRGB, no larger than `maxPixels` on its
