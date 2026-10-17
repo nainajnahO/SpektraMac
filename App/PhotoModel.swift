@@ -143,7 +143,10 @@ final class PhotoModel {
     /// Drives the Open Preset panel (`fileImporter`); its menu item sets it.
     var isImportingPreset = false
 
-    private let engine: Engine?
+    /// Made in the background as the app starts, so the window shows at once: about 0.1 s,
+    /// 0.5 s on the first launch after a build, as Metal compiles the shaders. The Film and Paper
+    /// menus fill, and photos open, once it's here.
+    private var engine: Engine?
     private let logger = Logger(subsystem: "nainajnahO.SpektraMac", category: "model")
     private var renderTask: Task<Void, Never>?
     /// Finished renders at the canvas's size for the open photo, by the controls they show: going
@@ -160,14 +163,15 @@ final class PhotoModel {
     private var saveTask: Task<Void, Never>?
 
     init() {
-        do {
-            engine = try Engine()
-        } catch {
-            engine = nil
-            errorMessage = "Metal is unavailable: \(error.localizedDescription)"
-        }
-        // On the engine's queue, so the first photo opened doesn't wait for it.
-        Task { [engine] in
+        let making = Task.detached(priority: .userInitiated) { try Engine() }
+        Task {
+            do {
+                engine = try await making.value
+            } catch {
+                errorMessage = "Metal is unavailable: \(error.localizedDescription)"
+                return
+            }
+            // On the engine's queue, so the first photo opened doesn't wait for it.
             do {
                 try await engine?.loadVision()
             } catch {
