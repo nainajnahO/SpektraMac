@@ -132,6 +132,8 @@ final class PhotoModel {
     private(set) var log: [LogEntry] = []
     /// Drives the Open panel (`fileImporter`); ⌘O and the toolbar set it.
     var isImporting = false
+    /// Drives the Open Preset panel (`fileImporter`); its menu item sets it.
+    var isImportingPreset = false
 
     private let engine: Engine?
     private let logger = Logger(subsystem: "nainajnahO.SpektraMac", category: "model")
@@ -538,10 +540,10 @@ final class PhotoModel {
         }
     }
 
-    func openPreset() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+    func openPreset(_ url: URL) {
+        // Files from the Open panel are security-scoped.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let preset = try Controls(preset: Data(contentsOf: url))
             guard films.contains(where: { $0.stock == preset.film }),
