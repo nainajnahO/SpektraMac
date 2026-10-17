@@ -125,7 +125,8 @@ private struct SettingsPanel: View {
                             .help("Raises the brightest highlights before they reach the film, rebuilding light the camera clipped, so bright lights glow more.")
                     }
                 case .film:
-                    StockRow(title: "Film", stocks: model.films, selection: $model.film, controls: $model.controls)
+                    StockRow(title: "Film", stocks: model.films, selection: $model.film, controls: $model.controls,
+                             choosing: model.controls(choosing:))
                     AdjustmentGroup("Halation", systemImage: "sun.haze", adjustment: .halation,
                                     isOn: $model.controls.halation) {
                         ValueSlider("Strength", value: $model.controls.halationAmount, in: 0...3, step: 0.05, neutral: 1,
@@ -177,7 +178,11 @@ private struct SettingsPanel: View {
                     }
                     Group {
                         StockRow(title: "Paper", stocks: model.papers, selection: $model.controls.paper,
-                                 controls: $model.controls)
+                                 controls: $model.controls) { paper in
+                            var controls = model.controls
+                            controls.paper = paper
+                            return controls
+                        }
                         AdjustmentGroup("Contrast", systemImage: "circle.lefthalf.filled", adjustment: .contrast) {
                             ThumbnailStrip("Contrast", value: $model.controls.printContrast,
                                            in: model.range(of: .printContrast), step: 0.05, frames: model.strips[.printContrast])
@@ -366,13 +371,15 @@ private struct StockRow: View {
     let stocks: [ProfileInfo]
     @Binding var selection: String
     @Binding var controls: Controls
+    /// What choosing a stock sets the controls to.
+    let choosing: (String) -> Controls
 
     var body: some View {
         HStack {
             Text(title)
                 .fixedSize()
             Spacer(minLength: 8)
-            StockMenu(stocks: stocks, selection: $selection, controls: $controls)
+            StockMenu(stocks: stocks, selection: $selection, controls: $controls, choosing: choosing)
                 .layoutPriority(1)
                 .accessibilityLabel(title)
         }
@@ -382,13 +389,17 @@ private struct StockRow: View {
 /// A pop-up menu of stocks under headings, from their profiles: slides, still negatives or
 /// papers, then cine stocks. While it's open, the photo shows the stock the pointer is on as
 /// choosing it would, and goes back to `controls` as they were if the menu closes without a
-/// choice. AppKit's pop-up button: SwiftUI's menus don't say which item is highlighted, and an
-/// `NSMenuDelegate` is told.
+/// choice. As it opens, the model renders each stock's finished look, nearest the current one
+/// first (``PhotoModel/preload(_:)``), so the pointer finds it ready. AppKit's pop-up button:
+/// SwiftUI's menus don't say which item is highlighted, and an `NSMenuDelegate` is told.
 private struct StockMenu: NSViewRepresentable {
+    @Environment(PhotoModel.self) private var model
     let stocks: [ProfileInfo]
     @Binding var selection: String
     /// What choosing a stock may change, as the menu found it.
     @Binding var controls: Controls
+    /// What choosing a stock sets the controls to.
+    let choosing: (String) -> Controls
 
     func makeNSView(context: Context) -> NSPopUpButton {
         let button = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -463,6 +474,11 @@ private struct StockMenu: NSViewRepresentable {
         func menuWillOpen(_ menu: NSMenu) {
             opened = parent.controls
             chosen = nil
+            // Outward from the current stock, as the pointer moves from it.
+            let order = menu.items.compactMap { $0.representedObject as? String }
+            let current = order.firstIndex(of: parent.selection) ?? 0
+            let nearestFirst = order.indices.sorted { (abs($0 - current), $0) < (abs($1 - current), $1) }
+            parent.model.preload(nearestFirst.map { parent.choosing(order[$0]) })
         }
 
         func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
@@ -475,6 +491,7 @@ private struct StockMenu: NSViewRepresentable {
         }
 
         func menuDidClose(_ menu: NSMenu) {
+            parent.model.stopPreloading()
             // The pop-up sends its action as the menu closes: settle once both have run.
             DispatchQueue.main.async { [self] in
                 guard let opened else { return }
