@@ -131,6 +131,17 @@ public actor Engine {
     private var simulation: Simulation?
     /// The photo renders work on (``open(_:)``).
     private var photo: Photo?
+    /// GPU memory set aside for renders' intermediates (``GPU/reservedMemory(width:height:keeping:)``),
+    /// which each render makes them from. For renders the size of the preview, the thumbnail or the
+    /// screen: kept for every photo, the largest so far (0.5 GB at 1600 px), as new memory for each
+    /// photo cost the first render after opening 150 ms more.
+    private var screenMemory: (any MTLHeap)?
+    /// For renders of the whole photo, where that's larger than its preview: set aside by the first
+    /// (its pages become resident as that starts: 2 GB at 12 MP) and kept for the next zoom or save,
+    /// until another photo opens or memory runs low (``releaseFullSizeMemory()``).
+    private var fullSizeMemory: (any MTLHeap)?
+    /// Says when memory runs low.
+    private let memoryPressure: any DispatchSourceMemoryPressure
     /// The live preview's long side. Larger than Spektrafilm's `preview_max_size` (640), which is
     /// soft on a Retina display: about 0.1 s per change on an M1 Pro, preview mode and display.
     private nonisolated let previewMaxSize = 1600
@@ -155,6 +166,23 @@ public actor Engine {
         let infos = profiles.map(\.info).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         films = infos.filter { $0.stage == .filming }
         papers = infos.filter { $0.stage == .printing }
+        let memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: queue)
+        self.memoryPressure = memoryPressure
+        memoryPressure.setEventHandler { [weak self] in
+            Task { await self?.releaseFullSizeMemory() }
+        }
+        memoryPressure.activate()
+    }
+
+    /// Lets the memory set aside for renders of the whole photo go, with the steps kept from the
+    /// last one, whose textures hold it. The next such render sets it aside again.
+    private func releaseFullSizeMemory() {
+        if gpu.heap === fullSizeMemory {
+            gpu.heap = nil
+        }
+        fullSizeMemory = nil
+        photo?.full.exposure = nil
+        photo?.full.film = nil
     }
 
     /// The open photo on the GPU, at full size, as its preview and as its thumbnail.
@@ -207,13 +235,13 @@ public actor Engine {
     /// Makes `image` (``RGBImage/decode(contentsOf:)``) the photo renders work on: Core Image
     /// renders it once into a texture, and its preview (at most ``previewMaxSize`` on the long side)
     /// from that on the GPU. Vision looks for the metering marks' regions in the preview, and each
-    /// image is metered once at every mark, in place. Sets aside the GPU memory renders of its size
-    /// need.
+    /// image is metered once at every mark, in place.
     public func open(_ image: CIImage) throws -> OpenedPhoto {
         let extent = image.extent.integral
         let (width, height) = (Int(extent.width), Int(extent.height))
-        photo = nil  // frees the previous photo before reserving memory for this one
-        gpu.reserveMemory(width: width, height: height)
+        // The previous photo goes, and the memory set aside for renders of all of it.
+        photo = nil
+        releaseFullSizeMemory()
         let full = gpu.makeReadableTexture(width: width, height: height)
         try render(image, from: extent, into: full)
         let preview = try scaled(full, toLongSide: previewMaxSize)
@@ -377,6 +405,20 @@ public actor Engine {
             }
         case .full, .export:
             image = \.full
+        }
+
+        // Intermediates from the memory set aside for renders of this size.
+        let source = photo![keyPath: image].texture
+        if image == \Photo.full && source !== photo!.preview.texture {
+            fullSizeMemory = gpu.reservedMemory(width: source.width, height: source.height, keeping: fullSizeMemory)
+            gpu.heap = fullSizeMemory
+        } else {
+            // A render's textures and room for the steps kept of the preview, the screen-size image
+            // and the thumbnail: with fewer, some of a slider step's textures are allocated fresh
+            // (30 ms a step instead of 24 at 12 MP with ten, 26 with 14).
+            screenMemory = gpu.reservedMemory(width: source.width, height: source.height,
+                                              textures: GPU.reservedTextures + 6, keeping: screenMemory)
+            gpu.heap = screenMemory
         }
 
         let exposureEV = photo![keyPath: image].metering.reading(resolving: controls.exposureMark).ev

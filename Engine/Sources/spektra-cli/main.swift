@@ -17,7 +17,7 @@ default:
 
 func benchmark(width: Int, height: Int) throws {
     let gpu = try GPU()
-    gpu.reserveMemory(width: width, height: height)  // as the app does for an open photo
+    gpu.heap = gpu.reservedMemory(width: width, height: height)  // as the app does for a full render
     let film = try Profile.load("kodak_portra_400")
     let paper = try Profile.load("kodak_portra_endura")
     var parameters = Parameters()
