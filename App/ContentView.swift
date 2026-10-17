@@ -15,13 +15,7 @@ struct ContentView: View {
             .navigationSubtitle(status)
             .toolbar {
                 ToolbarItemGroup(placement: .principal) {
-                    Picker("Show", selection: $model.controls.scanFilm) {
-                        Text("Print").tag(false)
-                            .selectionDisabled(model.isSlideFilm)
-                        Text("Film").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
+                    ShowPicker()
                 }
                 ToolbarItemGroup {
                     Button("Open…", systemImage: "folder") { model.isImporting = true }
@@ -92,6 +86,23 @@ struct ContentView: View {
         } else {
             return "Preview, \(photo.previewWidth.formatted()) × \(photo.previewHeight.formatted())"
         }
+    }
+}
+
+/// Print | Film, in a view of its own reading only what it shows (``PhotoModel/showsFilm``): the
+/// controls change at every step of a slider, and read here or in the window's body they laid out
+/// the toolbar again each time.
+private struct ShowPicker: View {
+    @Environment(PhotoModel.self) private var model
+
+    var body: some View {
+        Picker("Show", selection: Binding { model.showsFilm } set: { model.controls.scanFilm = $0 }) {
+            Text("Print").tag(false)
+                .selectionDisabled(model.isSlideFilm)
+            Text("Film").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
     }
 }
 
@@ -416,6 +427,7 @@ private struct StockMenu: NSViewRepresentable {
         coordinator.parent = self
         if coordinator.stocks != stocks.map(\.stock) {
             coordinator.stocks = stocks.map(\.stock)
+            coordinator.measured = nil
             button.menu = menu(delegate: coordinator)
         }
         // While the menu is open, its check mark stays on the stock it opened with.
@@ -425,12 +437,21 @@ private struct StockMenu: NSViewRepresentable {
         button.isEnabled = context.environment.isEnabled
     }
 
-    /// The selected stock's width, as SwiftUI's picker has, rather than the widest stock's.
+    /// The selected stock's width, as SwiftUI's picker has, rather than the widest stock's: the
+    /// pop-up button sizes itself (`intrinsicContentSize`, its cell's `cellSize`) only to its
+    /// widest item. Measured once per stock list and selected stock and kept: each step of a
+    /// slider lays out the panel again.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView button: NSPopUpButton, context: Context) -> CGSize? {
-        let widest = button.intrinsicContentSize
-        func width(_ title: String) -> CGFloat { (title as NSString).size(withAttributes: [.font: button.font!]).width }
-        let ideal = widest.width - (button.itemTitles.map(width).max() ?? 0) + width(button.titleOfSelectedItem ?? "")
-        return CGSize(width: min(ideal, proposal.width ?? ideal), height: widest.height)
+        let coordinator = context.coordinator
+        let selected = button.titleOfSelectedItem ?? ""
+        if coordinator.measured?.selected != selected {
+            let widest = button.intrinsicContentSize
+            func width(_ title: String) -> CGFloat { (title as NSString).size(withAttributes: [.font: button.font!]).width }
+            let ideal = widest.width - (button.itemTitles.map(width).max() ?? 0) + width(selected)
+            coordinator.measured = (selected, CGSize(width: ideal, height: widest.height))
+        }
+        let ideal = coordinator.measured!.size
+        return CGSize(width: min(ideal.width, proposal.width ?? ideal.width), height: ideal.height)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -462,6 +483,9 @@ private struct StockMenu: NSViewRepresentable {
         var parent: StockMenu
         /// The stocks the menu lists.
         var stocks: [String] = []
+        /// The button's size for the stock it shows (``sizeThatFits(_:nsView:context:)``), until
+        /// the menu lists other stocks.
+        var measured: (selected: String, size: CGSize)?
         /// The controls the menu opened with, while it's open.
         private var opened: Controls?
         private var chosen: String?
