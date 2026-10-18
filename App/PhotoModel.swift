@@ -116,8 +116,8 @@ final class PhotoModel {
     private var awaitsRelease = false
     /// Display-sized rendering of the last simulation.
     private(set) var displayImage: CGImage?
-    /// The Print tab's tone graph for the controls on screen, made with each preview.
-    private(set) var toneGraph: ToneGraph?
+    /// The Print tab's tone graph and the controls it was made for, with each preview.
+    private(set) var toneGraph: (graph: ToneGraph, controls: Controls)?
     /// The render `displayImage` comes from.
     private(set) var shownMode: RenderMode?
     /// The photo's long side fitted on the canvas, in screen pixels: what renders are reduced to
@@ -295,7 +295,7 @@ final class PhotoModel {
                         }
                         // With each preview, so the graph follows a slider or its own handles as
                         // they move.
-                        toneGraph = try await engine.toneGraph(controls: controls)
+                        toneGraph = (try await engine.toneGraph(controls: controls), controls)
                     } while controls != self.controls
                     isPreviewing = false
                     if isAdjusting && !isFinished {

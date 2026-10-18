@@ -925,8 +925,10 @@ private struct ThumbnailStrip: View {
 /// Exposure control's units (``ToneGraph``). The menu shows the neutral curve, or one colour's over
 /// the other two, which spread apart with the filter shifts. Dragging the middle point sideways
 /// sets the print exposure; the side points up or down, the shadow and highlight contrast; and
-/// the curve anywhere else, the contrast, about the middle point. The sliders under Options and in
-/// Enlarger stand in for it with VoiceOver and the keyboard.
+/// the curve anywhere else, the contrast, about the middle point. The curve follows the controls
+/// at once, as a slider's bar does: it's predicted from the last one the engine made
+/// (``ToneCurve/predicted(for:from:)``), which renders with the photo. The sliders under Options
+/// and in Enlarger stand in for it with VoiceOver and the keyboard.
 private struct ToneGraphView: View {
     @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
@@ -936,8 +938,10 @@ private struct ToneGraphView: View {
     @State private var drag: ToneDrag?
     @State private var hovered: ToneHandle?
 
-    /// The contrasts' range, their sliders' too.
-    static let contrastRange = 0.5...2.0
+    /// The contrasts' range, their sliders' too: the side points' whole way. By 3 they're at the
+    /// paper's black or white (past 4 the middle point drifts); below 0.1 they barely move closer
+    /// to its grey, which they can't pass (measured on Portra Endura, 2383 and Crystal Archive).
+    static let contrastRange = 0.1...3.0
     /// The tones the graph shows: the print is black or white past them.
     private static let tones: ClosedRange<Float> = -6...6
     /// How far the side points are from the middle one, in stops.
@@ -946,8 +950,8 @@ private struct ToneGraphView: View {
     private static let grabDistance: CGFloat = 10
 
     var body: some View {
-        if let graph = model.toneGraph {
-            chart(graph)
+        if let toneGraph = model.toneGraph {
+            chart(toneGraph.graph, rendered: toneGraph.controls)
                 .opacity(isEnabled ? 1 : 0.5)
                 .help("Drag the middle point sideways to set the print exposure, the side points up or down for the shadow and highlight contrast, or the curve elsewhere for the contrast.")
         } else {
@@ -956,10 +960,14 @@ private struct ToneGraphView: View {
         }
     }
 
-    private func chart(_ graph: ToneGraph) -> some View {
-        let shown = ToneCurve(graph, channel: channel)
+    /// `graph` as the controls on screen would make it, from the controls it was made for.
+    private func chart(_ graph: ToneGraph, rendered: Controls) -> some View {
+        let controls = model.controls
+        let shown = ToneCurve(graph, channel: channel).predicted(for: controls, from: rendered)
         // The other colours' curves under the one shown, faint.
-        let others = channel == .neutral ? [] : ToneChannel.colours.filter { $0 != channel }.map { ToneCurve(graph, channel: $0) }
+        let others = channel == .neutral ? [] : ToneChannel.colours.filter { $0 != channel }.map {
+            ToneCurve(graph, channel: $0).predicted(for: controls, from: rendered)
+        }
         let active = drag?.handle ?? hovered
         return Chart {
             ForEach(histogram(graph)) { bin in
@@ -1074,19 +1082,19 @@ private struct ToneGraphView: View {
         }
     }
 
-    /// What pressing at `point` (in the plot) grabs: a point of the curve under it, else the curve
-    /// there, unless that's by the middle point, which the contrast leaves where it is.
+    /// What pressing at `point` (in the plot) grabs on the curve shown: a point of it under the
+    /// pointer, else the curve there, unless that's by the middle point, which the contrast leaves
+    /// where it is.
     private func beginDrag(at point: CGPoint, proxy: ChartProxy) -> ToneDrag? {
-        guard isEnabled, let graph = model.toneGraph else { return nil }
-        let curve = ToneCurve(graph, channel: channel)
+        guard isEnabled, let toneGraph = model.toneGraph else { return nil }
+        let curve = ToneCurve(toneGraph.graph, channel: channel).predicted(for: model.controls, from: toneGraph.controls)
         let handles = curve.handles(sideDistance: Self.sideDistance)
         guard let middle = handles.first(where: { $0.id == .middle }) else { return nil }
         if let handle = handle(at: point, among: handles, proxy: proxy) {
-            return ToneDrag(handle: handle.id, curve: curve, controls: model.controls, tone: handle.tone, print: handle.print)
+            return ToneDrag(handle: handle.id, tone: handle.tone, print: handle.print)
         }
         guard let tone = proxy.value(atX: point.x, as: Float.self), abs(tone - middle.tone) > 0.5 else { return nil }
-        return ToneDrag(handle: nil, curve: curve, controls: model.controls, tone: tone,
-                        print: curve.value(of: curve.print, at: tone))
+        return ToneDrag(handle: nil, tone: tone, print: curve.value(of: curve.print, at: tone))
     }
 
     /// The point of the curve within ``grabDistance`` of `point` (in the plot), the nearest.
@@ -1101,34 +1109,35 @@ private struct ToneGraphView: View {
     }
 
     /// Sets the control `drag` moves for the pointer `sideways` and `up` from where it began, in
-    /// stops and brightness, from the curve as it began: so the grabbed point follows the pointer.
+    /// stops and brightness, so the grabbed point follows the pointer. From the engine's last curve
+    /// rather than the one shown: where the prediction is near, the next curve corrects it.
     private func move(_ drag: ToneDrag, sideways: Float, up: Float) {
-        let curve = drag.curve
+        guard let toneGraph = model.toneGraph else { return }
+        let (curve, rendered) = (ToneCurve(toneGraph.graph, channel: channel), toneGraph.controls)
         switch drag.handle {
         case .middle:
             // The middle point is where the paper's exposure is 0, and the print exposure adds its
             // log₁₀ to it: this puts 0 at the pointer's tone.
             let paper = curve.value(of: curve.paper, at: drag.tone + sideways)
-            set(\.printExposure, to: drag.controls.printExposure * pow(10, -Double(paper)), in: model.range(of: .printExposure))
+            set(\.printExposure, to: rendered.printExposure * pow(10, -Double(paper)), in: model.range(of: .printExposure))
         case .shadows:
-            scale(\.printShadowContrast, drag, up: up)
+            scale(\.printShadowContrast, of: curve, rendered: rendered, at: drag.tone, to: drag.print + up)
         case .highlights:
-            scale(\.printHighlightContrast, drag, up: up)
+            scale(\.printHighlightContrast, of: curve, rendered: rendered, at: drag.tone, to: drag.print + up)
         case nil:
-            scale(\.printContrast, drag, up: up)
+            scale(\.printContrast, of: curve, rendered: rendered, at: drag.tone, to: drag.print + up)
         }
     }
 
     /// The contrasts scale the paper's response about its exposure 0 (``ToneGraph/Point/paper``): a
-    /// factor f gives exposure E the response the curve had at f·E. So for the grabbed point's
-    /// brightness moved `up`, f is the paper's exposure where the curve as it began has that
-    /// brightness, over the point's own.
-    private func scale(_ contrast: WritableKeyPath<Controls, Double>, _ drag: ToneDrag, up: Float) {
-        let curve = drag.curve
-        let reached = curve.tone(where: curve.print, is: drag.print + up, near: drag.tone)
-        let factor = curve.value(of: curve.paper, at: reached) / curve.value(of: curve.paper, at: drag.tone)
+    /// factor f gives exposure E the response `curve` has at f·E. So for brightness `print` at
+    /// `tone`, f is the paper's exposure where `curve` has that brightness, over the one at `tone`.
+    private func scale(_ contrast: WritableKeyPath<Controls, Double>, of curve: ToneCurve, rendered: Controls,
+                       at tone: Float, to print: Float) {
+        let reached = curve.tone(where: curve.print, is: print, near: tone)
+        let factor = curve.value(of: curve.paper, at: reached) / curve.value(of: curve.paper, at: tone)
         guard factor.isFinite else { return }
-        set(contrast, to: drag.controls[keyPath: contrast] * Double(max(factor, 0)), in: Self.contrastRange)
+        set(contrast, to: rendered[keyPath: contrast] * Double(max(factor, 0)), in: Self.contrastRange)
     }
 
     /// Sets `control` to `value` in hundredths, as its slider shows it, within `range`.
@@ -1180,12 +1189,9 @@ private struct HistogramBin: Identifiable {
     let height: Float
 }
 
-/// A drag on the tone graph: the point it grabbed (none for the curve) where it was, and the curve
-/// and controls as it began.
+/// A drag on the tone graph: the point it grabbed (none for the curve), where it was.
 private struct ToneDrag {
     let handle: ToneHandle?
-    let curve: ToneCurve
-    let controls: Controls
     let tone: Float
     let print: Float
 }
@@ -1211,6 +1217,10 @@ private struct ToneCurve: Identifiable {
     let print: [Float]
     var id: ToneChannel { channel }
 
+    init(channel: ToneChannel, tones: [Float], paper: [Float], print: [Float]) {
+        (self.channel, self.tones, self.paper, self.print) = (channel, tones, paper, print)
+    }
+
     init(_ graph: ToneGraph, channel: ToneChannel) {
         self.channel = channel
         if let index = channel.index {
@@ -1223,6 +1233,26 @@ private struct ToneCurve: Identifiable {
             paper = graph.curve.map { $0.paper.sum() / 3 }
             print = graph.curve.map { ($0.print * SIMD3(0.2126, 0.7152, 0.0722)).sum() }
         }
+    }
+
+    /// The curve `controls` would make, from this one made with `rendered`: the print exposure
+    /// adds its log₁₀ to the paper's exposure, and the contrasts scale that about 0 (Contrast all
+    /// of it, Shadow contrast above 0, Highlight contrast below), the print's brightness for each
+    /// paper exposure staying this curve's. Exact for the print exposure (but for preflash) and
+    /// Contrast; near for the other two, as their sub-layers aren't all of the paper's response.
+    /// The other controls change nothing here: the engine's next curve shows them.
+    func predicted(for controls: Controls, from rendered: Controls) -> ToneCurve {
+        let shift = Float(log10(controls.printExposure / rendered.printExposure))
+        let contrast = Float(controls.printContrast / rendered.printContrast)
+        let shadows = contrast * Float(controls.printShadowContrast / rendered.printShadowContrast)
+        let highlights = contrast * Float(controls.printHighlightContrast / rendered.printHighlightContrast)
+        guard shift.isFinite, shift != 0 || shadows != 1 || highlights != 1 else { return self }
+        let shifted = paper.map { $0 + shift }
+        let scaled = shifted.map { $0 > 0 ? $0 * shadows : $0 * highlights }
+        let brightness = scaled.indices.map { index in
+            value(of: print, at: tone(where: paper, is: scaled[index], near: tones[index]))
+        }
+        return ToneCurve(channel: channel, tones: tones, paper: shifted, print: brightness)
     }
 
     /// The points within `range`, and the nearest past each end, so the line reaches them.
