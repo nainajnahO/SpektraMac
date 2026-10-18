@@ -175,10 +175,10 @@ min window size, GPU readback to `CGImage` for the canvas.
 ≈ 35 sessions ≈ 7 weeks of weekday sessions; overruns get split into new issues, not squeezed.
 
 ### After v1 (backlog, ~1 day each)
-Other output gamut modes (oklch, aces_rgc, oklrab, jzazbz) · camera/enlarger diffusion filters
-(FFT) · full FILM/PRINT/ADVANCED controls (halation, couplers, grain, chemistry, glare, preflash,
-channel swap) · mallett2019 upsampling · LUT export for LightCraft (with a working exposure setting) ·
-preview crop/upscale · display transform · upstream-sync routine for new Spektrafilm versions.
+Other output gamut modes (oklch, aces_rgc, oklrab, jzazbz) · full FILM/PRINT/ADVANCED controls
+(halation, couplers, grain, chemistry, glare, preflash, channel swap) · mallett2019 upsampling · LUT
+export for LightCraft (with a working exposure setting) · preview crop/upscale · display transform ·
+upstream-sync routine for new Spektrafilm versions.
 
 ## Daily session routine
 1. `gh issue list --milestone <current phase>` → take the lowest open issue; branch off `main`.

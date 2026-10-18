@@ -32,6 +32,30 @@ public struct Parameters: Codable, Sendable, Equatable {
         /// Band-pass filter edges (amplitude, wavelength nm, width nm); amplitude 0 is off.
         public var filterUv = [0.0, 410, 8]
         public var filterIr = [0.0, 675, 15]
+        public var diffusionFilter = DiffusionFilter()
+    }
+
+    /// Spektrafilm's `DiffusionFilterParams`: a diffusion filter on the lens (Pro-Mist and the
+    /// like), which spreads part of the light into a glow around bright areas
+    /// (``GPU/encodeDiffusionFilter(on:input:filter:pixelSizeUm:)``). Its per-group fine-tuning
+    /// (`core_intensity` … `bloom_size`) is not ported (1, no change, by default).
+    public struct DiffusionFilter: Codable, Sendable, Equatable {
+        public var active = false
+        public var filterFamily = Family.blackProMist
+        /// Commercial filter stops: 1/8, 1/4, 1/2, 1, 2, interpolated between.
+        public var strength = 0.5
+        /// Multiplier on the glow's widths.
+        public var spatialScale = 1.0
+        /// Added to the family's halo warmth: above 0 the halo's outer rim is warmer and its inner
+        /// part cooler, below 0 the reverse.
+        public var haloWarmth = 0.0
+
+        public enum Family: String, Codable, Sendable, CaseIterable {
+            case glimmerglass
+            case blackProMist = "black_pro_mist"
+            case proMist = "pro_mist"
+            case cinebloom
+        }
     }
 
     public struct IO: Codable, Sendable, Equatable {
@@ -106,7 +130,9 @@ extension Parameters {
         filmRender.grain.active = false
         printRender.glare.active = false
         camera.lensBlurUm = 0
+        camera.diffusionFilter.active = false
         enlarger.lensBlur = 0
+        enlarger.diffusionFilter.active = false
         scanner.lensBlur = 0
         scanner.unsharpMask = [0, 0]
     }
@@ -155,6 +181,7 @@ extension Parameters {
         public var mFilterNeutral = 65.0
         public var cFilterNeutral = 0.0
         public var lensBlur = 0.0
+        public var diffusionFilter = DiffusionFilter()
         public var preflashExposure = 0.0
         public var preflashYFilterShift = 0.0
         public var preflashMFilterShift = 0.0

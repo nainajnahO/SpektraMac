@@ -135,9 +135,12 @@ private struct SettingsPanel: View {
                                     format: .number.precision(.fractionLength(1)), unit: "EV")
                             .help("Raises the brightest highlights before they reach the film, rebuilding light the camera clipped, so bright lights glow more.")
                     }
+                    DiffusionGroup(adjustment: .cameraDiffusion, isOn: \.cameraDiffusion, family: \.cameraDiffusionFilter,
+                                   strength: \.cameraDiffusionStrength, size: \.cameraDiffusionSize,
+                                   warmth: \.cameraDiffusionWarmth)
                 case .film:
-                    StockRow(title: "Film", stocks: model.films, selection: $model.film, controls: $model.controls,
-                             choosing: model.controls(choosing:))
+                    ChoiceRow(title: "Film", sections: stockSections(model.films), selection: $model.film,
+                              controls: $model.controls, choosing: model.controls(choosing:))
                     AdjustmentGroup("Halation", systemImage: "sun.haze", adjustment: .halation,
                                     isOn: $model.controls.halation) {
                         ValueSlider("Strength", value: $model.controls.halationAmount, in: 0...3, step: 0.05, neutral: 1,
@@ -188,8 +191,8 @@ private struct SettingsPanel: View {
                             .foregroundStyle(.secondary)
                     }
                     Group {
-                        StockRow(title: "Paper", stocks: model.papers, selection: $model.controls.paper,
-                                 controls: $model.controls) { paper in
+                        ChoiceRow(title: "Paper", sections: stockSections(model.papers), selection: $model.controls.paper,
+                                  controls: $model.controls) { paper in
                             var controls = model.controls
                             controls.paper = paper
                             return controls
@@ -225,6 +228,9 @@ private struct SettingsPanel: View {
                                         format: .number.precision(.fractionLength(3)))
                                 .help("A flash of plain light on the paper before the print, so light tones such as a bright sky gain some tone. It darkens the whole print: lower the print exposure to bring the mid-tones back.")
                         }
+                        DiffusionGroup(adjustment: .enlargerDiffusion, isOn: \.enlargerDiffusion,
+                                       family: \.enlargerDiffusionFilter, strength: \.enlargerDiffusionStrength,
+                                       size: \.enlargerDiffusionSize, warmth: \.enlargerDiffusionWarmth)
                         AdjustmentGroup("Glare", systemImage: "sun.max", adjustment: .glare, isOn: $model.controls.glare) {
                             ValueSlider("Amount", value: $model.controls.glareAmount, in: 0...1, step: 0.01,
                                         format: .number.precision(.fractionLength(2)), unit: "%")
@@ -271,8 +277,9 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
         self.isOn = isOn
         self.main = main()
         self.options = options()
-        _isExpanded = SceneStorage(wrappedValue: true, "adjustment.\(title)")
-        _showsOptions = SceneStorage(wrappedValue: false, "adjustment.\(title).options")
+        // By adjustment, not title: the camera's and the enlarger's diffusion share theirs.
+        _isExpanded = SceneStorage(wrappedValue: true, "adjustment.\(adjustment)")
+        _showsOptions = SceneStorage(wrappedValue: false, "adjustment.\(adjustment).options")
     }
 
     var body: some View {
@@ -375,42 +382,60 @@ private struct CircleToggleStyle: ToggleStyle {
     }
 }
 
-/// The Film or Paper row: its stocks in a pop-up menu (``StockMenu``). A row of its own, as
-/// `LabeledContent` gives its content at most about half the row, cutting short names.
-private struct StockRow: View {
+/// The Film or Paper row, or a diffusion filter's: its choices in a pop-up menu (``ChoiceMenu``).
+/// A row of its own, as `LabeledContent` gives its content at most about half the row, cutting
+/// short names.
+private struct ChoiceRow<Value: Hashable>: View {
     let title: String
-    let stocks: [ProfileInfo]
-    @Binding var selection: String
+    let sections: [ChoiceMenu<Value>.Section]
+    @Binding var selection: Value
     @Binding var controls: Controls
-    /// What choosing a stock sets the controls to.
-    let choosing: (String) -> Controls
+    /// What choosing a value sets the controls to.
+    let choosing: (Value) -> Controls
 
     var body: some View {
         HStack {
             Text(title)
                 .fixedSize()
             Spacer(minLength: 8)
-            StockMenu(stocks: stocks, selection: $selection, controls: $controls, choosing: choosing)
+            ChoiceMenu(sections: sections, selection: $selection, controls: $controls, choosing: choosing)
                 .layoutPriority(1)
                 .accessibilityLabel(title)
         }
     }
 }
 
-/// A pop-up menu of stocks under headings, from their profiles: slides, still negatives or
-/// papers, then cine stocks. While it's open, the photo shows the stock the pointer is on as
-/// choosing it would, and goes back to `controls` as they were if the menu closes without a
-/// choice. As it opens, the model renders each stock's finished look, nearest the current one
-/// first (``PhotoModel/preload(_:)``), so the pointer finds it ready. AppKit's pop-up button:
-/// SwiftUI's menus don't say which item is highlighted, and an `NSMenuDelegate` is told.
-private struct StockMenu: NSViewRepresentable {
+/// Stocks under headings, from their profiles: slides, still negatives or papers, then cine stocks.
+private func stockSections(_ stocks: [ProfileInfo]) -> [ChoiceMenu<String>.Section] {
+    let groups = Dictionary(grouping: stocks) { stock -> String in
+        if stock.type == .positive { return "Slide" }
+        if stock.use == .cine { return "Cine" }
+        return stock.stage == .filming ? "Negative" : "Still"
+    }
+    return ["Slide", "Negative", "Still", "Cine"].compactMap { heading in
+        groups[heading].map { ChoiceMenu.Section(heading: heading, choices: $0.map { ($0.name, $0.stock) }) }
+    }
+}
+
+/// A pop-up menu of choices, under headings where they have them. While it's open, the photo
+/// shows the choice the pointer is on as choosing it would, and goes back to `controls` as they
+/// were if the menu closes without a choice. As it opens, the model renders each choice's finished
+/// look, nearest the current one first (``PhotoModel/preload(_:)``), so the pointer finds it ready.
+/// AppKit's pop-up button: SwiftUI's menus don't say which item is highlighted, and an
+/// `NSMenuDelegate` is told.
+private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
+    struct Section {
+        let heading: String?
+        let choices: [(name: String, value: Value)]
+    }
+
     @Environment(PhotoModel.self) private var model
-    let stocks: [ProfileInfo]
-    @Binding var selection: String
-    /// What choosing a stock may change, as the menu found it.
+    let sections: [Section]
+    @Binding var selection: Value
+    /// What choosing a value may change, as the menu found it.
     @Binding var controls: Controls
-    /// What choosing a stock sets the controls to.
-    let choosing: (String) -> Controls
+    /// What choosing a value sets the controls to.
+    let choosing: (Value) -> Controls
 
     func makeNSView(context: Context) -> NSPopUpButton {
         let button = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -425,22 +450,23 @@ private struct StockMenu: NSViewRepresentable {
     func updateNSView(_ button: NSPopUpButton, context: Context) {
         let coordinator = context.coordinator
         coordinator.parent = self
-        if coordinator.stocks != stocks.map(\.stock) {
-            coordinator.stocks = stocks.map(\.stock)
+        let values = sections.flatMap { $0.choices.map(\.value) }
+        if coordinator.values != values {
+            coordinator.values = values
             coordinator.measured = nil
             button.menu = menu(delegate: coordinator)
         }
-        // While the menu is open, its check mark stays on the stock it opened with.
+        // While the menu is open, its check mark stays on the choice it opened with.
         if !coordinator.isOpen {
-            button.select(button.itemArray.first { $0.representedObject as? String == selection })
+            button.select(button.itemArray.first { $0.representedObject as? Value == selection })
         }
         button.isEnabled = context.environment.isEnabled
     }
 
-    /// The selected stock's width, as SwiftUI's picker has, rather than the widest stock's: the
+    /// The selected choice's width, as SwiftUI's picker has, rather than the widest choice's: the
     /// pop-up button sizes itself (`intrinsicContentSize`, its cell's `cellSize`) only to its
-    /// widest item. Measured once per stock list and selected stock and kept: each step of a
-    /// slider lays out the panel again.
+    /// widest item. Measured once per list of choices and selected choice and kept: each step of
+    /// a slider lays out the panel again.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView button: NSPopUpButton, context: Context) -> CGSize? {
         let coordinator = context.coordinator
         let selected = button.titleOfSelectedItem ?? ""
@@ -457,22 +483,18 @@ private struct StockMenu: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
     private func menu(delegate: Coordinator) -> NSMenu {
-        let groups = Dictionary(grouping: stocks) { stock -> String in
-            if stock.type == .positive { return "Slide" }
-            if stock.use == .cine { return "Cine" }
-            return stock.stage == .filming ? "Negative" : "Still"
-        }
         let menu = NSMenu()
         menu.delegate = delegate
-        for heading in ["Slide", "Negative", "Still", "Cine"] {
-            guard let group = groups[heading] else { continue }
+        for section in sections {
             if !menu.items.isEmpty {
                 menu.addItem(.separator())
             }
-            menu.addItem(.sectionHeader(title: heading))
-            for stock in group {
-                let item = NSMenuItem(title: stock.name, action: nil, keyEquivalent: "")
-                item.representedObject = stock.stock
+            if let heading = section.heading {
+                menu.addItem(.sectionHeader(title: heading))
+            }
+            for choice in section.choices {
+                let item = NSMenuItem(title: choice.name, action: nil, keyEquivalent: "")
+                item.representedObject = choice.value
                 menu.addItem(item)
             }
         }
@@ -480,26 +502,26 @@ private struct StockMenu: NSViewRepresentable {
     }
 
     final class Coordinator: NSObject, NSMenuDelegate {
-        var parent: StockMenu
-        /// The stocks the menu lists.
-        var stocks: [String] = []
-        /// The button's size for the stock it shows (``sizeThatFits(_:nsView:context:)``), until
-        /// the menu lists other stocks.
+        var parent: ChoiceMenu
+        /// The values the menu lists.
+        var values: [Value] = []
+        /// The button's size for the choice it shows (``sizeThatFits(_:nsView:context:)``), until
+        /// the menu lists other choices.
         var measured: (selected: String, size: CGSize)?
         /// The controls the menu opened with, while it's open.
         private var opened: Controls?
-        private var chosen: String?
+        private var chosen: Value?
         var isOpen: Bool { opened != nil }
 
-        init(parent: StockMenu) {
+        init(parent: ChoiceMenu) {
             self.parent = parent
         }
 
         func menuWillOpen(_ menu: NSMenu) {
             opened = parent.controls
             chosen = nil
-            // Outward from the current stock, as the pointer moves from it.
-            let order = menu.items.compactMap { $0.representedObject as? String }
+            // Outward from the current choice, as the pointer moves from it.
+            let order = menu.items.compactMap { $0.representedObject as? Value }
             let current = order.firstIndex(of: parent.selection) ?? 0
             let nearestFirst = order.indices.sorted { (abs($0 - current), $0) < (abs($1 - current), $1) }
             parent.model.preload(nearestFirst.map { parent.choosing(order[$0]) })
@@ -507,11 +529,11 @@ private struct StockMenu: NSViewRepresentable {
 
         func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
             guard let opened else { return }
-            show(item?.representedObject as? String, from: opened)
+            show(item?.representedObject as? Value, from: opened)
         }
 
         @objc func choose(_ button: NSPopUpButton) {
-            chosen = button.selectedItem?.representedObject as? String
+            chosen = button.selectedItem?.representedObject as? Value
         }
 
         func menuDidClose(_ menu: NSMenu) {
@@ -524,11 +546,11 @@ private struct StockMenu: NSViewRepresentable {
             }
         }
 
-        /// The controls the menu opened with, `stock` chosen from them unless it's theirs.
-        private func show(_ stock: String?, from opened: Controls) {
+        /// The controls the menu opened with, `value` chosen from them unless it's theirs.
+        private func show(_ value: Value?, from opened: Controls) {
             parent.controls = opened
-            if let stock, stock != parent.selection {
-                parent.selection = stock
+            if let value, value != parent.selection {
+                parent.selection = value
             }
         }
     }
@@ -624,6 +646,55 @@ private extension MeteringMark {
         case .objects: "meters what stands out in the frame"
         case .people: "meters the people in the frame, so a bright sky or background can't darken them"
         case .faces: "meters the faces in the frame"
+        }
+    }
+}
+
+/// A diffusion filter on the camera's lens or the enlarger's: the filter and its strength, with its
+/// glow's size and warmth under Options, each the controls at its key path.
+private struct DiffusionGroup: View {
+    @Environment(PhotoModel.self) private var model
+    let adjustment: PhotoModel.Adjustment
+    let isOn: WritableKeyPath<Controls, Bool>
+    let family: WritableKeyPath<Controls, Parameters.DiffusionFilter.Family>
+    let strength: WritableKeyPath<Controls, Double>
+    let size: WritableKeyPath<Controls, Double>
+    let warmth: WritableKeyPath<Controls, Double>
+
+    var body: some View {
+        @Bindable var model = model
+        let controls = $model.controls
+        AdjustmentGroup("Diffusion", systemImage: "camera.filters", adjustment: adjustment,
+                        isOn: controls[dynamicMember: isOn]) {
+            ChoiceRow(title: "Filter",
+                      sections: [.init(heading: nil, choices: Parameters.DiffusionFilter.Family.allCases.map { ($0.name, $0) })],
+                      selection: controls[dynamicMember: family], controls: controls) { choice in
+                var choosing = model.controls
+                choosing[keyPath: family] = choice
+                return choosing
+            }
+            .help("Glimmerglass keeps detail and glows faintly; Black Pro-Mist gives a tight, punchy halo; Pro-Mist a broader pastel haze; CineBloom a wide glow that lifts the whole frame.")
+            ValueSlider("Strength", value: controls[dynamicMember: strength], in: 0.125...2, step: 0.125,
+                        format: .number.precision(.fractionLength(0...3)))
+                .help("The filter's grade, as filters are sold: 1/8, 1/4, 1/2, 1 and 2. Stronger spreads more of the light into the glow.")
+        } options: {
+            ValueSlider("Size", value: controls[dynamicMember: size], in: 0...3, step: 0.05, neutral: 1,
+                        format: .number.precision(.fractionLength(2)))
+                .help("How far the glow reaches, over the filter's own.")
+            ValueSlider("Warmth", value: controls[dynamicMember: warmth], in: -1.5...1.5, step: 0.05, neutral: 0,
+                        format: .number.precision(.fractionLength(2)).sign(strategy: .always(includingZero: false)))
+                .help("Warmer light at the glow's outer rim and cooler at its centre, over the filter's own; below 0, the reverse.")
+        }
+    }
+}
+
+private extension Parameters.DiffusionFilter.Family {
+    var name: String {
+        switch self {
+        case .glimmerglass: "Glimmerglass"
+        case .blackProMist: "Black Pro-Mist"
+        case .proMist: "Pro-Mist"
+        case .cinebloom: "CineBloom"
         }
     }
 }

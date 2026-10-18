@@ -234,12 +234,11 @@ public struct Simulation {
     }
 
     /// `rgb_pre → log_e_film` (FilmingStage.expose): the film's raw exposure through the
-    /// hanatos2025 tc LUT, × 2^exposure compensation, highlight boost, lens blur, scatter and
-    /// halation, as log10.
+    /// hanatos2025 tc LUT, × 2^exposure compensation, highlight boost, the camera's diffusion
+    /// filter, lens blur, scatter and halation, as log10.
     ///
-    /// Not ported: the camera diffusion filter (off by default, backlog). The scanner's
-    /// black/white correction factor is 1 unless those corrections are on (not ported yet; off by
-    /// default).
+    /// The scanner's black/white correction factor is 1 unless those corrections are on (not
+    /// ported yet; off by default).
     public func encodeExpose(_ rgb: any MTLTexture, on encoder: Encoder) -> any MTLTexture {
         // `light` holds the current result; each step that can works on it in place.
         var light = intermediate(width: rgb.width, height: rgb.height)
@@ -259,6 +258,8 @@ public struct Simulation {
             light = gpu.encodeBoostHighlights(on: encoder, input: light, boostEv: halation.boostEv,
                                               boostRange: halation.boostRange, protectEv: halation.protectEv)
         }
+        light = gpu.encodeDiffusionFilter(on: encoder, input: light, filter: parameters.camera.diffusionFilter,
+                                          pixelSizeUm: pixelSizeUm)
         if parameters.camera.lensBlurUm > 0 {
             gpu.encodeGaussianBlur(on: encoder, input: light, output: light,
                                    sigma: SIMD3(repeating: parameters.camera.lensBlurUm / pixelSizeUm))
@@ -431,22 +432,29 @@ extension Simulation {
     /// `cmy_film → log_e_print` (PrintingStage.expose): the enlarger light through the negative's
     /// dye densities and base, integrated against the paper's spectral sensitivity over 81 bands,
     /// normalised so a mid-grey negative gives the paper a unit exposure, plus preflash, × print
-    /// exposure, as log10.
+    /// exposure, through the enlarger's diffusion filter, as log10.
     ///
-    /// Not ported: the enlarger diffusion filter (off by default, backlog) and the scanner's
-    /// black/white correction (factor 1 unless on; off by default).
+    /// Not ported: the scanner's black/white correction (factor 1 unless on; off by default).
     public func encodePrintExpose(_ cmy: any MTLTexture, on encoder: Encoder) -> any MTLTexture {
         let output = gpu.makeTexture(width: cmy.width, height: cmy.height)
+        let filter = parameters.enlarger.diffusionFilter
         var bandCount = UInt32(printFilmBands.count)
         var factors = SIMD2<Float>(Float(printExposureFactor), Float(parameters.enlarger.printExposure))
         var preflash = SIMD3<Float>(preflashRaw)
+        // The filter spreads the exposure itself, so the kernel leaves the log to after it.
+        var linear = UInt32(filter.active ? 1 : 0)
         gpu.encode("print_exposure", on: encoder, textures: [cmy, output], grid: output.size) {
             $0.setBytes(printFilmBands, length: printFilmBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 0)
             $0.setBytes(printPaperBands, length: printPaperBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 1)
             $0.setBytes(&bandCount, length: 4, index: 2)
             $0.setBytes(&factors, length: MemoryLayout<SIMD2<Float>>.size, index: 3)
             $0.setBytes(&preflash, length: MemoryLayout<SIMD3<Float>>.size, index: 4)
+            $0.setBytes(&linear, length: 4, index: 5)
         }
+        guard filter.active else { return output }
+        gpu.encodeLogExposure(on: encoder, input: gpu.encodeDiffusionFilter(on: encoder, input: output, filter: filter,
+                                                                            pixelSizeUm: pixelSizeUm(of: cmy)),
+                              output: output)
         return output
     }
 }

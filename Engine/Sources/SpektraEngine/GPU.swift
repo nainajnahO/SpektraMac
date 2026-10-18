@@ -2,6 +2,7 @@ import Accelerate
 import CoreGraphics
 import Foundation
 import Metal
+import MetalPerformanceShaders
 
 /// The Metal device, queue and compiled kernels every stage runs on.
 ///
@@ -16,6 +17,9 @@ public final class GPU {
     /// Where intermediates are made while it has room: memory set aside for renders of their size
     /// (``reservedMemory(width:height:keeping:)``). Without it, each is allocated fresh.
     public var heap: (any MTLHeap)?
+    /// The diffusion filter's convolutions (``encodeDiffusionFilter(on:input:filter:pixelSizeUm:)``),
+    /// one per FFT size, the most recently used last (``fftConvolution(width:height:)``).
+    var fftConvolutions: [(size: SIMD2<Int>, convolution: FFTConvolution)] = []
 
     public enum SetupError: Error {
         case noDevice
@@ -233,6 +237,9 @@ public final class Encoder {
 
     private let gpu: GPU
     private var commandBuffer: any MTLCommandBuffer
+    /// Command buffers Metal Performance Shaders committed, continuing in a new one: their errors
+    /// are checked as the current one completes.
+    private var committedByShaders: [any MTLCommandBuffer] = []
     /// The current command buffer's encoder, for kernels encoded outside ``GPU``.
     public private(set) var compute: any MTLComputeCommandEncoder
     private var allocatedAtStart: Int
@@ -262,12 +269,19 @@ public final class Encoder {
         allocatedAtStart = gpu.allocatedSize
     }
 
-    /// Encodes work that needs the command buffer itself (Metal Performance Shaders) between kernels.
-    func encodeCommands(_ body: (any MTLCommandBuffer) -> Void) {
+    /// Encodes Metal Performance Shaders work between kernels, MPSGraph's too. MPSGraph may commit
+    /// the command buffer and continue in a new one (it does for a 24 MP FFT): encoding continues
+    /// in that one.
+    func encodeCommands(_ body: (MPSCommandBuffer) -> Void) {
         flushIfOverBudget()
         guard !isCancelled else { return }
         compute.endEncoding()
-        body(commandBuffer)
+        let commands = MPSCommandBuffer(commandBuffer: commandBuffer)
+        body(commands)
+        if commands.rootCommandBuffer !== commandBuffer {
+            committedByShaders.append(commandBuffer)
+            commandBuffer = commands.rootCommandBuffer
+        }
         compute = commandBuffer.makeComputeCommandEncoder()!
     }
 
@@ -284,7 +298,10 @@ public final class Encoder {
         compute.endEncoding()
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
-        if error == nil { error = commandBuffer.error }
+        for completed in committedByShaders + [commandBuffer] where error == nil {
+            error = completed.error
+        }
+        committedByShaders = []
     }
 }
 

@@ -15,7 +15,8 @@ inline float3 spectral_transmission(float3 density, constant float4 *bands, cons
 // PrintingStage.expose: per spectral band, the negative transmits 10^−(dye densities + base) of
 // the enlarger light, which the paper integrates through its sensitivity (paper_bands holds
 // light × sensitivity). Then mid-grey normalisation (factors.x), preflash, print exposure
-// (factors.y), as log10 — Python's log10 → 10^ round trip in between is the identity.
+// (factors.y), as log10 — Python's log10 → 10^ round trip in between is the identity — or
+// with `linear`, before the log (for the enlarger's diffusion filter).
 kernel void print_exposure(texture2d<float, access::read> cmy [[texture(0)]],
                            texture2d<float, access::write> output [[texture(1)]],
                            constant float4 *film_bands [[buffer(0)]],
@@ -23,8 +24,10 @@ kernel void print_exposure(texture2d<float, access::read> cmy [[texture(0)]],
                            constant uint &band_count [[buffer(2)]],
                            constant float2 &factors [[buffer(3)]],
                            constant float3 &preflash [[buffer(4)]],
+                           constant uint &linear [[buffer(5)]],
                            uint2 gid [[thread_position_in_grid]]) {
     float3 raw = spectral_transmission(cmy.read(gid).rgb, film_bands, paper_bands, band_count);
     raw = fmax(raw * factors.x + preflash, 0.0f) + 1e-10f;
-    output.write(float4(log10(fmax(raw * factors.y, 0.0f) + 1e-10f), 1.0f), gid);
+    float3 exposure = raw * factors.y;
+    output.write(float4(linear ? exposure : log10(fmax(exposure, 0.0f) + 1e-10f), 1.0f), gid);
 }

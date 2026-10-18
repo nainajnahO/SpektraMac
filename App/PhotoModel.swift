@@ -164,7 +164,7 @@ final class PhotoModel {
     private var renderTask: Task<Void, Never>?
     /// Finished renders at the canvas's size for the open photo, by the controls they show: going
     /// back to controls shown before (hovering back to a stock, a slider back at a value) shows
-    /// them at once, as do the stocks a menu renders ahead (``preload(_:)``). Not
+    /// them at once, as do the choices a menu renders ahead (``preload(_:)``). Not
     /// full-resolution ones (96 MB at 24 MP). `NSCache` drops the oldest past
     /// 512 MB, and all of them when memory runs low.
     private let finishedRenders: NSCache<RenderKey, CGImage> = {
@@ -480,15 +480,15 @@ final class PhotoModel {
         return controls
     }
 
-    // MARK: Stocks rendered ahead
+    // MARK: Choices rendered ahead
 
-    /// Renders what a stock menu offers, while it's open (``preload(_:)``).
+    /// Renders what a menu offers, while it's open (``preload(_:)``).
     @ObservationIgnored private var preloadTask: Task<Void, Never>?
 
-    /// Renders each of `choices` (what choosing each stock of a menu sets the controls to, in
-    /// order) with every effect at the canvas's size into the kept renders, so the menu shows a
-    /// stock finished the moment the pointer is on it (``showKept(_:photo:)``). One render at a
-    /// time, as the strips are made: a stock the pointer reaches before its turn waits on one
+    /// Renders each of `choices` (what choosing each stock or filter of a menu sets the controls
+    /// to, in order) with every effect at the canvas's size into the kept renders, so the menu
+    /// shows a choice finished the moment the pointer is on it (``showKept(_:photo:)``). One render
+    /// at a time, as the strips are made: a choice the pointer reaches before its turn waits on one
     /// render at most. As many as fill half the kept renders' memory, so they can't push each
     /// other out.
     func preload(_ choices: [Controls]) {
@@ -511,11 +511,11 @@ final class PhotoModel {
                 }
                 if count > 0 {
                     let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
-                    note("Rendered \(count) stocks ahead in \(elapsed)")
+                    note("Rendered \(count) choices ahead in \(elapsed)")
                 }
             } catch {
                 guard !Task.isCancelled else { return }
-                fail("Could not render the stocks ahead", error)
+                fail("Could not render the choices ahead", error)
             }
         }
     }
@@ -692,7 +692,7 @@ final class PhotoModel {
 
     /// The settings' groups, as Photos groups its adjustments: each resets on its own.
     enum Adjustment {
-        case exposure, halation, couplers, grain, contrast, enlarger, glare
+        case exposure, cameraDiffusion, halation, couplers, grain, contrast, enlarger, enlargerDiffusion, glare
     }
 
     /// Whether `adjustment`'s controls are what choosing the film applies.
@@ -717,6 +717,12 @@ final class PhotoModel {
             reset.exposureMark = defaults.exposureMark
             reset.exposureOffsetEV = defaults.exposureOffsetEV
             reset.highlightBoost = defaults.highlightBoost
+        case .cameraDiffusion:
+            reset.cameraDiffusion = defaults.cameraDiffusion
+            reset.cameraDiffusionFilter = defaults.cameraDiffusionFilter
+            reset.cameraDiffusionStrength = defaults.cameraDiffusionStrength
+            reset.cameraDiffusionSize = defaults.cameraDiffusionSize
+            reset.cameraDiffusionWarmth = defaults.cameraDiffusionWarmth
         case .halation:
             reset.halation = defaults.halation
             reset.halationAmount = defaults.halationAmount
@@ -740,6 +746,12 @@ final class PhotoModel {
             reset.yFilterShift = defaults.yFilterShift
             reset.mFilterShift = defaults.mFilterShift
             reset.preflash = defaults.preflash
+        case .enlargerDiffusion:
+            reset.enlargerDiffusion = defaults.enlargerDiffusion
+            reset.enlargerDiffusionFilter = defaults.enlargerDiffusionFilter
+            reset.enlargerDiffusionStrength = defaults.enlargerDiffusionStrength
+            reset.enlargerDiffusionSize = defaults.enlargerDiffusionSize
+            reset.enlargerDiffusionWarmth = defaults.enlargerDiffusionWarmth
         case .glare:
             reset.glare = defaults.glare
             reset.glareAmount = defaults.glareAmount

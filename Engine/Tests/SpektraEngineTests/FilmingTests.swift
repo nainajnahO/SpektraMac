@@ -84,7 +84,10 @@ func exposeMatchesLogEFilm(caseName: String) throws {
     // log10 exposure: absolute error is relative error of the exposure / ln 10.
     let difference = Difference(gpu.download(output), reference.values, floor: 1)
     print("\(caseName) log_e_film: \(difference)")
-    #expect(difference.maxAbsolute < 1e-4)
+    // The camera's diffusion filter convolves in f32, Python in f64: the round-off, about a
+    // millionth of the brightest light, reaches the darkest pixels' logs (up to 0.003 below −2.5,
+    // as Python's own filter in f32 gives; 2e-5 elsewhere).
+    #expect(difference.maxAbsolute < (caseName.hasPrefix("diffusion") ? 5e-3 : 1e-4))
 }
 
 @Test func boostHighlightsMatchesPython() throws {
@@ -111,6 +114,23 @@ func exposeMatchesLogEFilm(caseName: String) throws {
     // Its bounces are Apple's blur, which Python's recursive filter approximates: they part at the
     // borders, most of this small image.
     #expect(difference.maxAbsolute < 2e-3)
+}
+
+/// Each family on bright dots and a bar (`tools/golden.py`): under the radius cap with a core under a
+/// pixel, at the full-resolution scale, at a wider spatial scale, and both warmths.
+@Test(arguments: [("glimmerglass", 0.05, 1.0, 0.0, 60.0), ("black_pro_mist", 0.75, 1.0, 0.3, 5.0),
+                  ("pro_mist", 1.0, 1.5, 0.0, 20.0), ("cinebloom", 2.0, 1.0, -0.6, 40.0)])
+func diffusionFilterMatchesPython(family: String, strength: Double, spatialScale: Double, haloWarmth: Double,
+                                  pixelSizeUm: Double) throws {
+    let filter = Parameters.DiffusionFilter(active: true, filterFamily: .init(rawValue: family)!, strength: strength,
+                                            spatialScale: spatialScale, haloWarmth: haloWarmth)
+    let gpu = try GPU()
+    let x = try golden("primitives", "diffusion_x")
+    let input = gpu.upload(rgb: x.values, width: x.shape[1], height: x.shape[0])
+    let output = try gpu.run { gpu.encodeDiffusionFilter(on: $0, input: input, filter: filter, pixelSizeUm: pixelSizeUm) }
+    let difference = Difference(gpu.download(output), try golden("primitives", "diffusion_\(family)_out").values, floor: 1)
+    print("diffusion filter, \(family): \(difference)")
+    #expect(difference.maxRelative < 1e-5)  // f32 against Python's f64 FFT
 }
 
 @Test(arguments: goldenCases.filter { $0.hasPrefix("photo") })
@@ -153,7 +173,7 @@ func developMatchesCMYFilm(caseName: String) throws {
     let difference = Difference(gpu.download(output), reference.values, floor: 1)
     print("\(caseName) cmy_film: \(difference)")
     // The photo's inhibitor diffusion is Apple's blur, which Python's recursive filter approximates.
-    #expect(difference.maxAbsolute < (caseName.hasPrefix("photo") ? 5e-2 : 1e-4))
+    #expect(difference.maxAbsolute < (hasPhotoEffects(caseName) ? 5e-2 : 1e-4))
 }
 
 @Test(arguments: goldenCases.filter { $0.hasPrefix("photo") })
@@ -183,7 +203,7 @@ func filmingChainMatchesCMYFilm(caseName: String) throws {
     let difference = Difference(gpu.download(output), try SpektraEngineTests.golden(caseName, "cmy_film").values, floor: 1)
     print("\(caseName) chain to cmy_film: \(difference)")
     // The photo's halation and inhibitor diffusion are Apple's blur (see developMatchesCMYFilm).
-    #expect(difference.maxAbsolute < (caseName.hasPrefix("photo") ? 5e-2 : 1e-4))
+    #expect(difference.maxAbsolute < (hasPhotoEffects(caseName) ? 5e-2 : 1e-4))
 }
 
 /// Grain's particle model against Python's on uniform density patches (both random, so per patch

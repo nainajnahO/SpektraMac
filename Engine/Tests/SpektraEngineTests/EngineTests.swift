@@ -220,6 +220,13 @@ func controlsDigestLikePython(caseName: String) throws {
     controls.film = golden.film
     controls.paper = try golden.printProfile().info.stock
     controls.scanFilm = golden.params.io.scanFilm
+    let (camera, enlarger) = (golden.params.camera.diffusionFilter, golden.params.enlarger.diffusionFilter)
+    (controls.cameraDiffusion, controls.cameraDiffusionFilter, controls.cameraDiffusionStrength,
+     controls.cameraDiffusionSize, controls.cameraDiffusionWarmth) =
+        (camera.active, camera.filterFamily, camera.strength, camera.spatialScale, camera.haloWarmth)
+    (controls.enlargerDiffusion, controls.enlargerDiffusionFilter, controls.enlargerDiffusionStrength,
+     controls.enlargerDiffusionSize, controls.enlargerDiffusionWarmth) =
+        (enlarger.active, enlarger.filterFamily, enlarger.strength, enlarger.spatialScale, enlarger.haloWarmth)
     let preview = caseName.hasPrefix("preview")
     var parameters = Engine.parameters(for: controls, film: try Profile.load(golden.film), print: try golden.printProfile(),
                                        database: try Tables.loadNeutralPrintFilters(), mode: preview ? .preview : .export)

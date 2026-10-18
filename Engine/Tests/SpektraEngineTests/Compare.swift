@@ -21,12 +21,18 @@ func golden(_ caseName: String, _ tap: String) throws -> NPYArray {
 }
 
 /// The golden cases `tools/golden.py` writes: every film pair on the chart and on the photo, and
-/// the photo in preview mode.
+/// the photo in preview mode and with the camera's and the enlarger's diffusion filters on.
 let goldenCases = ["chart", "photo"].flatMap { input in
     ["kodak_portra_400-kodak_portra_endura", "kodak_vision3_500t-kodak_2383", "fujifilm_velvia_100-scan",
      "kodak_portra_400-scan"]
         .map { "\(input)-\($0)" }
-} + ["preview-kodak_portra_400-kodak_portra_endura"]
+} + ["preview-kodak_portra_400-kodak_portra_endura", "diffusion-kodak_portra_400-kodak_portra_endura"]
+
+/// Whether a case runs the photo's spatial effects (halation and the inhibitor diffusion, through
+/// Apple's blur): the photo, and the photo with the diffusion filters.
+func hasPhotoEffects(_ caseName: String) -> Bool {
+    caseName.hasPrefix("photo") || caseName.hasPrefix("diffusion")
+}
 
 /// A case's `params.json`: the digested parameters and what the run measured.
 struct GoldenCase: Decodable {
