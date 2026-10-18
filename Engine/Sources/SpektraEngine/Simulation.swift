@@ -432,7 +432,7 @@ extension Simulation {
     /// `cmy_film → log_e_print` (PrintingStage.expose): the enlarger light through the negative's
     /// dye densities and base, integrated against the paper's spectral sensitivity over 81 bands,
     /// normalised so a mid-grey negative gives the paper a unit exposure, plus preflash, × print
-    /// exposure, through the enlarger's diffusion filter, as log10.
+    /// exposure and the burn (not Spektrafilm's), through the enlarger's diffusion filter, as log10.
     ///
     /// Not ported: the scanner's black/white correction (factor 1 unless on; off by default).
     public func encodePrintExpose(_ cmy: any MTLTexture, on encoder: Encoder) -> any MTLTexture {
@@ -441,6 +441,11 @@ extension Simulation {
         var bandCount = UInt32(printFilmBands.count)
         var factors = SIMD2<Float>(Float(printExposureFactor), Float(parameters.enlarger.printExposure))
         var preflash = SIMD3<Float>(preflashRaw)
+        // Stops and reach; none (0 stops, which the kernel leaves out) where it reaches nothing.
+        var burn = SIMD2<Float>.zero
+        if let enlargerBurn = parameters.enlarger.burn, enlargerBurn.reach > 0 {
+            burn = SIMD2(Float(enlargerBurn.stops), Float(enlargerBurn.reach))
+        }
         // The filter spreads the exposure itself, so the kernel leaves the log to after it.
         var linear = UInt32(filter.active ? 1 : 0)
         gpu.encode("print_exposure", on: encoder, textures: [cmy, output], grid: output.size) {
@@ -450,6 +455,7 @@ extension Simulation {
             $0.setBytes(&factors, length: MemoryLayout<SIMD2<Float>>.size, index: 3)
             $0.setBytes(&preflash, length: MemoryLayout<SIMD3<Float>>.size, index: 4)
             $0.setBytes(&linear, length: 4, index: 5)
+            $0.setBytes(&burn, length: MemoryLayout<SIMD2<Float>>.size, index: 6)
         }
         guard filter.active else { return output }
         gpu.encodeLogExposure(on: encoder, input: gpu.encodeDiffusionFilter(on: encoder, input: output, filter: filter,

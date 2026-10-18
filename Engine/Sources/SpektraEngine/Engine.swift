@@ -28,6 +28,11 @@ public struct Controls: Codable, Sendable, Hashable {
     /// A flash of the bare enlarger light on the paper before the print, as a fraction of the
     /// clear film base's exposure: it darkens light tones more than white or the shadows.
     public var preflash = 0.0
+    /// Burning in a sky, as a darkroom printer does: extra enlarger exposure at the print's top
+    /// edge, in stops, fading linearly to none `burnReach` percent of the height down.
+    public var burn = false
+    public var burnStops = 1.0
+    public var burnReach = 40.0
     /// The paper's contrast, as a multiplier of its curves' gamma around mid-grey; and of its
     /// light tones' alone (its fastest sub-layer's) and its dark tones' (the others').
     public var printContrast = 1.0
@@ -538,6 +543,8 @@ public actor Engine {
         parameters.enlarger.yFilterShift = controls.yFilterShift
         parameters.enlarger.mFilterShift = controls.mFilterShift
         parameters.enlarger.preflashExposure = controls.preflash
+        parameters.enlarger.burn = controls.burn
+            ? Parameters.Burn(stops: controls.burnStops, reach: controls.burnReach / 100) : nil
         // Off at 1: Python's default, which the morph at 1 renders identically.
         parameters.printRender.densityCurvesMorph.active = controls.printContrast != 1
             || controls.printHighlightContrast != 1 || controls.printShadowContrast != 1

@@ -121,8 +121,8 @@ extension Parameters {
 
     /// What a LUT can hold: `digest_params` with `debug.deactivate_spatial_effects` and
     /// `deactivate_stochastic_effects`, and no highlight boost (it scales by the image's maximum),
-    /// as `debug.lut_mode` has it. Unlike lut_mode it keeps the exposure and print settings, which
-    /// the LUT carries.
+    /// as `debug.lut_mode` has it, nor burn (it depends on where a pixel is). Unlike lut_mode it
+    /// keeps the exposure and print settings, which the LUT carries.
     public mutating func applyPerPixelMode() {
         filmRender.halation.active = false
         filmRender.halation.boostEv = 0
@@ -133,6 +133,7 @@ extension Parameters {
         camera.diffusionFilter.active = false
         enlarger.lensBlur = 0
         enlarger.diffusionFilter.active = false
+        enlarger.burn = nil
         scanner.lensBlur = 0
         scanner.unsharpMask = [0, 0]
     }
@@ -185,6 +186,8 @@ extension Parameters {
         public var preflashExposure = 0.0
         public var preflashYFilterShift = 0.0
         public var preflashMFilterShift = 0.0
+        /// Not Spektrafilm's, which has no burn: `nil` there and in the golden data, as when off.
+        public var burn: Burn?
 
         /// The filters the print is exposed through: neutral plus the user's shifts.
         var printFilters: SIMD3<Double> {
@@ -195,6 +198,13 @@ extension Parameters {
         var preflashFilters: SIMD3<Double> {
             SIMD3(cFilterNeutral, mFilterNeutral + preflashMFilterShift, yFilterNeutral + preflashYFilterShift)
         }
+    }
+
+    /// A darkroom printer's burn, for a sky: extra print exposure of `stops` at the top edge,
+    /// fading linearly to none `reach` (a fraction of the height) down from it.
+    public struct Burn: Codable, Sendable, Equatable {
+        public var stops: Double
+        public var reach: Double
     }
 
     /// `apply_database_neutral_print_filters`: the C, M, Y filters that print a grey neutral for

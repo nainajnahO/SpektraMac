@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SpektraEngine
 
@@ -65,6 +66,34 @@ func printExposeMatchesLogEPrint(caseName: String) throws {
     let difference = Difference(gpu.download(output), try golden("primitives", "print_variant_log_e_print").values, floor: 1)
     print("print variant log_e_print: \(difference)")
     #expect(difference.maxAbsolute < 1e-4)
+}
+
+/// The burn raises the print's log exposure by its stops × log10 2 at the top, fading linearly to
+/// none at its reach (pixel centres), below which the print is exactly as without it.
+@Test func burnRaisesTheTopOfThePrint() throws {
+    var parameters = Parameters()
+    let (film, print, tables) = (try Profile.load("kodak_portra_400"), try Profile.load("kodak_portra_endura"),
+                                 try Tables.load())
+    let gpu = try GPU()
+    let (width, height) = (3, 10)
+    let input = gpu.upload(rgb: [Float](repeating: 0.8, count: width * height * 3), width: width, height: height)
+    func logExposure() throws -> [Float] {
+        let simulation = try Simulation(parameters: parameters, film: film, print: print, gpu: gpu, tables: tables)
+        return gpu.download(try gpu.run { simulation.encodePrintExpose(input, on: $0) })
+    }
+    let plain = try logExposure()
+    parameters.enlarger.burn = Parameters.Burn(stops: 1.5, reach: 0.4)
+    let burned = try logExposure()
+    for y in 0..<height {
+        let ramp = max(0, 1 - (Double(y) + 0.5) / (0.4 * Double(height)))
+        for index in (y * width * 3)..<((y + 1) * width * 3) {
+            if ramp == 0 {
+                #expect(burned[index] == plain[index], "row \(y)")
+            } else {
+                #expect(abs(Double(burned[index] - plain[index]) - 1.5 * ramp * log10(2)) < 1e-5, "row \(y)")
+            }
+        }
+    }
 }
 
 @Test(arguments: ["kodak_portra_endura", "kodak_2383"])

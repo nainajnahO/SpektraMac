@@ -103,6 +103,8 @@ final class PhotoModel {
     }
     /// While the Exposure slider is held: the canvas then tints the region the mark it's on meters.
     var isAdjustingExposure = false
+    /// While a Burn slider is held: the canvas then tints the part of the print the burn reaches.
+    var isAdjustingBurn = false
     /// While a slider is held: its next step would cancel the blurs and grain, so they render
     /// once it's let go.
     var isAdjusting = false {
@@ -587,7 +589,7 @@ final class PhotoModel {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [Self.cubeType]
         panel.nameFieldStringValue = controls.scanFilm ? filmName : "\(filmName) – \(paperName)"
-        panel.message = "The LUT carries this exposure (\(stops) EV) and every setting a LUT can hold. Grain, halation, glare, highlight boost and the sharper edges of the couplers' Edge contrast depend on neighbouring pixels or the whole photo, so they're left out."
+        panel.message = "The LUT carries this exposure (\(stops) EV) and every setting a LUT can hold. Grain, halation, glare, highlight boost and the sharper edges of the couplers' Edge contrast depend on neighbouring pixels or the whole photo, and the burn on where a pixel is, so they're left out."
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let (controls, exposureEV) = (controls, exposureEV)
@@ -692,7 +694,7 @@ final class PhotoModel {
 
     /// The settings' groups, as Photos groups its adjustments: each resets on its own.
     enum Adjustment {
-        case exposure, cameraDiffusion, halation, couplers, grain, contrast, enlarger, enlargerDiffusion, glare
+        case exposure, cameraDiffusion, halation, couplers, grain, contrast, enlarger, burn, enlargerDiffusion, glare
     }
 
     /// Whether `adjustment`'s controls are what choosing the film applies.
@@ -746,6 +748,10 @@ final class PhotoModel {
             reset.yFilterShift = defaults.yFilterShift
             reset.mFilterShift = defaults.mFilterShift
             reset.preflash = defaults.preflash
+        case .burn:
+            reset.burn = defaults.burn
+            reset.burnStops = defaults.burnStops
+            reset.burnReach = defaults.burnReach
         case .enlargerDiffusion:
             reset.enlargerDiffusion = defaults.enlargerDiffusion
             reset.enlargerDiffusionFilter = defaults.enlargerDiffusionFilter
