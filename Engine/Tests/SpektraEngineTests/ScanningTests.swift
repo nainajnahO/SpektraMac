@@ -58,7 +58,7 @@ func chainMatchesPython(caseName: String) throws {
     print("\(caseName) rgb_out: \(difference); 8-bit: max \(steps.max()!) steps, \(identical * 100)% identical")
     // The photo's halation and inhibitor diffusion are Apple's blur, which Python's recursive
     // filter approximates: they part by a few levels, mostly along the borders of this small image.
-    if caseName.hasPrefix("photo") {
+    if hasPhotoEffects(caseName) {
         #expect(difference.maxAbsolute < 2e-2)
         #expect(steps.max()! <= 3 && identical >= 0.98)
     } else {
