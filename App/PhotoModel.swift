@@ -103,6 +103,17 @@ final class PhotoModel {
     }
     /// While the Exposure slider is held: the canvas then tints the region the mark it's on meters.
     var isAdjustingExposure = false
+    /// While a slider is held: its next step would cancel the blurs and grain, so they render
+    /// once it's let go.
+    var isAdjusting = false {
+        didSet {
+            if !isAdjusting && awaitsRelease {
+                render(from: .reduced)
+            }
+        }
+    }
+    /// The preview is on screen, and the blurs and grain wait for the slider to be let go.
+    private var awaitsRelease = false
     /// Display-sized rendering of the last simulation.
     private(set) var displayImage: CGImage?
     /// The render `displayImage` comes from.
@@ -112,12 +123,14 @@ final class PhotoModel {
     var canvasLongSide = 0 {
         didSet {
             if canvasLongSide != oldValue && awaitsFullResolution {
-                render(from: .reduced)
+                render(from: .resized)
             }
         }
     }
-    /// Whether the canvas may show the photo larger than it fits: the pointer is over it, or it's
-    /// zoomed in. Only then does the whole photo render, if it's larger than the canvas shows it.
+    /// Whether the canvas shows the photo larger than it fits: it's zoomed in. Only then does the
+    /// whole photo render, if it's larger than the canvas shows it. Until it's on screen, the
+    /// zoomed photo is the screen-size render enlarged: about 0.3 s at 12 MP, 0.5–0.9 s at 24 MP
+    /// on an M1 Pro.
     var wantsFullResolution = false {
         didSet {
             if wantsFullResolution && awaitsFullResolution {
@@ -222,8 +235,9 @@ final class PhotoModel {
 
     // MARK: Rendering
 
-    /// How long the controls stay still before the blurs and grain render.
-    private static let fullRenderDelay = Duration.milliseconds(500)
+    /// How long the canvas's size stays still before the photo renders at it: a window being
+    /// resized changes it at every frame.
+    private static let resizeDelay = Duration.milliseconds(500)
 
     /// Renders once per main-actor turn, however many settings changed in it.
     private func scheduleRender() {
@@ -235,12 +249,13 @@ final class PhotoModel {
         }
     }
 
-    /// Where a render starts: a change to the controls at the quick preview, a new canvas size at
-    /// the reduced render, ``wantsFullResolution`` at the whole photo.
-    private enum RenderStart { case preview, reduced, full }
+    /// Where a render starts: a change to the controls at the quick preview, a slider let go at the
+    /// reduced render, a new canvas size there once it has been still for `resizeDelay`,
+    /// ``wantsFullResolution`` at the whole photo.
+    private enum RenderStart { case preview, reduced, resized, full }
 
-    /// Renders the preview, then, once the controls have been still for `fullRenderDelay`, with
-    /// the blurs and grain the preview leaves out: at the size the canvas shows the photo, and the
+    /// Renders the preview, then with the blurs and grain the preview leaves out, once the slider
+    /// is let go if one is held (``isAdjusting``): at the size the canvas shows the photo, and the
     /// whole photo once ``wantsFullResolution``, or at once where the canvas shows it no smaller.
     /// A change cancels it, except a preview, which shows and then renders the newest controls.
     /// Controls with a kept finished render (``finishedRenders``) show it instead, at once.
@@ -256,12 +271,13 @@ final class PhotoModel {
         isPreviewing = false
         isRenderingFullResolution = false
         awaitsFullResolution = false
+        awaitsRelease = false
         guard let photo, let engine else {
             displayImage = nil
             isRendering = false
             return
         }
-        isRendering = start != .preview
+        isRendering = start == .reduced || start == .full
         isPreviewing = start == .preview
         renderTask = Task {
             var controls = self.controls
@@ -277,10 +293,13 @@ final class PhotoModel {
                         }
                     } while controls != self.controls
                     isPreviewing = false
+                    if isAdjusting && !isFinished {
+                        awaitsRelease = true
+                        return
+                    }
                 }
-                if start != .full && !isFinished {
-                    isRendering = false
-                    try await Task.sleep(for: Self.fullRenderDelay)
+                if start == .resized {
+                    try await Task.sleep(for: Self.resizeDelay)
                 }
                 // The canvas's size once things are still.
                 let longSide = reducedLongSide(of: photo)

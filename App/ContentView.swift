@@ -646,6 +646,7 @@ private struct ValueSlider: View {
     /// The value when the drag began.
     @State private var dragStart: Double?
     @State private var isHovered = false
+    @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.displayScale) private var displayScale
 
@@ -705,12 +706,18 @@ private struct ValueSlider: View {
         .contentShape(.rect)
         .gesture(DragGesture(minimumDistance: 0)
             .onChanged { drag in
+                if dragStart == nil {
+                    model.isAdjusting = true
+                }
                 let start = dragStart ?? value
                 dragStart = start
                 guard width > 0 else { return }
                 set(start + drag.translation.width / width * (range.upperBound - range.lowerBound))
             }
-            .onEnded { _ in dragStart = nil })
+            .onEnded { _ in
+                dragStart = nil
+                model.isAdjusting = false
+            })
         .focusable(interactions: .activate)
         .onMoveCommand { direction in
             switch direction {
@@ -751,6 +758,7 @@ private struct ThumbnailStrip: View {
     let onEditingChanged: (Bool) -> Void
     @State private var width: CGFloat = 0
     @State private var isDragging = false
+    @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
 
     init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double, frames: [CGImage]?,
@@ -791,6 +799,7 @@ private struct ThumbnailStrip: View {
                 .onChanged { drag in
                     if !isDragging {
                         isDragging = true
+                        model.isAdjusting = true
                         onEditingChanged(true)
                     }
                     guard width > 0 else { return }
@@ -798,6 +807,7 @@ private struct ThumbnailStrip: View {
                 }
                 .onEnded { _ in
                     isDragging = false
+                    model.isAdjusting = false
                     onEditingChanged(false)
                 })
             if !marks.isEmpty {
@@ -851,7 +861,8 @@ private struct ImageCanvas: View {
     @State private var canvasSize: CGSize = .zero
     /// How much of the canvas the toolbar (top) and the settings panel (trailing) cover.
     @State private var insets = EdgeInsets()
-    /// Where the pointer is over the photo: scrolling zooms around it.
+    /// Where the pointer is over the canvas below the toolbar and beside the panel: scrolling
+    /// zooms around it.
     @State private var pointer: CGPoint?
     /// The offset when the drag began, and the pinch's magnification so far.
     @State private var dragStart: CGSize?
@@ -916,8 +927,11 @@ private struct ImageCanvas: View {
                 .pointerStyle(zoom > 1 ? (dragStart == nil ? .grabIdle : .grabActive) : nil)
                 .onContinuousHover { phase in
                     switch phase {
-                    case .active(let location): pointer = location
-                    case .ended: pointer = nil
+                    // Not under the toolbar or the panel: they lie over the canvas, yet it's still
+                    // told where the pointer is.
+                    case .active(let location) where location.x < visibleSize.width && location.y >= insets.top:
+                        pointer = location
+                    case .active, .ended: pointer = nil
                     }
                 }
                 .onAppear {
@@ -955,8 +969,7 @@ private struct ImageCanvas: View {
         .onChange(of: fittedLongSide, initial: true) { _, pixels in
             model.canvasLongSide = pixels
         }
-        // With the pointer anywhere over the canvas, where scrolling zooms.
-        .onChange(of: pointer != nil || zoom > 1, initial: true) { _, wants in
+        .onChange(of: zoom > 1, initial: true) { _, wants in
             model.wantsFullResolution = wants
         }
     }
