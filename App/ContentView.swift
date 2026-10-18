@@ -991,8 +991,9 @@ private struct ToneGraphView: View {
             AxisMarks(values: Array(stride(from: Self.tones.lowerBound, through: Self.tones.upperBound, by: 2))) { value in
                 // Mid-grey brighter.
                 AxisGridLine(stroke: StrokeStyle(lineWidth: value.as(Float.self) == 0 ? 1 : 0.5))
-                AxisValueLabel {
-                    if let stops = value.as(Float.self) {
+                // Centred under its line; none at the ends, which would stick out.
+                if let stops = value.as(Float.self), stops != Self.tones.lowerBound, stops != Self.tones.upperBound {
+                    AxisValueLabel(anchor: .top) {
                         Text(stops.formatted(.number.sign(strategy: .always(includingZero: false))))
                     }
                 }
