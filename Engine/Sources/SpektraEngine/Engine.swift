@@ -28,11 +28,11 @@ public struct Controls: Codable, Sendable, Hashable {
     /// A flash of the bare enlarger light on the paper before the print, as a fraction of the
     /// clear film base's exposure: it darkens light tones more than white or the shadows.
     public var preflash = 0.0
-    /// Burning in a sky, as a darkroom printer does: extra enlarger exposure at the print's top
-    /// edge, in stops, fading linearly to none `burnReach` percent of the height down.
+    /// Burning in what's bright, such as a sky, as a darkroom printer does: extra enlarger exposure,
+    /// in stops, where the film's exposure is over `burnThreshold` stops above mid-grey.
     public var burn = false
     public var burnStops = 1.0
-    public var burnReach = 40.0
+    public var burnThreshold = 2.5
     /// The paper's contrast, as a multiplier of its curves' gamma around mid-grey; and of its
     /// light tones' alone (its fastest sub-layer's) and its dark tones' (the others').
     public var printContrast = 1.0
@@ -348,7 +348,7 @@ public actor Engine {
     /// The simulation of the open photo as `controls` set it: the scanned print, or the developed
     /// film itself. Throws `CancellationError` when the task is cancelled.
     public func render(controls: Controls, mode: RenderMode) throws -> RGBImage {
-        let output = try renderTexture(controls: controls, mode: mode)
+        let output = try renderTexture(controls: controls, mode: mode).output
         return RGBImage(width: output.width, height: output.height, pixels: gpu.download(output))
     }
 
@@ -356,7 +356,7 @@ public actor Engine {
     /// bits per channel for TIFF and PNG, 8 for JPEG, in ``exportColorSpace``
     /// (``GPU/image(of:bits:colorSpace:)``). Throws `CancellationError` when the task is cancelled.
     public func export(controls: Controls, as type: UTType) throws -> CGImage {
-        try gpu.image(of: renderTexture(controls: controls, mode: .export), bits: type.conforms(to: .jpeg) ? 8 : 16,
+        try gpu.image(of: renderTexture(controls: controls, mode: .export).output, bits: type.conforms(to: .jpeg) ? 8 : 16,
                       colorSpace: Self.exportColorSpace)
     }
 
@@ -365,7 +365,7 @@ public actor Engine {
     /// zooms into the render's own pixels. Core Image scales larger ones down on the GPU, so only
     /// that comes back from it.
     public func display(controls: Controls, mode: RenderMode, maxPixels: Int = 16384) throws -> CGImage {
-        let output = try renderTexture(controls: controls, mode: mode)
+        let output = try renderTexture(controls: controls, mode: mode).output
         // Core Image puts a texture's first row at the bottom.
         guard let image = CIImage(mtlTexture: output, options: [.colorSpace: Self.outputColorSpace]) else {
             throw DisplayError()
@@ -385,8 +385,10 @@ public actor Engine {
     /// Renders from the first step `controls` change since the last render of the same image: a
     /// new paper, enlarger setting or Print | Film choice prints and scans the developed film
     /// again; switching grain develops the film's exposure again; the rest starts over. The same
-    /// kernels run as for a render from scratch, so the result is the same.
-    private func renderTexture(controls: Controls, mode: RenderMode) throws -> any MTLTexture {
+    /// kernels run as for a render from scratch, so the result is the same. Also returns the burn's
+    /// mask, if it's on.
+    private func renderTexture(controls: Controls, mode: RenderMode) throws
+        -> (output: any MTLTexture, burnMask: (any MTLTexture)?) {
         guard photo != nil else { preconditionFailure("Rendering before a photo is open") }
         let film = profiles[controls.film]!, print = profiles[controls.paper]!
         let parameters = Self.parameters(for: controls, film: film, print: print, database: neutralPrintFilters,
@@ -454,15 +456,37 @@ public actor Engine {
             photo![keyPath: image].film = nil
         }
         let last = photo![keyPath: image]
-        let (logExposure, cmyFilm, output) = try gpu.run { encoder in
+        let (logExposure, cmyFilm, burnMask, output) = try gpu.run { encoder in
             let logExposure = last.exposure?.texture ?? simulation.encodeExpose(
                 simulation.encodePreprocess(last.texture, autoExposureEV: exposureEV, on: encoder), on: encoder)
             let cmyFilm = last.film?.texture ?? simulation.encodeDevelop(logExposure, on: encoder)
-            return (logExposure, cmyFilm, simulation.encodePrintAndScan(cmyFilm, on: encoder))
+            let burnMask = simulation.encodeBurnMask(logExposure, on: encoder)
+            return (logExposure, cmyFilm, burnMask,
+                    simulation.encodePrintAndScan(cmyFilm, burnMask: burnMask, on: encoder))
         }
         photo![keyPath: image].exposure = Step(key: exposureKey, texture: logExposure)
         photo![keyPath: image].film = Step(key: filmKey, texture: cmyFilm)
-        return output
+        return (output, burnMask)
+    }
+
+    /// Where `controls`' burn falls on the photo's preview, for the canvas to show while a Burn
+    /// slider is held: white, with how much of the burn each pixel gets as alpha. Nil with the
+    /// burn off.
+    public func burnMask(controls: Controls) throws -> CGImage? {
+        guard let mask = try renderTexture(controls: controls, mode: .preview).burnMask else { return nil }
+        // Core Image puts a texture's first row at the bottom. The mask (in red) becomes the alpha.
+        let overlay = CIImage(mtlTexture: mask, options: [.colorSpace: NSNull()])!
+            .oriented(.downMirrored)
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputAVector": CIVector(x: 1, y: 0, z: 0, w: 0),
+                "inputBiasVector": CIVector(x: 1, y: 1, z: 1, w: 0),
+            ])
+        guard let image = context.createCGImage(overlay, from: overlay.extent, format: .RGBA8,
+                                                colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
+            throw DisplayError()
+        }
+        return image
     }
 
     /// A `size`³ 3D LUT of `controls`' look, for an app that applies one to display-encoded sRGB
@@ -544,7 +568,7 @@ public actor Engine {
         parameters.enlarger.mFilterShift = controls.mFilterShift
         parameters.enlarger.preflashExposure = controls.preflash
         parameters.enlarger.burn = controls.burn
-            ? Parameters.Burn(stops: controls.burnStops, reach: controls.burnReach / 100) : nil
+            ? Parameters.Burn(stops: controls.burnStops, threshold: controls.burnThreshold) : nil
         // Off at 1: Python's default, which the morph at 1 renders identically.
         parameters.printRender.densityCurvesMorph.active = controls.printContrast != 1
             || controls.printHighlightContrast != 1 || controls.printShadowContrast != 1

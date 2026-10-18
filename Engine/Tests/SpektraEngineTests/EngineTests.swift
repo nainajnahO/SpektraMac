@@ -265,7 +265,7 @@ func controlsDigestLikePython(caseName: String) throws {
     controls.grainSoftness = 0.9
     controls.burn = true
     controls.burnStops = 1.5
-    controls.burnReach = 40
+    controls.burnThreshold = 3
     let (film, paper, database) = (try Profile.load(controls.film), try Profile.load(controls.paper),
                                    try Tables.loadNeutralPrintFilters())
     var expected = Engine.parameters(for: Controls(), film: film, print: paper, database: database, mode: .full)
@@ -285,7 +285,7 @@ func controlsDigestLikePython(caseName: String) throws {
     expected.filmRender.halation.scatterSpatialScale = 1.5
     expected.filmRender.grain.particleAreaUm2 = 0.4
     expected.filmRender.grain.blur = 0.9
-    expected.enlarger.burn = Parameters.Burn(stops: 1.5, reach: 0.4)
+    expected.enlarger.burn = Parameters.Burn(stops: 1.5, threshold: 3)
     #expect(Engine.parameters(for: controls, film: film, print: paper, database: database, mode: .full) == expected)
 
     // Any of the paper's contrasts away from 1 turns the morph on.
@@ -553,7 +553,7 @@ extension PhotoOpeningTests {
     controls.grainSoftness = 0.8
     controls.burn = true
     controls.burnStops = 1.5
-    controls.burnReach = 35
+    controls.burnThreshold = 2
     let preset = try controls.preset()
     #expect(try Controls(preset: preset) == controls)
     let text = try #require(String(data: preset, encoding: .utf8))

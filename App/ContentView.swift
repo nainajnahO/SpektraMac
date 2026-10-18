@@ -228,18 +228,17 @@ private struct SettingsPanel: View {
                                         format: .number.precision(.fractionLength(3)))
                                 .help("A flash of plain light on the paper before the print, so light tones such as a bright sky gain some tone. It darkens the whole print: lower the print exposure to bring the mid-tones back.")
                         }
-                        AdjustmentGroup("Burn", systemImage: "rectangle.tophalf.filled", adjustment: .burn,
-                                        isOn: $model.controls.burn) {
+                        AdjustmentGroup("Burn", systemImage: "sun.horizon", adjustment: .burn, isOn: $model.controls.burn) {
                             ValueSlider("Strength", value: $model.controls.burnStops, in: 0...3, step: 0.1,
                                         format: .number.precision(.fractionLength(1)), unit: "EV") {
                                 model.isAdjustingBurn = $0
                             }
-                            .help("Extra enlarger exposure at the top edge, as a darkroom printer burns in a sky: a pale sky darkens and gets its colour back, and the rest of the print stays as it is.")
-                            ValueSlider("Reach", value: $model.controls.burnReach, in: 0...100, step: 1,
-                                        format: .number.precision(.fractionLength(0)), unit: "%") {
+                            .help("Extra enlarger exposure where the photo is bright, as a darkroom printer burns in a sky: a pale sky darkens and gets its colour back, and the rest of the print stays as it is.")
+                            ValueSlider("Threshold", value: $model.controls.burnThreshold, in: 0...6, step: 0.1,
+                                        format: ExposureStrip.stops, unit: "EV") {
                                 model.isAdjustingBurn = $0
                             }
-                            .help("How far down from the top edge the burn fades to nothing, in percent of the height. Heads reaching into it darken too.")
+                            .help("How bright a part of the photo must be to burn, in stops over mid-grey. About +2.5 is where a screen's white sits; lower takes in more. Holding a Burn slider shows what burns, white on black.")
                         }
                         DiffusionGroup(adjustment: .enlargerDiffusion, isOn: \.enlargerDiffusion,
                                        family: \.enlargerDiffusionFilter, strength: \.enlargerDiffusionStrength,
@@ -1098,13 +1097,13 @@ private struct ImageCanvas: View {
         }
     }
 
-    /// While a Burn slider is held: the part of the print the burn reaches, tinted most at the top
-    /// edge and fading to none at its reach, as the burn does.
+    /// While a Burn slider is held: what burns, in place of the photo, white on black as strongly as
+    /// it burns.
     @ViewBuilder private var burnOverlay: some View {
-        let reach = model.controls.burnReach / 100
-        if model.isAdjustingBurn && reach > 0 {
-            LinearGradient(colors: [.pink.opacity(0.5), .pink.opacity(0)], startPoint: .top,
-                           endPoint: UnitPoint(x: 0.5, y: reach))
+        if model.isAdjustingBurn, let mask = model.burnMask {
+            Image(decorative: mask, scale: 1)
+                .resizable()
+                .background(.black)
                 .allowsHitTesting(false)
         }
     }

@@ -1,5 +1,6 @@
 import Foundation
 import Metal
+import MetalPerformanceShaders
 import simd
 
 /// Spektrafilm's `SimulationPipeline`: the stages between the pipeline taps
@@ -432,36 +433,73 @@ extension Simulation {
     /// `cmy_film → log_e_print` (PrintingStage.expose): the enlarger light through the negative's
     /// dye densities and base, integrated against the paper's spectral sensitivity over 81 bands,
     /// normalised so a mid-grey negative gives the paper a unit exposure, plus preflash, × print
-    /// exposure and the burn (not Spektrafilm's), through the enlarger's diffusion filter, as log10.
+    /// exposure and the burn (not Spektrafilm's) through `burnMask` (``encodeBurnMask(_:on:)``),
+    /// through the enlarger's diffusion filter, as log10.
     ///
     /// Not ported: the scanner's black/white correction (factor 1 unless on; off by default).
-    public func encodePrintExpose(_ cmy: any MTLTexture, on encoder: Encoder) -> any MTLTexture {
+    public func encodePrintExpose(_ cmy: any MTLTexture, burnMask: (any MTLTexture)? = nil,
+                                  on encoder: Encoder) -> any MTLTexture {
         let output = gpu.makeTexture(width: cmy.width, height: cmy.height)
         let filter = parameters.enlarger.diffusionFilter
         var bandCount = UInt32(printFilmBands.count)
         var factors = SIMD2<Float>(Float(printExposureFactor), Float(parameters.enlarger.printExposure))
         var preflash = SIMD3<Float>(preflashRaw)
-        // Stops and reach; none (0 stops, which the kernel leaves out) where it reaches nothing.
-        var burn = SIMD2<Float>.zero
-        if let enlargerBurn = parameters.enlarger.burn, enlargerBurn.reach > 0 {
-            burn = SIMD2(Float(enlargerBurn.stops), Float(enlargerBurn.reach))
-        }
+        // Without a mask, 0 stops: the kernel leaves the burn out (and reads `cmy` in the mask's place).
+        var burnStops = burnMask == nil ? 0 : Float(parameters.enlarger.burn?.stops ?? 0)
         // The filter spreads the exposure itself, so the kernel leaves the log to after it.
         var linear = UInt32(filter.active ? 1 : 0)
-        gpu.encode("print_exposure", on: encoder, textures: [cmy, output], grid: output.size) {
+        gpu.encode("print_exposure", on: encoder, textures: [cmy, output, burnMask ?? cmy], grid: output.size) {
             $0.setBytes(printFilmBands, length: printFilmBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 0)
             $0.setBytes(printPaperBands, length: printPaperBands.count * MemoryLayout<SIMD4<Float>>.stride, index: 1)
             $0.setBytes(&bandCount, length: 4, index: 2)
             $0.setBytes(&factors, length: MemoryLayout<SIMD2<Float>>.size, index: 3)
             $0.setBytes(&preflash, length: MemoryLayout<SIMD3<Float>>.size, index: 4)
             $0.setBytes(&linear, length: 4, index: 5)
-            $0.setBytes(&burn, length: MemoryLayout<SIMD2<Float>>.size, index: 6)
+            $0.setBytes(&burnStops, length: 4, index: 6)
         }
         guard filter.active else { return output }
         gpu.encodeLogExposure(on: encoder, input: gpu.encodeDiffusionFilter(on: encoder, input: output, filter: filter,
                                                                             pixelSizeUm: pixelSizeUm(of: cmy)),
                               output: output)
         return output
+    }
+
+    /// The long side the burn's mask is fitted on, whatever the image's size, so the preview, the
+    /// screen-size render and the whole photo burn alike.
+    static let burnMaskLongSide = 256
+
+    /// Where the burn falls (not Spektrafilm's), 0 to 1 in `.r`, from the film's log exposure: what's
+    /// over the threshold (``Parameters/Burn``), fitted to the photo's edges by Apple's guided
+    /// filter, so a dark head against a bright sky stays out of it while the whole sky, clouds and
+    /// all, burns alike. The fit runs on the image at ``burnMaskLongSide`` and is drawn back at full
+    /// size along the full image's edges. Nil when there's no burn.
+    public func encodeBurnMask(_ logExposure: any MTLTexture, on encoder: Encoder) -> (any MTLTexture)? {
+        guard let burn = parameters.enlarger.burn, burn.stops != 0 else { return nil }
+        let scale = min(1, Double(Self.burnMaskLongSide) / Double(max(logExposure.width, logExposure.height)))
+        let small = gpu.makeTexture(width: max(1, Int((Double(logExposure.width) * scale).rounded())),
+                                    height: max(1, Int((Double(logExposure.height) * scale).rounded())))
+        let bright = gpu.makeTexture(width: small.width, height: small.height, pixelFormat: .r32Float)
+        let coefficients = gpu.makeTexture(width: small.width, height: small.height)
+        let mask = gpu.makeTexture(width: logExposure.width, height: logExposure.height, pixelFormat: .r32Float)
+        encoder.encodeCommands {
+            MPSImageLanczosScale(device: gpu.device).encode(commandBuffer: $0, sourceTexture: logExposure,
+                                                            destinationTexture: small)
+        }
+        var threshold = Float(burn.threshold)
+        gpu.encode("burn_threshold", on: encoder, textures: [small, bright], grid: small.size) {
+            $0.setBytes(&threshold, length: 4, index: 0)
+        }
+        // A window of 9 of the 256 pixels (3.5 % of the long side); ε in (log10 exposure)²: edges
+        // under about 0.2 stops are smoothed over.
+        let filter = MPSImageGuidedFilter(device: gpu.device, kernelDiameter: 9)
+        filter.epsilon = 0.004
+        encoder.encodeCommands {
+            filter.encodeRegression(to: $0, sourceTexture: bright, guidanceTexture: small, weightsTexture: nil,
+                                    destinationCoefficientsTexture: coefficients)
+            filter.encodeReconstruction(to: $0, guidanceTexture: logExposure, coefficientsTexture: coefficients,
+                                        destinationTexture: mask)
+        }
+        return mask
     }
 }
 
@@ -479,15 +517,17 @@ extension Simulation {
 extension Simulation {
     /// `rgb_in → rgb_out`: filming, printing (skipped when scanning the film itself) and scanning.
     public func encode(_ image: RGBImage, on encoder: Encoder) -> any MTLTexture {
-        let cmyFilm = encodeDevelop(encodeExpose(encodePreprocess(image, on: encoder), on: encoder), on: encoder)
-        return encodePrintAndScan(cmyFilm, on: encoder)
+        let logExposure = encodeExpose(encodePreprocess(image, on: encoder), on: encoder)
+        return encodePrintAndScan(encodeDevelop(logExposure, on: encoder),
+                                  burnMask: encodeBurnMask(logExposure, on: encoder), on: encoder)
     }
 
-    /// `cmy_film → rgb_out`: printing (skipped when scanning the film itself) and scanning. Only
-    /// reads `cmyFilm`.
-    public func encodePrintAndScan(_ cmyFilm: any MTLTexture, on encoder: Encoder) -> any MTLTexture {
+    /// `cmy_film → rgb_out`: printing (skipped when scanning the film itself), burned through
+    /// `burnMask`, and scanning. Only reads `cmyFilm`.
+    public func encodePrintAndScan(_ cmyFilm: any MTLTexture, burnMask: (any MTLTexture)? = nil,
+                                   on encoder: Encoder) -> any MTLTexture {
         let cmy = parameters.io.scanFilm
-            ? cmyFilm : encodePrintDevelop(encodePrintExpose(cmyFilm, on: encoder), on: encoder)
+            ? cmyFilm : encodePrintDevelop(encodePrintExpose(cmyFilm, burnMask: burnMask, on: encoder), on: encoder)
         return encodeScan(cmy, on: encoder)
     }
 

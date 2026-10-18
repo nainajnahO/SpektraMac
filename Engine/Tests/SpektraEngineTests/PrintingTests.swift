@@ -68,32 +68,35 @@ func printExposeMatchesLogEPrint(caseName: String) throws {
     #expect(difference.maxAbsolute < 1e-4)
 }
 
-/// The burn raises the print's log exposure by its stops × log10 2 at the top, fading linearly to
-/// none at its reach (pixel centres), below which the print is exactly as without it.
-@Test func burnRaisesTheTopOfThePrint() throws {
+/// The burn gives what's over its threshold its stops of extra print exposure and leaves the rest
+/// as it was, up to the edge between them: a film exposure of mid-grey on the left half and 4 stops
+/// over on the right, the negative itself the same all over.
+@Test func burnDarkensOnlyWhatIsBright() throws {
     var parameters = Parameters()
-    let (film, print, tables) = (try Profile.load("kodak_portra_400"), try Profile.load("kodak_portra_endura"),
-                                 try Tables.load())
-    let gpu = try GPU()
-    let (width, height) = (3, 10)
-    let input = gpu.upload(rgb: [Float](repeating: 0.8, count: width * height * 3), width: width, height: height)
-    func logExposure() throws -> [Float] {
-        let simulation = try Simulation(parameters: parameters, film: film, print: print, gpu: gpu, tables: tables)
-        return gpu.download(try gpu.run { simulation.encodePrintExpose(input, on: $0) })
+    parameters.enlarger.burn = Parameters.Burn(stops: 1.5, threshold: 2)
+    let simulation = try Simulation(parameters: parameters, film: Profile.load("kodak_portra_400"),
+                                    print: Profile.load("kodak_portra_endura"), gpu: GPU(), tables: Tables.load())
+    let gpu = simulation.gpu
+    let (width, height) = (64, 16)
+    let logExposure = (0..<height).flatMap { _ in
+        (0..<width).flatMap { x in [Float](repeating: x < width / 2 ? 0 : Float(4 * log10(2.0)), count: 3) }
     }
-    let plain = try logExposure()
-    parameters.enlarger.burn = Parameters.Burn(stops: 1.5, reach: 0.4)
-    let burned = try logExposure()
+    let film = gpu.upload(rgb: logExposure, width: width, height: height)
+    let cmy = gpu.upload(rgb: [Float](repeating: 0.8, count: width * height * 3), width: width, height: height)
+    let plain = gpu.download(try gpu.run { simulation.encodePrintExpose(cmy, on: $0) })
+    let burned = gpu.download(try gpu.run { encoder in
+        simulation.encodePrintExpose(cmy, burnMask: simulation.encodeBurnMask(film, on: encoder), on: encoder)
+    })
+    var (darkest, brightest) = (0.0, Double.infinity)
     for y in 0..<height {
-        let ramp = max(0, 1 - (Double(y) + 0.5) / (0.4 * Double(height)))
-        for index in (y * width * 3)..<((y + 1) * width * 3) {
-            if ramp == 0 {
-                #expect(burned[index] == plain[index], "row \(y)")
-            } else {
-                #expect(abs(Double(burned[index] - plain[index]) - 1.5 * ramp * log10(2)) < 1e-5, "row \(y)")
-            }
+        for x in 0..<width {
+            let stops = Double(burned[(y * width + x) * 3 + 1] - plain[(y * width + x) * 3 + 1]) / log10(2)
+            if x < width / 2 { darkest = max(darkest, abs(stops)) } else { brightest = min(brightest, stops) }
         }
     }
+    print("burn: dark half up to \(darkest) stops, bright half at least \(brightest)")
+    #expect(darkest < 0.01)
+    #expect(abs(brightest - 1.5) < 0.01)
 }
 
 @Test(arguments: ["kodak_portra_endura", "kodak_2383"])

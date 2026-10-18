@@ -121,8 +121,8 @@ extension Parameters {
 
     /// What a LUT can hold: `digest_params` with `debug.deactivate_spatial_effects` and
     /// `deactivate_stochastic_effects`, and no highlight boost (it scales by the image's maximum),
-    /// as `debug.lut_mode` has it, nor burn (it depends on where a pixel is). Unlike lut_mode it
-    /// keeps the exposure and print settings, which the LUT carries.
+    /// as `debug.lut_mode` has it, nor burn (its mask depends on the pixels around). Unlike
+    /// lut_mode it keeps the exposure and print settings, which the LUT carries.
     public mutating func applyPerPixelMode() {
         filmRender.halation.active = false
         filmRender.halation.boostEv = 0
@@ -200,11 +200,12 @@ extension Parameters {
         }
     }
 
-    /// A darkroom printer's burn, for a sky: extra print exposure of `stops` at the top edge,
-    /// fading linearly to none `reach` (a fraction of the height) down from it.
+    /// A darkroom printer's burn, for a sky or anything else bright: `stops` of extra print
+    /// exposure where the film's exposure is over `threshold` stops above mid-grey, through a mask
+    /// that follows the photo's edges (``Simulation/encodeBurnMask(_:on:)``).
     public struct Burn: Codable, Sendable, Equatable {
         public var stops: Double
-        public var reach: Double
+        public var threshold: Double
     }
 
     /// `apply_database_neutral_print_filters`: the C, M, Y filters that print a grey neutral for
