@@ -116,6 +116,8 @@ final class PhotoModel {
     private var awaitsRelease = false
     /// Display-sized rendering of the last simulation.
     private(set) var displayImage: CGImage?
+    /// The Print tab's tone graph for the controls on screen, made with each preview.
+    private(set) var toneGraph: ToneGraph?
     /// The render `displayImage` comes from.
     private(set) var shownMode: RenderMode?
     /// The photo's long side fitted on the canvas, in screen pixels: what renders are reduced to
@@ -291,6 +293,9 @@ final class PhotoModel {
                         if !isFinished {
                             try await show(controls: controls, mode: .preview, engine: engine, photo: photo)
                         }
+                        // With each preview, so the graph follows a slider or its own handles as
+                        // they move.
+                        toneGraph = try await engine.toneGraph(controls: controls)
                     } while controls != self.controls
                     isPreviewing = false
                     if isAdjusting && !isFinished {
@@ -393,7 +398,7 @@ final class PhotoModel {
     /// a frame each, rendered in preview mode on a small image of the photo (``RenderMode/thumbnail``).
     /// Halation, grain and glare barely show at that size, so they have none.
     enum Strip: CaseIterable {
-        case exposure, couplerSaturation, printContrast, printExposure
+        case exposure, couplerSaturation, printExposure
     }
     static let framesPerStrip = 5
     /// Each strip's frames, left to right. A strip whose control changes nothing the controls show
@@ -409,7 +414,6 @@ final class PhotoModel {
         switch strip {
         case .exposure: exposureRange
         case .couplerSaturation: 0...1.5
-        case .printContrast: 0.5...2
         case .printExposure: 0...2
         }
     }
@@ -459,7 +463,7 @@ final class PhotoModel {
         switch strip {
         case .exposure: true
         case .couplerSaturation: controls.couplers
-        case .printContrast, .printExposure: !controls.scanFilm
+        case .printExposure: !controls.scanFilm
         }
     }
 
@@ -472,8 +476,6 @@ final class PhotoModel {
             controls.exposureOffsetEV = value - photo.metering.reading(resolving: controls.exposureMark).ev
         case .couplerSaturation:
             controls.couplerSaturation = value
-        case .printContrast:
-            controls.printContrast = value
         case .printExposure:
             controls.printExposure = value
         }

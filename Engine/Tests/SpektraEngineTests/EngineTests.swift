@@ -598,3 +598,59 @@ extension PhotoOpeningTests {
         #expect(lines[3] == Substring(String(format: "%.6f %.6f %.6f", lut.values[0], lut.values[1], lut.values[2])))
     }
 }
+
+extension PhotoOpeningTests {
+    /// The tone graph of a photo of one grey, exposed `e` stops over mid-grey: its curve at `e` is
+    /// the colour a render of the photo gives when nothing that depends on other pixels is on, and
+    /// each layer's histogram is all in the bin of the curve's film exposure there. The print
+    /// exposure adds its log₁₀ to the paper's exposure and the contrasts leave that alone, as the
+    /// graph's handles take it.
+    @Test func toneGraphIsTheRenderOfAGrey() async throws {
+        let e: Float = 1
+        var controls = Controls()
+        controls.exposureOffsetEV = Double(e)
+        controls.halation = false
+        controls.grain = false
+        controls.glare = false
+        let (width, height) = (16, 16)
+        let rgba = (0..<(width * height)).flatMap { _ in [Float](arrayLiteral: 0.5, 0.5, 0.5, 1) }
+        let photo = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+                            size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: Engine.exportColorSpace)
+        let engine = try Engine()
+        _ = try await engine.open(photo)
+        let rendered = try await engine.render(controls: controls, mode: .export)
+        let graph = try await engine.toneGraph(controls: controls)
+        #expect(graph.curve.count == 256 && graph.histogram.count == 256)
+
+        // `e` between two greys of the ramp.
+        let position = (e - ToneGraph.stops.lowerBound) / (ToneGraph.stops.upperBound - ToneGraph.stops.lowerBound)
+            * Float(graph.curve.count - 1)
+        let (below, fraction) = (Int(position), position - position.rounded(.down))
+        func atE(_ value: KeyPath<ToneGraph.Point, SIMD3<Float>>) -> SIMD3<Float> {
+            graph.curve[below][keyPath: value] * (1 - fraction) + graph.curve[below + 1][keyPath: value] * fraction
+        }
+        let print = atE(\.print)
+        let expected = (0..<3).map { min(max(Double(rendered.pixels[$0]), 0), 1) }
+        #expect(Difference((0..<3).map { Double(print[$0]) }, expected).maxAbsolute < 2e-3, "\(print) vs \(expected)")
+
+        let film = atE(\.film)
+        #expect(abs(film.y - e) < 0.1)
+        for channel in 0..<3 {
+            let bin = Int((film[channel] - ToneGraph.stops.lowerBound) / 16 * 256)
+            let full = graph.histogram.firstIndex { $0[channel] > 0 }
+            #expect(graph.histogram.map { $0[channel] }.reduce(0, +) == 1)
+            #expect(full.map { abs($0 - bin) <= 1 } == true, "channel \(channel): bin \(String(describing: full)), expected \(bin)")
+        }
+
+        controls.printExposure = 2
+        let brighter = try await engine.toneGraph(controls: controls)
+        controls.printContrast = 1.5
+        let steeper = try await engine.toneGraph(controls: controls)
+        for index in graph.curve.indices {
+            let shift = brighter.curve[index].paper - graph.curve[index].paper
+            #expect(abs(shift - log10(2)).max() < 1e-4)
+            #expect(steeper.curve[index].paper == brighter.curve[index].paper)
+        }
+        #expect(steeper.curve[160].print.y > brighter.curve[160].print.y)  // 2 stops up: lighter
+    }
+}

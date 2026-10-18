@@ -3,6 +3,7 @@ import CoreImage
 import Dispatch
 import Foundation
 import Metal
+import MetalPerformanceShaders
 import UniformTypeIdentifiers
 
 /// What the app's controls set (PLAN.md, Day 31). Everything else stays at Spektrafilm's defaults
@@ -103,6 +104,32 @@ public struct LUT: Sendable {
         }
         return Data(text.utf8)
     }
+}
+
+/// What the Print tab's tone graph draws (``Engine/toneGraph(controls:)``), over the photo's tones:
+/// the film's exposure in stops over mid-grey, the Exposure control's units.
+public struct ToneGraph: Sendable {
+    /// One grey of the ramp the curve is rendered from.
+    public struct Point: Sendable {
+        /// The film's exposure to the grey, per layer (red-, green- and blue-sensitive), in stops
+        /// over mid-grey.
+        public let film: SIMD3<Float>
+        /// The paper's exposure to the negative of it, per layer, as log₁₀: 0 is a mid-grey
+        /// negative's at a print exposure of 1. The contrasts scale the paper's response about 0
+        /// (``printCurves(_:logExposure:morph:positive:)``), and the print exposure adds its log₁₀.
+        public let paper: SIMD3<Float>
+        /// The print's colour for it: display-encoded sRGB, 0–1.
+        public let print: SIMD3<Float>
+    }
+
+    /// The tones the ramp and the histogram span, in stops over mid-grey.
+    public static let stops: ClosedRange<Float> = -8...8
+    /// The print's tone curve: a ramp of greys evenly spaced in stops across ``stops``.
+    public let curve: [Point]
+    /// How much of the photo is at each tone of the film's exposure, per layer: bins evenly spaced
+    /// across ``stops``, each the fraction of the preview's pixels in it. Exposures outside the
+    /// range count in the end bins.
+    public let histogram: [SIMD3<Float>]
 }
 
 /// What a render is for.
@@ -497,6 +524,101 @@ public actor Engine {
         }
         // A colour outside the colour model (NaN) is black, as in a saved photo.
         return LUT(size: size, values: gpu.download(output).map { $0.isNaN ? 0 : min(max($0, 0), 1) })
+    }
+
+    /// The open photo's ``ToneGraph`` as `controls` set it. The curve is the print's whatever the
+    /// toolbar shows, with what a LUT holds (``Parameters/applyPerPixelMode()``): a ramp of greys
+    /// rendered as ``lut(controls:exposureEV:size:)`` renders its lattice. The histogram is of the
+    /// preview's film exposure, kept from its last render if that had these controls' exposure.
+    public func toneGraph(controls: Controls) throws -> ToneGraph {
+        guard photo != nil else { preconditionFailure("A tone graph before a photo is open") }
+        // Here rather than in a function holding parameters: a debug build's render takes most of
+        // the queue's 512 KB stack.
+        if !previewHasExposure(of: controls) {
+            _ = try renderTexture(controls: controls, mode: .preview)
+        }
+        return ToneGraph(curve: try toneCurve(controls: controls),
+                         histogram: try histogram(of: photo!.preview.exposure!.texture))
+    }
+
+    /// Whether the preview's last render made its film exposure as `controls` set it, as it keys it.
+    private func previewHasExposure(of controls: Controls) -> Bool {
+        let parameters = Self.parameters(for: controls, film: profiles[controls.film]!, print: profiles[controls.paper]!,
+                                         database: neutralPrintFilters, mode: .preview)
+        let exposureEV = photo!.preview.metering.reading(resolving: controls.exposureMark).ev + controls.exposureOffsetEV
+        return photo!.preview.exposure?.key
+            == Step.Key(film: controls.film, parameters: Self.exposureParameters(parameters), exposureEV: exposureEV)
+    }
+
+    /// The last tone curve and what it was rendered from: the exposure doesn't change it.
+    private var lastToneCurve: (parameters: Parameters, film: String, paper: String, curve: [ToneGraph.Point])?
+
+    /// Stops per unit of log₁₀ exposure.
+    private nonisolated static let stopsPerLog10 = log2(Float(10))
+
+    /// ``ToneGraph/curve``: 256 greys from mid-grey (0.184, what auto-exposure brings the photo's
+    /// mean to) × 2^``ToneGraph/stops``, in the input space, through the film, the paper and the scan.
+    private func toneCurve(controls: Controls) throws -> [ToneGraph.Point] {
+        let film = profiles[controls.film]!, print = profiles[controls.paper]!
+        var parameters = Self.parameters(for: controls, film: film, print: print, database: neutralPrintFilters,
+                                         mode: .export)
+        parameters.applyPerPixelMode()
+        parameters.io.scanFilm = false
+        if let last = lastToneCurve, last.parameters == parameters, last.film == controls.film,
+           last.paper == controls.paper {
+            return last.curve
+        }
+        let simulation = try Simulation(parameters: parameters, film: film, print: print, gpu: gpu, tables: tables,
+                                        cache: cache)
+        let count = 256, stops = ToneGraph.stops
+        let ramp = (0..<count).flatMap { index in
+            let tone = stops.lowerBound + Float(index) / Float(count - 1) * (stops.upperBound - stops.lowerBound)
+            return [Float](repeating: 0.184 * exp2(tone), count: 3)
+        }
+        let input = gpu.upload(rgb: ramp, width: count, height: 1)
+        // The greys are already exposed: no auto-exposure.
+        let (filmExposure, paperExposure, output) = try gpu.run { encoder in
+            let filmExposure = simulation.encodeExpose(input, on: encoder)
+            let paperExposure = simulation.encodePrintExpose(simulation.encodeDevelop(filmExposure, on: encoder),
+                                                             on: encoder)
+            return (filmExposure, paperExposure,
+                    simulation.encodeScan(simulation.encodePrintDevelop(paperExposure, on: encoder), on: encoder))
+        }
+        let (filmValues, paperValues, printValues) = (gpu.download(filmExposure), gpu.download(paperExposure),
+                                                      gpu.download(output))
+        func pixel(_ values: [Float], _ index: Int) -> SIMD3<Float> {
+            SIMD3(values[3 * index], values[3 * index + 1], values[3 * index + 2])
+        }
+        let curve = (0..<count).map { index in
+            let colour = pixel(printValues, index)
+            // A colour outside the colour model (NaN) is black, as in a saved photo.
+            return ToneGraph.Point(film: pixel(filmValues, index) * Self.stopsPerLog10, paper: pixel(paperValues, index),
+                                   print: colour.replacing(with: 0, where: colour .!= colour)
+                                       .clamped(lowerBound: .zero, upperBound: .one))
+        }
+        lastToneCurve = (parameters, controls.film, controls.paper, curve)
+        return curve
+    }
+
+    /// ``ToneGraph/histogram`` of a film exposure: 256 bins, counted on the GPU
+    /// (`MPSImageHistogram`, which clamps values outside its range into the end bins).
+    private func histogram(of logExposure: any MTLTexture) throws -> [SIMD3<Float>] {
+        let bins = 256, stops = ToneGraph.stops
+        var info = MPSImageHistogramInfo(numberOfHistogramEntries: bins, histogramForAlpha: false,
+                                         minPixelValue: SIMD4(repeating: stops.lowerBound / Self.stopsPerLog10),
+                                         maxPixelValue: SIMD4(repeating: stops.upperBound / Self.stopsPerLog10))
+        let histogram = MPSImageHistogram(device: gpu.device, histogramInfo: &info)
+        let counts = gpu.device.makeBuffer(length: histogram.histogramSize(forSourceFormat: logExposure.pixelFormat),
+                                           options: .storageModeShared)!
+        try gpu.run { encoder in
+            encoder.encodeCommands { histogram.encode(to: $0, sourceTexture: logExposure, histogram: counts, histogramOffset: 0) }
+        }
+        // A channel's bins, then the next channel's.
+        let values = counts.contents().assumingMemoryBound(to: UInt32.self)
+        let pixels = Float(logExposure.width * logExposure.height)
+        return (0..<bins).map { bin in
+            SIMD3(Float(values[bin]), Float(values[bins + bin]), Float(values[2 * bins + bin])) / pixels
+        }
     }
 
     /// What the developed film depends on: every parameter but the printing and scanning ones.

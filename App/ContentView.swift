@@ -1,3 +1,4 @@
+import Charts
 import SpektraEngine
 import SwiftUI
 import UniformTypeIdentifiers
@@ -198,18 +199,18 @@ private struct SettingsPanel: View {
                             return controls
                         }
                         AdjustmentGroup("Contrast", systemImage: "circle.lefthalf.filled", adjustment: .contrast) {
-                            ThumbnailStrip("Contrast", value: $model.controls.printContrast,
-                                           in: model.range(of: .printContrast), step: 0.05, frames: model.strips[.printContrast])
-                                .help("The paper's contrast around mid-grey: lower brings a bright sky and dark faces closer together.")
+                            ToneGraphView()
                         } options: {
-                            ValueSlider("Contrast", value: $model.controls.printContrast, in: model.range(of: .printContrast),
+                            ValueSlider("Contrast", value: $model.controls.printContrast, in: ToneGraphView.contrastRange,
                                         step: 0.05, neutral: 1, format: .number.precision(.fractionLength(2)))
                                 .help("The paper's contrast around mid-grey: lower brings a bright sky and dark faces closer together.")
-                            ValueSlider("Highlight contrast", value: $model.controls.printHighlightContrast, in: 0.5...2,
-                                        step: 0.05, neutral: 1, format: .number.precision(.fractionLength(2)))
+                            ValueSlider("Highlight contrast", value: $model.controls.printHighlightContrast,
+                                        in: ToneGraphView.contrastRange, step: 0.05, neutral: 1,
+                                        format: .number.precision(.fractionLength(2)))
                                 .help("The paper's contrast in the light tones alone: lower keeps more detail in a bright sky.")
-                            ValueSlider("Shadow contrast", value: $model.controls.printShadowContrast, in: 0.5...2,
-                                        step: 0.05, neutral: 1, format: .number.precision(.fractionLength(2)))
+                            ValueSlider("Shadow contrast", value: $model.controls.printShadowContrast,
+                                        in: ToneGraphView.contrastRange, step: 0.05, neutral: 1,
+                                        format: .number.precision(.fractionLength(2)))
                                 .help("The paper's contrast in the dark tones alone: lower opens up faces in shadow.")
                         }
                         AdjustmentGroup("Enlarger", systemImage: "lightbulb", adjustment: .enlarger) {
@@ -914,6 +915,354 @@ private struct ThumbnailStrip: View {
     private func set(_ newValue: Double) {
         let stepped = range.lowerBound + ((newValue - range.lowerBound) / step).rounded() * step
         value = min(max(stepped, range.lowerBound), range.upperBound)
+    }
+}
+
+// MARK: - Tone graph
+
+/// The print's tone curve, drawn as Photos draws Levels: behind it, how much of the photo is at
+/// each tone of the film's exposure. Both run over the photo's tones in stops over mid-grey, the
+/// Exposure control's units (``ToneGraph``). The menu shows the neutral curve, or one colour's over
+/// the other two, which spread apart with the filter shifts. Dragging the middle point sideways
+/// sets the print exposure; the side points up or down, the shadow and highlight contrast; and
+/// the curve anywhere else, the contrast, about the middle point. The sliders under Options and in
+/// Enlarger stand in for it with VoiceOver and the keyboard.
+private struct ToneGraphView: View {
+    @Environment(PhotoModel.self) private var model
+    @Environment(\.isEnabled) private var isEnabled
+    @SceneStorage("toneGraph.channel") private var channel = ToneChannel.neutral
+    /// While the pointer is pressed in the graph, and what it's moving, if anything.
+    @State private var isPressed = false
+    @State private var drag: ToneDrag?
+    @State private var hovered: ToneHandle?
+
+    /// The contrasts' range, their sliders' too.
+    static let contrastRange = 0.5...2.0
+    /// The tones the graph shows: the print is black or white past them.
+    private static let tones: ClosedRange<Float> = -6...6
+    /// How far the side points are from the middle one, in stops.
+    private static let sideDistance: Float = 2
+    /// How close to a point the pointer grabs it, in points.
+    private static let grabDistance: CGFloat = 10
+
+    var body: some View {
+        if let graph = model.toneGraph {
+            chart(graph)
+                .opacity(isEnabled ? 1 : 0.5)
+                .help("Drag the middle point sideways to set the print exposure, the side points up or down for the shadow and highlight contrast, or the curve elsewhere for the contrast.")
+        } else {
+            RoundedRectangle(cornerRadius: 5).fill(.quaternary)
+                .frame(height: 130)
+        }
+    }
+
+    private func chart(_ graph: ToneGraph) -> some View {
+        let shown = ToneCurve(graph, channel: channel)
+        // The other colours' curves under the one shown, faint.
+        let others = channel == .neutral ? [] : ToneChannel.colours.filter { $0 != channel }.map { ToneCurve(graph, channel: $0) }
+        let active = drag?.handle ?? hovered
+        return Chart {
+            ForEach(histogram(graph)) { bin in
+                AreaMark(x: .value("Tone", bin.tone), y: .value("Share", bin.height), series: .value("Series", "Histogram"))
+                    .foregroundStyle(channel.colour.opacity(0.25))
+            }
+            ForEach(others + [shown]) { curve in
+                let isShown = curve.channel == channel
+                ForEach(curve.points(in: Self.tones)) { point in
+                    LineMark(x: .value("Tone", point.tone), y: .value("Print", point.print),
+                             series: .value("Series", curve.channel.rawValue))
+                        .foregroundStyle(curve.channel.colour.opacity(isShown ? 1 : 0.35))
+                        .lineStyle(StrokeStyle(lineWidth: isShown ? 1.5 : 1))
+                }
+            }
+            ForEach(shown.handles(sideDistance: Self.sideDistance)) { handle in
+                PointMark(x: .value("Tone", handle.tone), y: .value("Print", handle.print))
+                    .symbol {
+                        Circle().fill(handle.id == active ? AnyShapeStyle(.tint) : AnyShapeStyle(.white))
+                            .frame(width: 9, height: 9)
+                            .shadow(color: .black.opacity(0.5), radius: 1)
+                    }
+            }
+        }
+        .chartXScale(domain: Self.tones)
+        .chartYScale(domain: 0...1)
+        .chartYAxis(.hidden)
+        .chartXAxis {
+            AxisMarks(values: Array(stride(from: Self.tones.lowerBound, through: Self.tones.upperBound, by: 2))) { value in
+                // Mid-grey brighter.
+                AxisGridLine(stroke: StrokeStyle(lineWidth: value.as(Float.self) == 0 ? 1 : 0.5))
+                AxisValueLabel {
+                    if let stops = value.as(Float.self) {
+                        Text(stops.formatted(.number.sign(strategy: .always(includingZero: false))))
+                    }
+                }
+            }
+        }
+        .chartPlotStyle { $0.background(.quinary).clipShape(.rect(cornerRadius: 5)) }
+        .chartOverlay { proxy in
+            GeometryReader { geometry in
+                let origin = proxy.plotFrame.map { geometry[$0].origin } ?? .zero
+                Rectangle().fill(.clear).contentShape(.rect)
+                    .gesture(DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let start = CGPoint(x: value.startLocation.x - origin.x, y: value.startLocation.y - origin.y)
+                            if !isPressed {
+                                isPressed = true
+                                drag = beginDrag(at: start, proxy: proxy)
+                                if drag != nil {
+                                    model.isAdjusting = true
+                                }
+                            }
+                            guard let drag,
+                                  let startTone = proxy.value(atX: start.x, as: Float.self),
+                                  let tone = proxy.value(atX: value.location.x - origin.x, as: Float.self),
+                                  let startPrint = proxy.value(atY: start.y, as: Float.self),
+                                  let print = proxy.value(atY: value.location.y - origin.y, as: Float.self) else { return }
+                            move(drag, sideways: tone - startTone, up: print - startPrint)
+                        }
+                        .onEnded { _ in
+                            if drag != nil {
+                                model.isAdjusting = false
+                            }
+                            isPressed = false
+                            drag = nil
+                        })
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let location) where isEnabled:
+                            hovered = handle(at: CGPoint(x: location.x - origin.x, y: location.y - origin.y),
+                                             among: shown.handles(sideDistance: Self.sideDistance), proxy: proxy)?.id
+                        case .active, .ended:
+                            hovered = nil
+                        }
+                    }
+                    .pointerStyle(active.map { $0 == .middle ? PointerStyle.columnResize : .rowResize })
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            // Where the curve is darkest, so it's clear of the menu.
+            Picker("Curve", selection: $channel) {
+                ForEach(ToneChannel.allCases, id: \.self) { Text($0.rawValue) }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .fixedSize()
+            .controlSize(.small)
+            .padding(4)
+        }
+        .frame(height: 130)
+    }
+
+    /// The photo's share at each tone, as the menu shows it (neutral: the layers together), scaled
+    /// so the tallest bin nearly fills the graph. Bins past the graph's tones count in its end ones,
+    /// as the engine counts those past its range, so clipped tones still show.
+    private func histogram(_ graph: ToneGraph) -> [HistogramBin] {
+        let stops = ToneGraph.stops
+        let width = (stops.upperBound - stops.lowerBound) / Float(graph.histogram.count)
+        let tones = graph.histogram.indices.map { stops.lowerBound + (Float($0) + 0.5) * width }
+        let shares = graph.histogram.map { share in channel.index.map { share[$0] } ?? share.sum() / 3 }
+        let inside = tones.indices.filter { Self.tones.contains(tones[$0]) }
+        guard let first = inside.first, let last = inside.last else { return [] }
+        var shown = inside.map { shares[$0] }
+        shown[0] += shares[..<first].reduce(0, +)
+        shown[shown.count - 1] += shares[(last + 1)...].reduce(0, +)
+        // The end bins left out: a photo with clipped tones would flatten the rest.
+        let peak = shown.dropFirst().dropLast().max() ?? 0
+        return inside.indices.map { index in
+            HistogramBin(id: index, tone: tones[inside[index]], height: peak > 0 ? min(shown[index] / peak * 0.9, 1) : 0)
+        }
+    }
+
+    /// What pressing at `point` (in the plot) grabs: a point of the curve under it, else the curve
+    /// there, unless that's by the middle point, which the contrast leaves where it is.
+    private func beginDrag(at point: CGPoint, proxy: ChartProxy) -> ToneDrag? {
+        guard isEnabled, let graph = model.toneGraph else { return nil }
+        let curve = ToneCurve(graph, channel: channel)
+        let handles = curve.handles(sideDistance: Self.sideDistance)
+        guard let middle = handles.first(where: { $0.id == .middle }) else { return nil }
+        if let handle = handle(at: point, among: handles, proxy: proxy) {
+            return ToneDrag(handle: handle.id, curve: curve, controls: model.controls, tone: handle.tone, print: handle.print)
+        }
+        guard let tone = proxy.value(atX: point.x, as: Float.self), abs(tone - middle.tone) > 0.5 else { return nil }
+        return ToneDrag(handle: nil, curve: curve, controls: model.controls, tone: tone,
+                        print: curve.value(of: curve.print, at: tone))
+    }
+
+    /// The point of the curve within ``grabDistance`` of `point` (in the plot), the nearest.
+    private func handle(at point: CGPoint, among handles: [ToneCurve.Handle], proxy: ChartProxy) -> ToneCurve.Handle? {
+        func distance(_ handle: ToneCurve.Handle) -> CGFloat {
+            guard let x = proxy.position(forX: handle.tone), let y = proxy.position(forY: handle.print) else {
+                return .infinity
+            }
+            return hypot(x - point.x, y - point.y)
+        }
+        return handles.filter { distance($0) <= Self.grabDistance }.min { distance($0) < distance($1) }
+    }
+
+    /// Sets the control `drag` moves for the pointer `sideways` and `up` from where it began, in
+    /// stops and brightness, from the curve as it began: so the grabbed point follows the pointer.
+    private func move(_ drag: ToneDrag, sideways: Float, up: Float) {
+        let curve = drag.curve
+        switch drag.handle {
+        case .middle:
+            // The middle point is where the paper's exposure is 0, and the print exposure adds its
+            // log₁₀ to it: this puts 0 at the pointer's tone.
+            let paper = curve.value(of: curve.paper, at: drag.tone + sideways)
+            set(\.printExposure, to: drag.controls.printExposure * pow(10, -Double(paper)), in: model.range(of: .printExposure))
+        case .shadows:
+            scale(\.printShadowContrast, drag, up: up)
+        case .highlights:
+            scale(\.printHighlightContrast, drag, up: up)
+        case nil:
+            scale(\.printContrast, drag, up: up)
+        }
+    }
+
+    /// The contrasts scale the paper's response about its exposure 0 (``ToneGraph/Point/paper``): a
+    /// factor f gives exposure E the response the curve had at f·E. So for the grabbed point's
+    /// brightness moved `up`, f is the paper's exposure where the curve as it began has that
+    /// brightness, over the point's own.
+    private func scale(_ contrast: WritableKeyPath<Controls, Double>, _ drag: ToneDrag, up: Float) {
+        let curve = drag.curve
+        let reached = curve.tone(where: curve.print, is: drag.print + up, near: drag.tone)
+        let factor = curve.value(of: curve.paper, at: reached) / curve.value(of: curve.paper, at: drag.tone)
+        guard factor.isFinite else { return }
+        set(contrast, to: drag.controls[keyPath: contrast] * Double(max(factor, 0)), in: Self.contrastRange)
+    }
+
+    /// Sets `control` to `value` in hundredths, as its slider shows it, within `range`.
+    private func set(_ control: WritableKeyPath<Controls, Double>, to value: Double, in range: ClosedRange<Double>) {
+        let value = min(max((value * 100).rounded() / 100, range.lowerBound), range.upperBound)
+        // Setting the controls renders, even to what they are.
+        if model.controls[keyPath: control] != value {
+            model.controls[keyPath: control] = value
+        }
+    }
+}
+
+/// The tone graph menu's choices: the neutral curve, or a colour's.
+private enum ToneChannel: String, CaseIterable {
+    case neutral = "Neutral", red = "Red", green = "Green", blue = "Blue"
+
+    static let colours: [ToneChannel] = [.red, .green, .blue]
+
+    /// Its layer and the print's channel; none for neutral.
+    var index: Int? {
+        switch self {
+        case .neutral: nil
+        case .red: 0
+        case .green: 1
+        case .blue: 2
+        }
+    }
+
+    var colour: Color {
+        switch self {
+        case .neutral: .primary
+        case .red: .red
+        case .green: .green
+        case .blue: .blue
+        }
+    }
+}
+
+/// The tone graph's points: the print exposure's in the middle, the shadow and highlight
+/// contrasts' either side.
+private enum ToneHandle {
+    case shadows, middle, highlights
+}
+
+/// One bar of the tone graph's histogram, its height 0–1.
+private struct HistogramBin: Identifiable {
+    let id: Int
+    let tone: Float
+    let height: Float
+}
+
+/// A drag on the tone graph: the point it grabbed (none for the curve) where it was, and the curve
+/// and controls as it began.
+private struct ToneDrag {
+    let handle: ToneHandle?
+    let curve: ToneCurve
+    let controls: Controls
+    let tone: Float
+    let print: Float
+}
+
+/// One colour's tone curve, or the neutral one, from a ``ToneGraph``: per grey of its ramp, the
+/// tone (the film's exposure, in stops), the paper's log₁₀ exposure and the print's brightness.
+private struct ToneCurve: Identifiable {
+    struct Point: Identifiable {
+        let id: Int
+        let tone: Float
+        let print: Float
+    }
+
+    struct Handle: Identifiable {
+        let id: ToneHandle
+        let tone: Float
+        let print: Float
+    }
+
+    let channel: ToneChannel
+    let tones: [Float]
+    let paper: [Float]
+    let print: [Float]
+    var id: ToneChannel { channel }
+
+    init(_ graph: ToneGraph, channel: ToneChannel) {
+        self.channel = channel
+        if let index = channel.index {
+            tones = graph.curve.map { $0.film[index] }
+            paper = graph.curve.map { $0.paper[index] }
+            print = graph.curve.map { $0.print[index] }
+        } else {
+            // The layers' mean, as the histogram has them together; the brightness as Rec. 709 luma.
+            tones = graph.curve.map { $0.film.sum() / 3 }
+            paper = graph.curve.map { $0.paper.sum() / 3 }
+            print = graph.curve.map { ($0.print * SIMD3(0.2126, 0.7152, 0.0722)).sum() }
+        }
+    }
+
+    /// The points within `range`, and the nearest past each end, so the line reaches them.
+    func points(in range: ClosedRange<Float>) -> [Point] {
+        let first = max((tones.firstIndex { $0 >= range.lowerBound } ?? 0) - 1, 0)
+        let last = min((tones.lastIndex { $0 <= range.upperBound } ?? tones.count - 1) + 1, tones.count - 1)
+        return (first...last).map { Point(id: $0, tone: tones[$0], print: print[$0]) }
+    }
+
+    /// The middle point where the paper's exposure is 0 (a mid-grey negative's at a print exposure
+    /// of 1), and the side points `sideDistance` stops either side; none if it's never 0.
+    func handles(sideDistance: Float) -> [Handle] {
+        guard paper.contains(where: { $0 <= 0 }), paper.contains(where: { $0 >= 0 }) else { return [] }
+        let middle = tone(where: paper, is: 0, near: 0)
+        return [(ToneHandle.shadows, middle - sideDistance), (.middle, middle), (.highlights, middle + sideDistance)]
+            .map { Handle(id: $0, tone: $1, print: value(of: print, at: $1)) }
+    }
+
+    /// `values` at `tone`, between the ramp's greys; past its ends, the end's.
+    func value(of values: [Float], at tone: Float) -> Float {
+        guard let above = tones.firstIndex(where: { $0 >= tone }) else { return values[values.count - 1] }
+        guard above > 0 else { return values[0] }
+        let fraction = (tone - tones[above - 1]) / (tones[above] - tones[above - 1])
+        return values[above - 1] + fraction * (values[above] - values[above - 1])
+    }
+
+    /// The tone nearest `near` where `values` are `target`, brought within their range.
+    func tone(where values: [Float], is target: Float, near: Float) -> Float {
+        let target = min(max(target, values.min()!), values.max()!)
+        var nearest = near
+        var nearestDistance = Float.infinity
+        for index in values.indices.dropLast() {
+            let (from, to) = (values[index], values[index + 1])
+            guard min(from, to) <= target && target <= max(from, to) else { continue }
+            let fraction = from == to ? 0 : (target - from) / (to - from)
+            let tone = tones[index] + fraction * (tones[index + 1] - tones[index])
+            if abs(tone - near) < nearestDistance {
+                (nearest, nearestDistance) = (tone, abs(tone - near))
+            }
+        }
+        return nearest
     }
 }
 
