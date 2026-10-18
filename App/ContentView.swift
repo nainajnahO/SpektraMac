@@ -231,13 +231,13 @@ private struct SettingsPanel: View {
                                 .help("A flash of plain light on the paper before the print, so light tones such as a bright sky gain some tone. It darkens the whole print: lower the print exposure to bring the mid-tones back.")
                         }
                         AdjustmentGroup("Burn", systemImage: "sun.horizon", adjustment: .burn, isOn: $model.controls.burn) {
-                            ValueSlider("Strength", value: $model.controls.burnStops, in: 0...3, step: 0.1,
+                            ValueSlider("Strength", value: $model.controls.burnStops, in: ToneGraphView.burnStopsRange, step: 0.1,
                                         format: .number.precision(.fractionLength(1)), unit: "EV") {
                                 model.isAdjustingBurn = $0
                             }
                             .help("Extra enlarger exposure where the photo is bright, as a darkroom printer burns in a sky: a pale sky darkens and gets its colour back, and the rest of the print stays as it is.")
-                            ValueSlider("Threshold", value: $model.controls.burnThreshold, in: 0...6, step: 0.1,
-                                        format: ExposureStrip.stops, unit: "EV") {
+                            ValueSlider("Threshold", value: $model.controls.burnThreshold, in: ToneGraphView.burnThresholdRange,
+                                        step: 0.1, format: ExposureStrip.stops, unit: "EV") {
                                 model.isAdjustingBurn = $0
                             }
                             .help("How bright a part of the photo must be to burn, in stops over mid-grey. About +2.5 is where a screen's white sits; lower takes in more. Holding a Burn slider shows what burns, white on black.")
@@ -964,6 +964,10 @@ private struct ToneGraphView: View {
     /// paper's black or white (past 4 the middle drifts); below 0.1 they barely move closer to its
     /// mid-grey (measured on Portra Endura, 2383 and Crystal Archive).
     static let contrastRange = 0.1...3.0
+    /// The burn's strength (EV) and threshold (stops over mid-grey), their sliders' too: its line's
+    /// whole way. The threshold stays within ``tones``.
+    static let burnStopsRange = 0.0...3.0
+    static let burnThresholdRange = 0.0...6.0
     /// The tones the graph shows: the print is black or white past them.
     static let tones: ClosedRange<Float> = -6...6
 
@@ -986,7 +990,7 @@ private struct ToneGraphView: View {
                 .padding(4)
             }
             .frame(height: 130)
-            .help("Drag the middle point sideways to set the print exposure, the side points up or down for the shadow and highlight contrast, or the curve elsewhere for the contrast. With the burn on, the shading is what it takes and the dashed line where those tones print.")
+            .help("Drag the middle point sideways to set the print exposure, the side points up or down for the shadow and highlight contrast, or the curve elsewhere for the contrast. With the burn on, the shading is what it takes and the dashed line where those tones print: drag its line sideways for the threshold, or up or down for the strength.")
         } else {
             RoundedRectangle(cornerRadius: 5).fill(.quaternary)
                 .frame(height: 130)
@@ -1065,8 +1069,9 @@ private struct ToneChart<Overlay: View>: View, Equatable {
 /// burn's marker. Those follow the controls each step, so they're drawn here, not by the chart. The
 /// middle point is where the paper's exposure is 0 (a mid-grey negative's at a print exposure of
 /// 1), the side points ``sideDistance`` stops either side. Dragging the middle one sideways sets
-/// the print exposure; a side one up or down, the shadow or highlight contrast; and the curve
-/// anywhere else up or down, the contrast, about the middle point. The curve follows the controls
+/// the print exposure; a side one up or down, the shadow or highlight contrast; the curve anywhere
+/// else up or down, the contrast, about the middle point; and the burn's line sideways, its
+/// threshold, and up or down, its strength. The curve follows the controls
 /// at once, as a slider's bar does: it's predicted from the engine's last
 /// (``ToneCurve/predicted(for:from:)``), which comes with the photo's preview, and each new one
 /// sets the drag's control again from it, so the grabbed point stays under the pointer.
@@ -1103,16 +1108,17 @@ private struct ToneCurveLayer: View {
                 let burned = controls.burn ? shown.burned(stops: Float(controls.burnStops), threshold: threshold,
                                                           exposures: toneGraph.graph.curve.map { log2(exp2($0.film).sum() / 3) })
                     : nil
+                let burnLine = burned == nil ? nil : location(of: SIMD2(threshold, 0), in: plot)?.x
                 Canvas { context, _ in
                     context.clip(to: Path(roundedRect: plot, cornerRadius: 5))
                     // What burns, shaded from a line at the threshold, labelled at the top beside it
                     // (before it if there's no room after).
                     var labelFrame: CGRect?
-                    if burned != nil, let line = location(of: SIMD2(threshold, 0), in: plot)?.x {
+                    if let line = burnLine {
                         context.fill(Path(CGRect(x: line, y: plot.minY, width: plot.maxX - line, height: plot.height)),
                                      with: .color(.orange.opacity(0.15)))
                         context.stroke(Path { $0.addLines([CGPoint(x: line, y: plot.minY), CGPoint(x: line, y: plot.maxY)]) },
-                                       with: .color(.orange), lineWidth: 1)
+                                       with: .color(.orange), lineWidth: active == .burn ? 2 : 1)
                         let label = context.resolve(Text("Burn from \(controls.burnThreshold.formatted(ExposureStrip.stops))")
                             .font(.caption2).foregroundStyle(.orange))
                         let size = label.measure(in: plot.size)
@@ -1150,9 +1156,14 @@ private struct ToneCurveLayer: View {
                     .onChanged { value in
                         if !isPressed {
                             isPressed = true
-                            drag = beginDrag(at: value.startLocation, handles: handles, curve: shown, plot: plot)
-                            if drag != nil {
+                            drag = beginDrag(at: value.startLocation, handles: handles, curve: shown, burnLine: burnLine,
+                                             plot: plot)
+                            if let drag {
                                 model.isAdjusting = true
+                                // As with a Burn slider held, the canvas shows what burns.
+                                if drag.handle == .burn {
+                                    model.isAdjustingBurn = true
+                                }
                             }
                         }
                         guard var drag, let moved = movement(from: value.startLocation, to: value.location, plot: plot) else {
@@ -1163,8 +1174,11 @@ private struct ToneCurveLayer: View {
                         move(drag)
                     }
                     .onEnded { _ in
-                        if drag != nil {
+                        if let drag {
                             model.isAdjusting = false
+                            if drag.handle == .burn {
+                                model.isAdjustingBurn = false
+                            }
                         }
                         isPressed = false
                         drag = nil
@@ -1173,11 +1187,18 @@ private struct ToneCurveLayer: View {
                     switch phase {
                     case .active(let location) where isEnabled:
                         hovered = grabbed(at: location, among: handles, plot: plot)?.id
+                            ?? (isNear(burnLine, location) ? .burn : nil)
                     case .active, .ended:
                         hovered = nil
                     }
                 }
-                .pointerStyle(active.map { $0 == .middle ? PointerStyle.columnResize : .rowResize })
+                .pointerStyle(active.map { handle in
+                    switch handle {
+                    case .middle: .columnResize
+                    case .shadows, .highlights: .rowResize
+                    case .burn: drag == nil ? .grabIdle : .grabActive
+                    }
+                })
             }
         }
         // The engine's curve for the controls so far: the drag's control set again from it.
@@ -1225,17 +1246,28 @@ private struct ToneCurveLayer: View {
         return handles.filter { distance($0) <= Self.grabDistance }.min { distance($0) < distance($1) }
     }
 
-    /// What pressing at `location` grabs on the curve shown: a point of it under the pointer, else
-    /// the curve there, unless that's by the middle point, which the contrast leaves where it is.
-    private func beginDrag(at location: CGPoint, handles: [ToneCurve.Handle], curve: ToneCurve, plot: CGRect) -> ToneDrag? {
-        guard isEnabled, let middle = handles.first(where: { $0.id == .middle }) else { return nil }
+    /// Whether `location` is within ``grabDistance`` of the burn's line, if it's shown (at `burnLine`).
+    private func isNear(_ burnLine: CGFloat?, _ location: CGPoint) -> Bool {
+        burnLine.map { abs(location.x - $0) <= Self.grabDistance } ?? false
+    }
+
+    /// What pressing at `location` grabs: a point of the curve shown under the pointer, else the
+    /// burn's line (at `burnLine`, if it's shown), else the curve there, unless that's by the middle
+    /// point, which the contrast leaves where it is.
+    private func beginDrag(at location: CGPoint, handles: [ToneCurve.Handle], curve: ToneCurve, burnLine: CGFloat?,
+                           plot: CGRect) -> ToneDrag? {
+        guard isEnabled else { return nil }
         if let handle = grabbed(at: location, among: handles, plot: plot) {
-            return ToneDrag(handle: handle.id, tone: handle.tone, print: handle.print)
+            return ToneDrag(handle: handle.id, tone: handle.tone, print: handle.print, controls: model.controls)
         }
-        guard let tone = proxy.value(atX: location.x - plot.minX, as: Float.self), abs(tone - middle.tone) > 0.5 else {
+        if isNear(burnLine, location) {
+            return ToneDrag(handle: .burn, tone: Float(model.controls.burnThreshold), print: 0, controls: model.controls)
+        }
+        guard let middle = handles.first(where: { $0.id == .middle }),
+              let tone = proxy.value(atX: location.x - plot.minX, as: Float.self), abs(tone - middle.tone) > 0.5 else {
             return nil
         }
-        return ToneDrag(handle: nil, tone: tone, print: curve.value(of: curve.print, at: tone))
+        return ToneDrag(handle: nil, tone: tone, print: curve.value(of: curve.print, at: tone), controls: model.controls)
     }
 
     /// Sets the control `drag` moves for the pointer's movement, so the grabbed point follows it:
@@ -1256,6 +1288,14 @@ private struct ToneCurveLayer: View {
             scale(\.printHighlightContrast, of: curve, rendered: rendered, at: drag.tone, to: drag.print + drag.moved.y)
         case nil:
             scale(\.printContrast, of: curve, rendered: rendered, at: drag.tone, to: drag.print + drag.moved.y)
+        case .burn:
+            // The line follows the pointer sideways; down burns more, the graph's height for the
+            // strength's whole range.
+            let strengths = ToneGraphView.burnStopsRange
+            set(\.burnThreshold, to: drag.controls.burnThreshold + Double(drag.moved.x),
+                in: ToneGraphView.burnThresholdRange)
+            set(\.burnStops, to: drag.controls.burnStops - Double(drag.moved.y) * (strengths.upperBound - strengths.lowerBound),
+                in: strengths)
         }
     }
 
@@ -1308,9 +1348,9 @@ private enum ToneChannel: String, CaseIterable {
 }
 
 /// The tone graph's points: the print exposure's in the middle, the shadow and highlight
-/// contrasts' either side.
+/// contrasts' either side. And the burn's line.
 private enum ToneHandle {
-    case shadows, middle, highlights
+    case shadows, middle, highlights, burn
 }
 
 /// One bar of the tone graph's histogram, its height 0–1.
@@ -1320,12 +1360,14 @@ private struct HistogramBin: Identifiable, Equatable {
     let height: Float
 }
 
-/// A drag on the tone graph: the point it grabbed (none for the curve) where it was, and how far
-/// the pointer has moved since, in tones and brightness.
+/// A drag on the tone graph: the point it grabbed (none for the curve) where it was, the controls
+/// then, which the burn's line moves from, and how far the pointer has moved since, in tones and
+/// brightness.
 private struct ToneDrag {
     let handle: ToneHandle?
     let tone: Float
     let print: Float
+    let controls: Controls
     var moved = SIMD2<Float>.zero
 }
 
