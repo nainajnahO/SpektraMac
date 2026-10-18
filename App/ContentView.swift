@@ -1,4 +1,5 @@
 import Charts
+import simd
 import SpektraEngine
 import SwiftUI
 import UniformTypeIdentifiers
@@ -950,8 +951,10 @@ private struct ThumbnailStrip: View {
 /// each tone of the film's exposure. Both run over the photo's tones in stops over mid-grey, the
 /// Exposure control's units (``ToneGraph``). The menu shows the neutral curve, or one colour's over
 /// the other two, which spread apart with the filter shifts. Its points set the print exposure and
-/// the contrasts (``ToneCurveLayer``). The sliders under Options and in Enlarger give exact values,
-/// and stand in for it with VoiceOver and the keyboard.
+/// the contrasts (``ToneCurveLayer``). With the burn on, shading from a line at its threshold marks
+/// the tones it takes, and a dashed line where they print
+/// (``ToneCurve/burned(stops:threshold:exposures:)``). The sliders under Options and in Enlarger
+/// give exact values, and stand in for it with VoiceOver and the keyboard.
 private struct ToneGraphView: View {
     @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
@@ -983,7 +986,7 @@ private struct ToneGraphView: View {
                 .padding(4)
             }
             .frame(height: 130)
-            .help("Drag the middle point sideways to set the print exposure, the side points up or down for the shadow and highlight contrast, or the curve elsewhere for the contrast.")
+            .help("Drag the middle point sideways to set the print exposure, the side points up or down for the shadow and highlight contrast, or the curve elsewhere for the contrast. With the burn on, the shading is what it takes and the dashed line where those tones print.")
         } else {
             RoundedRectangle(cornerRadius: 5).fill(.quaternary)
                 .frame(height: 130)
@@ -1058,7 +1061,8 @@ private struct ToneChart<Overlay: View>: View, Equatable {
     }
 }
 
-/// The tone graph's curve and its three points, over its chart (`proxy`), and their dragging. The
+/// The tone graph's curve and its three points, over its chart (`proxy`), their dragging, and the
+/// burn's marker. Those follow the controls each step, so they're drawn here, not by the chart. The
 /// middle point is where the paper's exposure is 0 (a mid-grey negative's at a print exposure of
 /// 1), the side points ``sideDistance`` stops either side. Dragging the middle one sideways sets
 /// the print exposure; a side one up or down, the shadow or highlight contrast; and the curve
@@ -1093,12 +1097,46 @@ private struct ToneCurveLayer: View {
                 }
                 let handles = shown.handles(sideDistance: Self.sideDistance)
                 let active = drag?.handle ?? hovered
+                // The burn's threshold and the curve it prints, while it's on. Its mask goes by the
+                // layers' mean exposure, as the engine's `burn_threshold` kernel takes it.
+                let threshold = Float(controls.burnThreshold)
+                let burned = controls.burn ? shown.burned(stops: Float(controls.burnStops), threshold: threshold,
+                                                          exposures: toneGraph.graph.curve.map { log2(exp2($0.film).sum() / 3) })
+                    : nil
                 Canvas { context, _ in
                     context.clip(to: Path(roundedRect: plot, cornerRadius: 5))
-                    for curve in others + [shown] {
-                        let isShown = curve.channel == channel
-                        context.stroke(path(of: curve, in: plot), with: .style(curve.channel.colour.opacity(isShown ? 1 : 0.35)),
-                                       lineWidth: isShown ? 1.5 : 1)
+                    // What burns, shaded from a line at the threshold, labelled at the top beside it
+                    // (before it if there's no room after).
+                    var labelFrame: CGRect?
+                    if burned != nil, let line = location(of: SIMD2(threshold, 0), in: plot)?.x {
+                        context.fill(Path(CGRect(x: line, y: plot.minY, width: plot.maxX - line, height: plot.height)),
+                                     with: .color(.orange.opacity(0.15)))
+                        context.stroke(Path { $0.addLines([CGPoint(x: line, y: plot.minY), CGPoint(x: line, y: plot.maxY)]) },
+                                       with: .color(.orange), lineWidth: 1)
+                        let label = context.resolve(Text("Burn from \(controls.burnThreshold.formatted(ExposureStrip.stops))")
+                            .font(.caption2).foregroundStyle(.orange))
+                        let size = label.measure(in: plot.size)
+                        let x = line + 4 + size.width <= plot.maxX - 4 ? line + 4 : line - 4 - size.width
+                        let frame = CGRect(origin: CGPoint(x: x, y: plot.minY + 3), size: size)
+                        context.draw(label, in: frame)
+                        labelFrame = frame
+                    }
+                    // In a layer of their own, so the label can be cut out of them where they run
+                    // along the top.
+                    context.drawLayer { curves in
+                        for curve in others + [shown] {
+                            let isShown = curve.channel == channel
+                            curves.stroke(path(of: curve, in: plot), with: .style(curve.channel.colour.opacity(isShown ? 1 : 0.35)),
+                                          lineWidth: isShown ? 1.5 : 1)
+                        }
+                        if let burned {
+                            curves.stroke(path(of: burned, over: threshold...ToneGraphView.tones.upperBound, in: plot),
+                                          with: .color(.orange), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                        }
+                        if let labelFrame {
+                            curves.blendMode = .destinationOut
+                            curves.fill(Path(labelFrame.insetBy(dx: -3, dy: -2)), with: .color(.black))
+                        }
                     }
                     context.addFilter(.shadow(color: .black.opacity(0.5), radius: 1))
                     for handle in handles {
@@ -1156,9 +1194,9 @@ private struct ToneCurveLayer: View {
         return CGPoint(x: plot.minX + x, y: plot.minY + y)
     }
 
-    private func path(of curve: ToneCurve, in plot: CGRect) -> Path {
+    private func path(of curve: ToneCurve, over tones: ClosedRange<Float> = ToneGraphView.tones, in plot: CGRect) -> Path {
         Path { path in
-            for position in curve.points(in: ToneGraphView.tones) {
+            for position in curve.points(in: tones) {
                 guard let at = location(of: position, in: plot) else { continue }
                 if path.isEmpty {
                     path.move(to: at)
@@ -1345,6 +1383,21 @@ private struct ToneCurve {
         let exposure = value(of: paper, at: tone) + change.x
         let scaled = exposure > 0 ? exposure * change.y : exposure * change.z
         return value(of: print, at: self.tone(where: paper, is: scaled, near: tone))
+    }
+
+    /// This curve burned in (``Parameters/Burn``) as the engine burns a photo, but with a mask not
+    /// fitted to its edges: each grey's paper exposure up by `stops` × its mask, log₁₀ 2 a stop, and
+    /// the brightness for that looked up on this curve, as ``predicted(for:from:)`` looks it up. The
+    /// mask is the `burn_threshold` kernel's over each grey's exposure in `exposures` (stops over
+    /// mid-grey): 0 under `threshold`, 1 from a stop over, smoothly between.
+    func burned(stops: Float, threshold: Float, exposures: [Float]) -> ToneCurve {
+        let burned = paper.indices.map { index in
+            paper[index] + log10(2) * stops * simd_smoothstep(threshold, threshold + 1, exposures[index])
+        }
+        let print = burned.indices.map { index in
+            value(of: self.print, at: tone(where: paper, is: burned[index], near: tones[index]))
+        }
+        return ToneCurve(channel: channel, tones: tones, paper: burned, print: print)
     }
 
     /// The middle point where the paper's exposure is 0 (a mid-grey negative's at a print exposure
