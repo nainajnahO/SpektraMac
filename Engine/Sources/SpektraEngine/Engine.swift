@@ -143,7 +143,7 @@ public actor Engine {
     /// Says when memory runs low.
     private let memoryPressure: any DispatchSourceMemoryPressure
     /// The live preview's long side. Larger than Spektrafilm's `preview_max_size` (640), which is
-    /// soft on a Retina display: about 0.1 s per change on an M1 Pro, preview mode and display.
+    /// soft on a Retina display: about 20 ms per change on an M1 Pro, preview mode and display.
     private nonisolated let previewMaxSize = 1600
     /// The long side of the image thumbnails render from.
     private nonisolated let thumbnailMaxSize = 256
