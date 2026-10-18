@@ -229,6 +229,18 @@ private struct SettingsPanel: View {
                                         format: .number.precision(.fractionLength(3)))
                                 .help("A flash of plain light on the paper before the print, so light tones such as a bright sky gain some tone. It darkens the whole print: lower the print exposure to bring the mid-tones back.")
                         }
+                        AdjustmentGroup("Burn", systemImage: "sun.horizon", adjustment: .burn, isOn: $model.controls.burn) {
+                            ValueSlider("Strength", value: $model.controls.burnStops, in: 0...3, step: 0.1,
+                                        format: .number.precision(.fractionLength(1)), unit: "EV") {
+                                model.isAdjustingBurn = $0
+                            }
+                            .help("Extra enlarger exposure where the photo is bright, as a darkroom printer burns in a sky: a pale sky darkens and gets its colour back, and the rest of the print stays as it is.")
+                            ValueSlider("Threshold", value: $model.controls.burnThreshold, in: 0...6, step: 0.1,
+                                        format: ExposureStrip.stops, unit: "EV") {
+                                model.isAdjustingBurn = $0
+                            }
+                            .help("How bright a part of the photo must be to burn, in stops over mid-grey. About +2.5 is where a screen's white sits; lower takes in more. Holding a Burn slider shows what burns, white on black.")
+                        }
                         DiffusionGroup(adjustment: .enlargerDiffusion, isOn: \.enlargerDiffusion,
                                        family: \.enlargerDiffusionFilter, strength: \.enlargerDiffusionStrength,
                                        size: \.enlargerDiffusionSize, warmth: \.enlargerDiffusionWarmth)
@@ -257,8 +269,8 @@ private struct SettingsPanel: View {
 
 /// A group of settings as Photos lays out an adjustment: a disclosure headed by its symbol and
 /// name, a reset arrow and, where the effect can be off, an on/off circle; its main control, then
-/// the rest under Options. Whether each is open is kept with the window. Sizes and shades measured
-/// from Photos' (macOS 26) screenshots.
+/// the rest under Options, if it has any. Whether each is open is kept with the window. Sizes and
+/// shades measured from Photos' (macOS 26) screenshots.
 private struct AdjustmentGroup<Main: View, Options: View>: View {
     @Environment(PhotoModel.self) private var model
     let title: String
@@ -287,15 +299,17 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
         DisclosureGroup(isExpanded: $isExpanded) {
             VStack(alignment: .leading, spacing: 4) {
                 main
-                DisclosureGroup(isExpanded: $showsOptions) {
-                    VStack(spacing: 6) { options }
-                        .padding(.top, 7)
-                        .padding(.bottom, 14)
-                } label: {
-                    Text("Options")
-                        .foregroundStyle(.secondary)
+                if Options.self != EmptyView.self {
+                    DisclosureGroup(isExpanded: $showsOptions) {
+                        VStack(spacing: 6) { options }
+                            .padding(.top, 7)
+                            .padding(.bottom, 14)
+                    } label: {
+                        Text("Options")
+                            .foregroundStyle(.secondary)
+                    }
+                    .disclosureGroupStyle(PhotosDisclosureStyle(contentIndent: 0))
                 }
-                .disclosureGroupStyle(PhotosDisclosureStyle(contentIndent: 0))
             }
             .padding(.top, 6)
             .disabled(isOn?.wrappedValue == false)
@@ -323,6 +337,14 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
             .foregroundStyle(.secondary)
         }
         .disclosureGroupStyle(PhotosDisclosureStyle(contentIndent: 14))
+    }
+}
+
+extension AdjustmentGroup where Options == EmptyView {
+    /// A group whose controls all show at once, with no Options.
+    init(_ title: String, systemImage: String, adjustment: PhotoModel.Adjustment, isOn: Binding<Bool>? = nil,
+         @ViewBuilder main: () -> Main) {
+        self.init(title, systemImage: systemImage, adjustment: adjustment, isOn: isOn, main: main) { EmptyView() }
     }
 }
 
@@ -714,6 +736,7 @@ private struct ValueSlider: View {
     let neutral: Double?
     let format: FloatingPointFormatStyle<Double>
     let unit: String
+    let onEditingChanged: (Bool) -> Void
     @State private var width: CGFloat = 0
     /// The value when the drag began.
     @State private var dragStart: Double?
@@ -723,7 +746,7 @@ private struct ValueSlider: View {
     @Environment(\.displayScale) private var displayScale
 
     init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double, neutral: Double? = nil,
-         format: FloatingPointFormatStyle<Double>, unit: String = "") {
+         format: FloatingPointFormatStyle<Double>, unit: String = "", onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
         self.title = title
         _value = value
         self.range = range
@@ -731,6 +754,7 @@ private struct ValueSlider: View {
         self.neutral = neutral
         self.format = format
         self.unit = unit
+        self.onEditingChanged = onEditingChanged
     }
 
     var body: some View {
@@ -780,6 +804,7 @@ private struct ValueSlider: View {
             .onChanged { drag in
                 if dragStart == nil {
                     model.isAdjusting = true
+                    onEditingChanged(true)
                 }
                 let start = dragStart ?? value
                 dragStart = start
@@ -789,6 +814,7 @@ private struct ValueSlider: View {
             .onEnded { _ in
                 dragStart = nil
                 model.isAdjusting = false
+                onEditingChanged(false)
             })
         .focusable(interactions: .activate)
         .onMoveCommand { direction in
@@ -1423,6 +1449,7 @@ private struct ImageCanvas: View {
                         .resizable()
                         .interpolation(.high)
                         .overlay { meteringOverlay }
+                        .overlay { burnOverlay }
                         .frame(width: fitted.width * zoom, height: fitted.height * zoom)
                         .position(x: visibleCentre.x + offset.width, y: visibleCentre.y + offset.height)
                 }
@@ -1514,6 +1541,17 @@ private struct ImageCanvas: View {
                 }
             }
             .allowsHitTesting(false)
+        }
+    }
+
+    /// While a Burn slider is held: what burns, in place of the photo, white on black as strongly as
+    /// it burns.
+    @ViewBuilder private var burnOverlay: some View {
+        if model.isAdjustingBurn, let mask = model.burnMask {
+            Image(decorative: mask, scale: 1)
+                .resizable()
+                .background(.black)
+                .allowsHitTesting(false)
         }
     }
 

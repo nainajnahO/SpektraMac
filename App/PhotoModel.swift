@@ -103,6 +103,19 @@ final class PhotoModel {
     }
     /// While the Exposure slider is held: the canvas then tints the region the mark it's on meters.
     var isAdjustingExposure = false
+    /// While a Burn slider is held: the canvas then shows what burns (``burnMask``).
+    var isAdjustingBurn = false {
+        didSet {
+            guard isAdjustingBurn != oldValue else { return }
+            if isAdjustingBurn {
+                updateBurnMask()
+            } else {
+                burnMask = nil
+            }
+        }
+    }
+    /// Where the burn falls on the preview while a Burn slider is held (``Engine/burnMask(controls:)``).
+    private(set) var burnMask: CGImage?
     /// While a slider is held: its next step would cancel the blurs and grain, so they render
     /// once it's let go.
     var isAdjusting = false {
@@ -355,6 +368,9 @@ final class PhotoModel {
         try Task.checkCancellation()
         displayImage = display
         shownMode = mode
+        if mode == .preview && isAdjustingBurn {
+            burnMask = try await engine.burnMask(controls: controls)
+        }
         if case .reduced(let longSide) = mode {
             finishedRenders.setObject(display, forKey: RenderKey(controls: controls, longSide: longSide),
                                       cost: display.bytesPerRow * display.height)
@@ -368,6 +384,23 @@ final class PhotoModel {
         case .full, .export: "full resolution"
         }
         note("Rendered \(name) (\(size)) in \(elapsed)")
+    }
+
+    /// Shows what burns as a Burn slider is taken hold of, before it moves (the previews it renders
+    /// then show it from ``show(controls:mode:engine:photo:)``).
+    private func updateBurnMask() {
+        guard let engine, photo != nil else { return }
+        let controls = controls
+        Task {
+            do {
+                let mask = try await engine.burnMask(controls: controls)
+                if isAdjustingBurn {
+                    burnMask = mask
+                }
+            } catch {
+                fail("Could not show what burns", error)
+            }
+        }
     }
 
     /// What a kept render shows: `NSCache` wants an object key.
@@ -589,7 +622,7 @@ final class PhotoModel {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [Self.cubeType]
         panel.nameFieldStringValue = controls.scanFilm ? filmName : "\(filmName) – \(paperName)"
-        panel.message = "The LUT carries this exposure (\(stops) EV) and every setting a LUT can hold. Grain, halation, glare, highlight boost and the sharper edges of the couplers' Edge contrast depend on neighbouring pixels or the whole photo, so they're left out."
+        panel.message = "The LUT carries this exposure (\(stops) EV) and every setting a LUT can hold. Grain, halation, glare, the burn, highlight boost and the sharper edges of the couplers' Edge contrast depend on neighbouring pixels or the whole photo, so they're left out."
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let (controls, exposureEV) = (controls, exposureEV)
@@ -694,7 +727,7 @@ final class PhotoModel {
 
     /// The settings' groups, as Photos groups its adjustments: each resets on its own.
     enum Adjustment {
-        case exposure, cameraDiffusion, halation, couplers, grain, contrast, enlarger, enlargerDiffusion, glare
+        case exposure, cameraDiffusion, halation, couplers, grain, contrast, enlarger, burn, enlargerDiffusion, glare
     }
 
     /// Whether `adjustment`'s controls are what choosing the film applies.
@@ -748,6 +781,10 @@ final class PhotoModel {
             reset.yFilterShift = defaults.yFilterShift
             reset.mFilterShift = defaults.mFilterShift
             reset.preflash = defaults.preflash
+        case .burn:
+            reset.burn = defaults.burn
+            reset.burnStops = defaults.burnStops
+            reset.burnThreshold = defaults.burnThreshold
         case .enlargerDiffusion:
             reset.enlargerDiffusion = defaults.enlargerDiffusion
             reset.enlargerDiffusionFilter = defaults.enlargerDiffusionFilter
