@@ -133,9 +133,9 @@ extension CGImage {
     /// writes a render: its pixels are clipped and rounded already (it truncates: at most a level
     /// apart), 16-bit for TIFF and PNG, 8-bit for JPEG at quality 0.98 (OpenImageIO's 98). TIFFs
     /// are uncompressed, unlike its deflate, which took 2.7 s for 24 MP and saved 4 % on a render
-    /// with grain. The file embeds the image's colour space's ICC profile and `metadata`, marked
-    /// upright since the pixels are.
-    public func write(to url: URL, as type: UTType, metadata: PhotoMetadata?) throws {
+    /// with grain. The file embeds the image's colour space's ICC profile, `metadata`, marked
+    /// upright since the pixels are, and `record`.
+    public func write(to url: URL, as type: UTType, metadata: PhotoMetadata?, record: EditRecord) throws {
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil)
         else { throw EncodeError(url: url) }
         var properties = metadata?.properties ?? [:]
@@ -143,12 +143,30 @@ extension CGImage {
         if type.conforms(to: .jpeg) {
             properties[kCGImageDestinationLossyCompressionQuality] = 0.98
         }
+        var tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+        tiff[kCGImagePropertyTIFFSoftware] = record.software
+        tiff[kCGImagePropertyTIFFImageDescription] = record.summary
         if type.conforms(to: .tiff) {
-            var tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
             tiff[kCGImagePropertyTIFFCompression] = 1  // none
-            properties[kCGImagePropertyTIFFDictionary] = tiff
         }
-        CGImageDestinationAddImage(destination, self, properties as CFDictionary)
+        properties[kCGImagePropertyTIFFDictionary] = tiff
+        var iptc = properties[kCGImagePropertyIPTCDictionary] as? [CFString: Any] ?? [:]
+        iptc[kCGImagePropertyIPTCCaptionAbstract] = record.summary
+        iptc[kCGImagePropertyIPTCKeywords] = (iptc[kCGImagePropertyIPTCKeywords] as? [String] ?? []) + record.keywords
+        properties[kCGImagePropertyIPTCDictionary] = iptc
+        // ImageIO mirrors the records above into XMP's standard fields (CreatorTool, description,
+        // subject) and adds these to it.
+        let settings = CGImageMetadataCreateMutable()
+        guard CGImageMetadataRegisterNamespaceForPrefix(settings, EditRecord.namespace as CFString,
+                                                        EditRecord.prefix as CFString, nil)
+        else { throw EncodeError(url: url) }
+        for case let (name?, value) in Mirror(reflecting: record.controls).children {
+            guard let tag = CGImageMetadataTagCreate(EditRecord.namespace as CFString, EditRecord.prefix as CFString,
+                                                     name as CFString, .default, "\(value)" as CFString),
+                  CGImageMetadataSetTagWithPath(settings, nil, "\(EditRecord.prefix):\(name)" as CFString, tag)
+            else { throw EncodeError(url: url) }
+        }
+        CGImageDestinationAddImageAndMetadata(destination, self, settings, properties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw EncodeError(url: url) }
     }
 }
@@ -182,6 +200,28 @@ func rgba(fromRGB rgb: [Float], width: Int, height: Int, alpha: Float) -> [Float
         }
     }
     return rgba
+}
+
+/// What a saved rendering records of how it was made, beside the photo's own metadata: the app
+/// (TIFF `Software`), the edit in a line (TIFF `ImageDescription` and IPTC `Caption-Abstract`),
+/// keywords after the photo's own (IPTC `Keywords`), and every control by its name, in XMP of the
+/// app's own. The camera's EXIF stays as shot: it has no field for a film.
+public struct EditRecord: Sendable {
+    public let software: String
+    public let summary: String
+    public let keywords: [String]
+    public let controls: Controls
+
+    /// The controls' XMP namespace and its prefix.
+    static let namespace = "https://github.com/nainajnahO/SpektraMac/settings/"
+    static let prefix = "spektramac"
+
+    public init(software: String, summary: String, keywords: [String], controls: Controls) {
+        self.software = software
+        self.summary = summary
+        self.keywords = keywords
+        self.controls = controls
+    }
 }
 
 /// What a rendering written from a photo keeps of the photo's metadata: its EXIF, GPS and IPTC

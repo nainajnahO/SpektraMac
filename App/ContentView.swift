@@ -712,7 +712,7 @@ private struct DiffusionGroup: View {
     }
 }
 
-private extension Parameters.DiffusionFilter.Family {
+extension Parameters.DiffusionFilter.Family {
     var name: String {
         switch self {
         case .glimmerglass: "Glimmerglass"
