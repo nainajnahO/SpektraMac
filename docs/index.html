@@ -137,7 +137,7 @@
       <a class="button secondary" href="#build">Build it</a>
       <a class="button secondary" href="https://github.com/nainajnahO/SpektraMac/blob/main/docs/guide.md">User guide</a>
     </div>
-    <img class="screenshot" src="images/screenshot.png" alt="SpektraMac with a photo open: the photo on the left, the film settings on the right">
+    <img class="screenshot" src="images/screenshot.webp" alt="SpektraMac with a photo open: the photo on the left, the film settings on the right">
   </header>
 
   <section id="looks">
@@ -250,8 +250,8 @@ open SpektraMac/SpektraMac.xcodeproj</pre></li>
   const after = compare.querySelector(".after");
 
   function show() {
-    before.src = `images/looks/${state.photo.id}-original.jpg`;
-    after.src = `images/looks/${state.photo.id}-${state.film.id}.jpg`;
+    before.src = `images/looks/${state.photo.id}-original.webp`;
+    after.src = `images/looks/${state.photo.id}-${state.film.id}.webp`;
     document.getElementById("film-label").textContent = state.film.name;
     document.getElementById("credit").textContent = state.photo.credit;
     for (const button of document.querySelectorAll(".chips button")) {

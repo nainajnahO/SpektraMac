@@ -25,7 +25,7 @@
   <a href="#build-from-source">Build from source</a>
 </p>
 
-![SpektraMac with a photo open: the photo on the left, the film settings on the right](docs/images/screenshot.png)
+![SpektraMac with a photo open: the photo on the left, the film settings on the right](docs/images/screenshot.webp)
 
 ## Film looks
 
@@ -34,19 +34,19 @@ film itself) and its scan. Compare them with the originals on the [website](http
 
 <table>
   <tr>
-    <td align="center"><img src="docs/images/looks/artemis-original.jpg" alt="The original photo"><br>Original</td>
-    <td align="center"><img src="docs/images/looks/artemis-portra-400.jpg" alt="On Kodak Portra 400"><br>Kodak Portra 400</td>
-    <td align="center"><img src="docs/images/looks/artemis-velvia-100.jpg" alt="On Fujifilm Velvia 100"><br>Fujifilm Velvia 100</td>
+    <td align="center"><img src="docs/images/looks/artemis-original.webp" alt="The original photo"><br>Original</td>
+    <td align="center"><img src="docs/images/looks/artemis-portra-400.webp" alt="On Kodak Portra 400"><br>Kodak Portra 400</td>
+    <td align="center"><img src="docs/images/looks/artemis-velvia-100.webp" alt="On Fujifilm Velvia 100"><br>Fujifilm Velvia 100</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/looks/artemis-kodachrome-64.jpg" alt="On Kodachrome 64"><br>Kodachrome 64</td>
-    <td align="center"><img src="docs/images/looks/artemis-ektar-100.jpg" alt="On Kodak Ektar 100"><br>Kodak Ektar 100</td>
-    <td align="center"><img src="docs/images/looks/artemis-vision3-500t.jpg" alt="On Kodak Vision3 500T"><br>Kodak Vision3 500T</td>
+    <td align="center"><img src="docs/images/looks/artemis-kodachrome-64.webp" alt="On Kodachrome 64"><br>Kodachrome 64</td>
+    <td align="center"><img src="docs/images/looks/artemis-ektar-100.webp" alt="On Kodak Ektar 100"><br>Kodak Ektar 100</td>
+    <td align="center"><img src="docs/images/looks/artemis-vision3-500t.webp" alt="On Kodak Vision3 500T"><br>Kodak Vision3 500T</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/looks/diner-original.jpg" alt="The original photo"><br>Original</td>
-    <td align="center"><img src="docs/images/looks/diner-gold-200.jpg" alt="On Kodak Gold 200"><br>Kodak Gold 200</td>
-    <td align="center"><img src="docs/images/looks/diner-pro-400h.jpg" alt="On Fujifilm Pro 400H"><br>Fujifilm Pro 400H</td>
+    <td align="center"><img src="docs/images/looks/diner-original.webp" alt="The original photo"><br>Original</td>
+    <td align="center"><img src="docs/images/looks/diner-gold-200.webp" alt="On Kodak Gold 200"><br>Kodak Gold 200</td>
+    <td align="center"><img src="docs/images/looks/diner-pro-400h.webp" alt="On Fujifilm Pro 400H"><br>Fujifilm Pro 400H</td>
   </tr>
 </table>
 

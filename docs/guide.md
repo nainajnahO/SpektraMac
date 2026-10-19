@@ -30,7 +30,7 @@ one, exposed the same way (see [Exposure](#exposure)).
 
 ## The window
 
-![The SpektraMac window](images/screenshot.png)
+![The SpektraMac window](images/screenshot.webp)
 
 **The photo.** It fits the window to start with.
 
@@ -132,9 +132,9 @@ Otherwise the settings stay as they are.
 
 <table>
   <tr>
-    <td align="center"><img src="images/looks/artemis-portra-400.jpg" alt=""><br>Kodak Portra 400</td>
-    <td align="center"><img src="images/looks/artemis-velvia-100.jpg" alt=""><br>Fujifilm Velvia 100</td>
-    <td align="center"><img src="images/looks/artemis-kodachrome-64.jpg" alt=""><br>Kodachrome 64</td>
+    <td align="center"><img src="images/looks/artemis-portra-400.webp" alt=""><br>Kodak Portra 400</td>
+    <td align="center"><img src="images/looks/artemis-velvia-100.webp" alt=""><br>Fujifilm Velvia 100</td>
+    <td align="center"><img src="images/looks/artemis-kodachrome-64.webp" alt=""><br>Kodachrome 64</td>
   </tr>
 </table>
 
@@ -186,7 +186,7 @@ The **tone graph** shows how the photo's tones print.
 - **Curve:** how bright each tone prints, from the film through the paper.
 - **Curve menu:** shows the neutral curve, or each colour's with the other two faint.
 
-![The tone graph](images/tone-graph.png)
+![The tone graph](images/tone-graph.webp)
 
 Drag on the graph to change the print:
 
