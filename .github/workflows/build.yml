@@ -12,7 +12,9 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-26
+    # Xcode 27, as the project needs: Xcode 26's compiler can't type-check some of the engine's
+    # expressions in time. GitHub's image for it is a preview.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
       - name: Build the app
