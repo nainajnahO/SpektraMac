@@ -62,6 +62,17 @@ film itself) and its scan. Compare them with the originals on the [website](http
   or 16-bit TIFF and PNG, in Display P3, keeping the camera's metadata and recording the edit in the file.
 - **Reuse.** Presets, defaults for each film, and 3D LUT export (`.cube`, sRGB) for other apps.
 
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/metering.webp" alt="The Exposure strip held at the Objects mark: the rocket and its tower are tinted pink"><br>
+      <b>Metering.</b> Apple's Vision finds the faces, people and objects in a photo, and each gets a mark on the
+      Exposure strip. Hold the strip to see what a mark meters.</td>
+    <td width="50%"><img src="docs/images/burn.webp" alt="A Burn slider held: the rocket's white body shows white on black"><br>
+      <b>Burn.</b> Extra print exposure where the photo is bright, as a darkroom printer burns in a sky. Hold a Burn
+      slider to see what burns.</td>
+  </tr>
+</table>
+
 The [user guide](docs/guide.md) explains every film, paper and control.
 
 ## Speed

@@ -82,7 +82,9 @@ exposure as shot.
 
 The dots under the strip are **metering marks**: the exposure each way of metering gives this photo. Drag onto a dot
 and it snaps there; its name shows under it, and the trackpad clicks. While you drag the strip, the area the
-nearest mark meters is tinted pink.
+nearest mark meters is tinted pink. Apple's Vision finds the faces, people and objects when the photo opens.
+
+![The Exposure strip held at the Objects mark: the rocket and its tower are tinted pink](images/metering.webp)
 
 | Mark | Meters |
 |---|---|
@@ -220,6 +222,8 @@ rest of the print stays as it is. Off by default. The burn follows the photo's e
   where a screen's white sits; lower takes in more.
 
 While you hold a Burn slider, the photo shows what burns, white on black.
+
+![A Burn slider held: the rocket's white body, which burns, shows white on black](images/burn.webp)
 
 On the tone graph, orange shading marks the tones that burn, and a dashed line shows where they print. Drag the line
 sideways for the threshold, or up and down for the strength.

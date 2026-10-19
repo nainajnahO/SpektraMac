@@ -129,8 +129,14 @@
   .note code { color: var(--muted); }
 
   /* Features */
+  .showcase { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap: 24px; margin-top: 56px; }
+  .showcase figure { margin: 0; padding: 12px 12px 28px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+  .showcase img { width: 100%; }
+  .showcase figcaption { padding: 8px 16px 0; }
+  .showcase h3 { margin-top: 10px; font-weight: 750; font-stretch: 112%; font-size: 26px; line-height: 1.15; letter-spacing: -0.01em; }
+  .showcase p { margin: 10px 0 0; color: var(--muted); font-size: 16px; }
   .spotlight {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 40px 56px; margin-top: 56px; padding: 40px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 40px 56px; margin-top: 24px; padding: 40px;
     background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
   }
   .spotlight > div { flex: 1 1 360px; min-width: 0; }
@@ -262,6 +268,29 @@
     <p class="lede">SpektraMac ports <a href="https://github.com/andreavolpato/spektrafilm">Spektrafilm</a>, Andrea
       Volpato's simulation of colour film, to Swift and Metal. Each setting changes something physical: the light, the
       film or the paper.</p>
+    <div class="showcase">
+      <figure>
+        <img src="images/metering.webp" width="2928" height="1766" loading="lazy"
+          alt="The Camera tab with the Exposure strip held at the Objects mark: the rocket and its tower, which Vision found, are tinted pink">
+        <figcaption>
+          <div class="small-label">METERING</div>
+          <h3>Exposed for what matters.</h3>
+          <p>When a photo opens, Apple's Vision finds the faces, people and objects in it, and SpektraMac meters each, as
+            a camera would. Choose one on the Exposure strip; while you hold it, what it meters is tinted. The next photo
+            opens exposed the same way.</p>
+        </figcaption>
+      </figure>
+      <figure>
+        <img src="images/burn.webp" width="2928" height="1766" loading="lazy"
+          alt="The Print tab with a Burn slider held: the photo shows what burns, the rocket's white body, in white on black">
+        <figcaption>
+          <div class="small-label">BURN</div>
+          <h3>Burn in the highlights.</h3>
+          <p>Extra print exposure where the photo is bright, as a darkroom printer burns in a sky: it darkens and gets its
+            colour back, and the rest of the print stays as it is. Hold a Burn slider and the photo shows what burns.</p>
+        </figcaption>
+      </figure>
+    </div>
     <div class="spotlight">
       <div>
         <div class="small-label">THE PRINT'S CURVE</div>
