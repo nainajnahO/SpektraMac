@@ -40,6 +40,8 @@ struct ContentView: View {
             // as the inspector lies over the canvas rather than beside it.
             .inspector(isPresented: $showsSettings) {
                 SettingsPanel(category: category)
+                    // Greyed out while the canvas shows the original: they set the edit.
+                    .disabled(model.showsOriginal)
                     .inspectorColumnWidth(290)
                     // In the inspector's own part of the toolbar, so centred over the panel.
                     .toolbar {
@@ -77,6 +79,7 @@ struct ContentView: View {
     private var status: String {
         if model.isLoading { return "Opening…" }
         if let phase = model.savePhase { return phase }
+        if model.showsOriginal { return "Original" }
         if model.isRendering { return model.isRenderingFullResolution ? "Rendering full resolution…" : "Rendering…" }
         if let message = model.errorMessage { return message }
         // Without one, the canvas says so.
@@ -104,6 +107,7 @@ private struct ShowPicker: View {
             Text("Film").tag(true)
         }
         .pickerStyle(.segmented)
+        .disabled(model.showsOriginal)
         .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
     }
 }
@@ -1488,9 +1492,9 @@ private struct ToneCurve {
 // MARK: - Canvas
 
 /// The photo fitted to the canvas below the toolbar and beside the settings panel. Scrolling (or
-/// pinching) zooms around the pointer, dragging moves the zoomed photo, and double-clicking shows
-/// all of it again. The canvas reaches under the toolbar and the panel, so a zoomed photo shows
-/// through them, as in Photos.
+/// pinching) zooms around the pointer, dragging moves the zoomed photo, clicking shows the original
+/// in place of the edit (and the edit again), and double-clicking shows all of it again. The canvas
+/// reaches under the toolbar and the panel, so a zoomed photo shows through them, as in Photos.
 private struct ImageCanvas: View {
     @Environment(PhotoModel.self) private var model
     /// Magnification over the photo fitted to the canvas (1 shows all of it), and how far the
@@ -1540,7 +1544,7 @@ private struct ImageCanvas: View {
                 // photo would make that the window's minimum.
                 GeometryReader { _ in
                     let fitted = fittedSize(in: visibleSize)
-                    Image(decorative: image, scale: 1)
+                    Image(decorative: model.showsOriginal ? model.original ?? image : image, scale: 1)
                         .resizable()
                         .interpolation(.high)
                         .overlay { meteringOverlay }
@@ -1563,7 +1567,17 @@ private struct ImageCanvas: View {
                         pinched = pinch.magnification
                     }
                     .onEnded { _ in pinched = 1 })
-                .onTapGesture(count: 2) { zoom = 1; offset = .zero }
+                // Each click of a double-click is a click too: it switches twice, so it ends on
+                // the view it started from.
+                .onTapGesture {
+                    if model.original != nil {
+                        model.showsOriginal.toggle()
+                    }
+                    if NSApp.currentEvent?.clickCount == 2 {
+                        zoom = 1
+                        offset = .zero
+                    }
+                }
                 .pointerStyle(zoom > 1 ? (dragStart == nil ? .grabIdle : .grabActive) : nil)
                 .onContinuousHover { phase in
                     switch phase {
