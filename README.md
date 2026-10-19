@@ -43,11 +43,6 @@ film itself) and its scan. Compare them with the originals on the [website](http
     <td align="center"><img src="docs/images/looks/artemis-ektar-100.webp" alt="On Kodak Ektar 100"><br>Kodak Ektar 100</td>
     <td align="center"><img src="docs/images/looks/artemis-vision3-500t.webp" alt="On Kodak Vision3 500T"><br>Kodak Vision3 500T</td>
   </tr>
-  <tr>
-    <td align="center"><img src="docs/images/looks/diner-original.webp" alt="The original photo"><br>Original</td>
-    <td align="center"><img src="docs/images/looks/diner-gold-200.webp" alt="On Kodak Gold 200"><br>Kodak Gold 200</td>
-    <td align="center"><img src="docs/images/looks/diner-pro-400h.webp" alt="On Fujifilm Pro 400H"><br>Fujifilm Pro 400H</td>
-  </tr>
 </table>
 
 ## Features
@@ -140,8 +135,6 @@ under CC BY-SA 4.0.
 The [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs) Rust port was used as a reference for structuring
 the GPU stages.
 
-Photos, both in the public domain:
+Photo, in the public domain:
 [Artemis II at Launch Pad 39B](https://commons.wikimedia.org/wiki/File:Sun_sets_on_Full_Artemis_II_Stack_at_Launch_Pad_39B_(Artemis_II_at_the_pad_sunsetting_jet_in_background_01292026_9).jpg)
-by NASA/Sam Lott, and
-[Modern diner, Pawtucket, Rhode Island](https://commons.wikimedia.org/wiki/File:Modern_diner,_Pawtucket,_Rhode_Island_LCCN2011630228.tif)
-by Carol M. Highsmith, from the Library of Congress.
+by NASA/Sam Lott.

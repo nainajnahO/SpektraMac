@@ -85,7 +85,7 @@
 
   /* Film looks */
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-  #photos { margin-top: 36px; }
+  #films { margin-top: 36px; }
   .chips button {
     min-height: 44px; padding: 0 16px; border-radius: 4px; cursor: pointer;
     font: 13px var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
@@ -212,7 +212,6 @@
     <h2>Choose a film. Watch it print.</h2>
     <p class="lede">Drag across the frame to compare it with the original. Each one is the whole simulation: exposure,
       development, a print on paper or the slide itself, and the scan.</p>
-    <div class="chips" id="photos" role="group" aria-label="Photo"></div>
     <div class="chips" id="films" role="group" aria-label="Film"></div>
     <div class="strip">
       <div class="sprockets" aria-hidden="true"></div>
@@ -228,7 +227,7 @@
       <div class="edge-print" aria-hidden="true"><span>SPEKTRAMAC</span><span class="frame-back"></span><span>SAFETY FILM</span></div>
       <div class="sprockets" aria-hidden="true"></div>
     </div>
-    <p class="credit" id="credit"></p>
+    <p class="credit">Artemis II at Launch Pad 39B. NASA/Sam Lott, public domain.</p>
   </section>
 
   <section id="speed">
@@ -361,19 +360,13 @@ open SpektraMac/SpektraMac.xcodeproj</pre>
     <p>The photographic model, film and paper data and methods come from
       <a href="https://github.com/andreavolpato/spektrafilm">Spektrafilm</a> by Andrea Volpato. The profile data are
       licensed by their author under CC BY-SA 4.0.</p>
-    <p>Photos, both in the public domain:
+    <p>Photo, in the public domain:
       <a href="https://commons.wikimedia.org/wiki/File:Sun_sets_on_Full_Artemis_II_Stack_at_Launch_Pad_39B_(Artemis_II_at_the_pad_sunsetting_jet_in_background_01292026_9).jpg">Artemis II at Launch Pad 39B</a>,
-      NASA/Sam Lott;
-      <a href="https://commons.wikimedia.org/wiki/File:Modern_diner,_Pawtucket,_Rhode_Island_LCCN2011630228.tif">Modern diner, Pawtucket, Rhode Island</a>,
-      Carol M. Highsmith, Library of Congress.</p>
+      NASA/Sam Lott.</p>
   </footer>
 
 </div>
 <script>
-  const photos = [
-    { id: "artemis", name: "Artemis II", credit: "Artemis II at Launch Pad 39B. NASA/Sam Lott, public domain." },
-    { id: "diner", name: "Diner", credit: "Modern diner, Pawtucket, Rhode Island. Carol M. Highsmith, Library of Congress, public domain." },
-  ];
   const films = [
     { id: "portra-400", name: "Portra 400", code: "KODAK PORTRA 400" },
     { id: "ektar-100", name: "Ektar 100", code: "KODAK EKTAR 100" },
@@ -384,43 +377,35 @@ open SpektraMac/SpektraMac.xcodeproj</pre>
     { id: "vision3-250d", name: "Vision3 250D", code: "KODAK VISION3 250D" },
     { id: "vision3-500t", name: "Vision3 500T", code: "KODAK VISION3 500T" },
   ];
-  const state = { photo: photos[0], film: films[4] };
   const strip = document.querySelector(".strip");
   const compare = document.getElementById("compare");
+  const buttons = document.getElementById("films");
+  compare.querySelector(".before").src = "images/looks/artemis-original.webp";
 
-  function show() {
-    const frame = 12 + films.indexOf(state.film);
-    compare.querySelector(".before").src = `images/looks/${state.photo.id}-original.webp`;
-    compare.querySelector(".after").src = `images/looks/${state.photo.id}-${state.film.id}.webp`;
-    for (const code of strip.querySelectorAll(".code")) code.textContent = state.film.code;
+  function show(film) {
+    const frame = 12 + films.indexOf(film);
+    compare.querySelector(".after").src = `images/looks/artemis-${film.id}.webp`;
+    for (const code of strip.querySelectorAll(".code")) code.textContent = film.code;
     strip.querySelector(".frame").textContent = `▸ ${frame}`;
     strip.querySelector(".frame-a").textContent = `▸ ${frame}A`;
     strip.querySelector(".frame-back").textContent = `◀ ${frame}A`;
-    document.getElementById("credit").textContent = state.photo.credit;
-    for (const button of document.querySelectorAll(".chips button")) {
-      const chosen = button.parentElement.id === "photos" ? state.photo : state.film;
-      button.setAttribute("aria-pressed", String(button.dataset.id === chosen.id));
+    for (const button of buttons.children) {
+      button.setAttribute("aria-pressed", String(button.dataset.id === film.id));
     }
   }
 
-  function chips(containerId, items, key) {
-    const container = document.getElementById(containerId);
-    for (const item of items) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = item.name;
-      button.dataset.id = item.id;
-      button.addEventListener("click", () => { state[key] = item; show(); });
-      container.append(button);
-    }
+  for (const film of films) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = film.name;
+    button.dataset.id = film.id;
+    button.addEventListener("click", () => show(film));
+    buttons.append(button);
   }
-
-  chips("photos", photos, "photo");
-  chips("films", films, "film");
   compare.querySelector("input").addEventListener("input", event => {
     compare.style.setProperty("--split", `${event.target.value}%`);
   });
-  show();
+  show(films[4]);
 </script>
 </body>
 </html>
