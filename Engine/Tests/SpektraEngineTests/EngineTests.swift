@@ -92,7 +92,7 @@ extension PhotoOpeningTests {
     func openRendersTheDecodedPhoto(format: String) async throws {
         let url: URL
         if format == "dng" {
-            url = goldenDirectory.appending(components: "raw", "patches.dng")
+            url = try goldenFile("raw", "patches.dng")
         } else {
             // Gradients in red and green, a fine pattern in blue.
             let (width, height, bits) = (2400, 1600, format == "tif" ? 16 : 8)
@@ -173,7 +173,8 @@ extension PhotoOpeningTests {
     /// The synthetic DNG `tools/golden.py` writes (camera RGB = linear sRGB): developed linearly, its
     /// grey patches keep their raw values, which grey keeps in BT.2020 too. Then it renders.
     @Test func rawDecodesLinearlyAndRenders() async throws {
-        let image = try RGBImage(contentsOf: goldenDirectory.appending(components: "raw", "patches.dng"))
+        let url = try goldenFile("raw", "patches.dng")
+        let image = try RGBImage(contentsOf: url)
         #expect(image.width == 512 && image.height == 256)
         for (patch, raw) in [0.05, 0.1, 0.2, 0.4].enumerated() {
             let index = (128 * image.width + patch * 128 + 64) * 3
@@ -183,7 +184,7 @@ extension PhotoOpeningTests {
         }
 
         let engine = try Engine()
-        _ = try await engine.open(RGBImage.decode(contentsOf: goldenDirectory.appending(components: "raw", "patches.dng")))
+        _ = try await engine.open(RGBImage.decode(contentsOf: url))
         let rendered = try await engine.render(controls: Controls(), mode: .full)
         #expect(rendered.width == 512 && rendered.height == 256)
         let finite = rendered.pixels.allSatisfy { $0.isFinite }

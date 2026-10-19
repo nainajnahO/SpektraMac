@@ -5,14 +5,42 @@ import SpektraEngine
 let arguments = CommandLine.arguments.dropFirst()
 switch arguments.first {
 case "benchmark":
-    // spektra-cli benchmark [width height]: times each ported stage on a synthetic image.
-    let numbers = arguments.dropFirst().compactMap { Int($0) }
-    let (width, height) = numbers.count == 2 ? (numbers[0], numbers[1]) : (6000, 4000)
-    try benchmark(width: width, height: height)
+    if let path = arguments.dropFirst().first, Int(path) == nil {
+        // spektra-cli benchmark <photo>: times the app's renders of a photo (the README's figures).
+        try await benchmarkRenders(of: URL(filePath: path))
+    } else {
+        // spektra-cli benchmark [width height]: times each ported stage on a synthetic image.
+        let numbers = arguments.dropFirst().compactMap { Int($0) }
+        let (width, height) = numbers.count == 2 ? (numbers[0], numbers[1]) : (6000, 4000)
+        try benchmark(width: width, height: height)
+    }
 default:
     print("spektra-cli — Spektrafilm \(SpektraEngine.referenceVersion) port")
     print("GPU: \(try GPU().device.name)")
-    print("Usage: spektra-cli benchmark [width height]")
+    print("Usage: spektra-cli benchmark [width height | photo]")
+}
+
+/// The app's renders of `url` with the default settings (Portra 400 printed on Portra Endura): the
+/// full render with every effect, as a save makes it, and the live preview that follows each change.
+/// The best of several runs, each through every stage.
+func benchmarkRenders(of url: URL) async throws {
+    let engine = try Engine()
+    let image = try RGBImage.decode(contentsOf: url)
+    _ = try await engine.open(image)
+    print("\(url.lastPathComponent), \(Int(image.extent.width)) × \(Int(image.extent.height)), on \(try GPU().device.name)")
+    for (label, mode, runs) in [("full render", RenderMode.full, 3), ("preview", .preview, 10)] {
+        var best = Duration.seconds(Int.max)
+        for run in 0...runs {
+            // A different exposure each time: the engine keeps the film's steps for renders that
+            // only change the print, and this times every stage.
+            var controls = Controls()
+            controls.exposureOffsetEV = Double(run) * 0.01
+            let start = ContinuousClock.now
+            _ = try await engine.render(controls: controls, mode: mode)
+            best = min(best, ContinuousClock.now - start)
+        }
+        print("\(label): \(best.formatted(.units(allowed: [.milliseconds], fractionalPart: .show(length: 0))))")
+    }
 }
 
 func benchmark(width: Int, height: Int) throws {

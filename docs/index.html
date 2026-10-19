@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpektraMac</title>
+<meta name="description" content="Physically based analog film for your photos, on your Mac's GPU. A native macOS port of Spektrafilm.">
+<meta property="og:title" content="SpektraMac">
+<meta property="og:description" content="Physically based analog film for your photos, on your Mac's GPU.">
+<meta property="og:image" content="https://nainajnaho.github.io/SpektraMac/images/social.png">
+<link rel="icon" href="images/icon.png">
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --surface: #ffffff;
+    --text: #1b1b1d;
+    --muted: #5f5f66;
+    --line: #e2e0da;
+    --accent: #d2316f;
+    --chip: #ecebe6;
+    --chip-on: #1b1b1d;
+    --chip-on-text: #ffffff;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px rgb(0 0 0 / 0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111113;
+      --surface: #1b1b1e;
+      --text: #f2f1ee;
+      --muted: #a3a2a8;
+      --line: #2c2c31;
+      --accent: #ff5c93;
+      --chip: #26262b;
+      --chip-on: #f2f1ee;
+      --chip-on-text: #111113;
+      --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 17px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  main { max-width: 1080px; margin: 0 auto; padding: 0 16px 64px; }
+  section { margin-top: 88px; }
+  h1, h2, h3 { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; letter-spacing: -0.02em; }
+  h2 { font-size: clamp(28px, 4vw, 40px); line-height: 1.1; margin: 0 0 12px; }
+  .lede { color: var(--muted); max-width: 680px; margin: 0 0 28px; }
+
+  /* Hero */
+  .hero { text-align: center; padding-top: 72px; }
+  .hero img.icon { width: 128px; height: 128px; }
+  .hero h1 { font-size: clamp(44px, 8vw, 76px); line-height: 1; margin: 16px 0 12px; }
+  .hero p { font-size: clamp(19px, 2.4vw, 23px); color: var(--muted); max-width: 720px; margin: 0 auto; }
+  .buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 28px; }
+  .button {
+    display: inline-block; padding: 11px 22px; border-radius: 999px; font-weight: 600;
+    background: var(--chip-on); color: var(--chip-on-text);
+  }
+  .button.secondary { background: var(--chip); color: var(--text); }
+  .button:hover { text-decoration: none; opacity: 0.88; }
+  .screenshot { display: block; width: 100%; margin-top: 56px; border-radius: 12px; }
+
+  /* Compare */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .chips button {
+    font: inherit; font-size: 15px; border: 0; border-radius: 999px; padding: 6px 14px; cursor: pointer;
+    background: var(--chip); color: var(--text);
+  }
+  .chips button[aria-pressed="true"] { background: var(--chip-on); color: var(--chip-on-text); }
+  .compare {
+    position: relative; overflow: hidden; border-radius: 12px; box-shadow: var(--shadow);
+    user-select: none; -webkit-user-select: none; touch-action: pan-y;
+  }
+  .compare img { display: block; width: 100%; height: auto; }
+  .compare .after { position: absolute; inset: 0; clip-path: inset(0 0 0 var(--split, 50%)); }
+  .compare .handle {
+    position: absolute; top: 0; bottom: 0; left: var(--split, 50%); width: 2px; margin-left: -1px;
+    background: #fff; box-shadow: 0 0 6px rgb(0 0 0 / 0.5); pointer-events: none;
+  }
+  .compare .handle::after {
+    content: "◀ ▶"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: #fff; color: #111; font-size: 11px; letter-spacing: 2px; padding: 8px 10px; border-radius: 999px;
+    box-shadow: 0 1px 6px rgb(0 0 0 / 0.4); white-space: nowrap;
+  }
+  .compare .label {
+    position: absolute; bottom: 12px; padding: 4px 10px; border-radius: 6px; font-size: 14px;
+    background: rgb(0 0 0 / 0.55); color: #fff; pointer-events: none;
+  }
+  .compare .label.left { left: 12px; }
+  .compare .label.right { right: 12px; }
+  .compare input {
+    position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize;
+  }
+  .caption { color: var(--muted); font-size: 14px; margin-top: 10px; }
+
+  /* Features */
+  .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+  .feature { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; }
+  .feature h3 { margin: 0 0 6px; font-size: 19px; }
+  .feature p { margin: 0; color: var(--muted); font-size: 16px; }
+
+  /* Speed */
+  .numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 16px; }
+  .number { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+  .number b { display: block; font-size: 44px; line-height: 1.05; letter-spacing: -0.03em; }
+  .number span { color: var(--muted); font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 16px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .table-wrap { overflow-x: auto; }
+
+  /* Build */
+  ol.steps { padding-left: 22px; }
+  ol.steps li { margin-bottom: 8px; }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; }
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; }
+
+  footer { border-top: 1px solid var(--line); margin-top: 88px; padding-top: 24px; color: var(--muted); font-size: 14px; }
+  footer p { margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <img class="icon" src="images/icon.png" alt="">
+    <h1>SpektraMac</h1>
+    <p>Physically based analog film for your photos, on your Mac's GPU. Choose a film and a paper, and see your photo
+      exposed, developed, printed and scanned, from the film's own spectral data.</p>
+    <div class="buttons">
+      <a class="button" href="https://github.com/nainajnahO/SpektraMac">View on GitHub</a>
+      <a class="button secondary" href="#build">Build it</a>
+      <a class="button secondary" href="https://github.com/nainajnahO/SpektraMac/blob/main/docs/guide.md">User guide</a>
+    </div>
+    <img class="screenshot" src="images/screenshot.png" alt="SpektraMac with a photo open: the photo on the left, the film settings on the right">
+  </header>
+
+  <section id="looks">
+    <h2>One photo, many films.</h2>
+    <p class="lede">Drag across the photo to compare the original with the film. Each render is the whole simulation:
+      the film's exposure and development, a print on paper or the slide itself, and its scan.</p>
+    <div class="chips" id="photos" role="group" aria-label="Photo"></div>
+    <div class="chips" id="films" role="group" aria-label="Film"></div>
+    <div class="compare" id="compare">
+      <img class="before" alt="The original photo">
+      <img class="after" alt="The photo through the chosen film">
+      <div class="handle"></div>
+      <span class="label left">Original</span>
+      <span class="label right" id="film-label"></span>
+      <input type="range" min="0" max="100" value="50" aria-label="Split between the original and the film">
+    </div>
+    <p class="caption" id="credit"></p>
+  </section>
+
+  <section id="features">
+    <h2>A darkroom, modelled.</h2>
+    <p class="lede">SpektraMac ports <a href="https://github.com/andreavolpato/spektrafilm">Spektrafilm</a>,
+      Andrea Volpato's simulation of colour film, to Swift and Metal. Every control maps to something physical.</p>
+    <div class="features">
+      <div class="feature"><h3>Films and papers</h3><p>20 colour negatives, slides and motion picture stocks, from Portra, Ektar and Gold to Velvia, Kodachrome and Vision3, printed on 8 papers and print films, or viewed as film.</p></div>
+      <div class="feature"><h3>The camera</h3><p>Exposure metered like a camera, on the whole frame or on the faces, people or objects it finds; highlight recovery; and diffusion filters from Glimmerglass to CineBloom.</p></div>
+      <div class="feature"><h3>The film</h3><p>Halation and light scattering in the emulsion, the DIR couplers that give film its saturation and edge contrast, and grain from silver halide particles.</p></div>
+      <div class="feature"><h3>The print</h3><p>Enlarger exposure and colour filters, preflash, paper contrast, and a burn for bright skies, all shown on a tone graph you can drag.</p></div>
+      <div class="feature"><h3>See before you choose</h3><p>Point at a film or paper in its menu and the photo shows it at once. Click the photo for the original, at the same zoom.</p></div>
+      <div class="feature"><h3>Wide colour</h3><p>The preview and saved photos are in Display P3, so saturated colours keep their depth on a Mac's display.</p></div>
+      <div class="feature"><h3>Save and reuse</h3><p>Save JPEG, or 16-bit TIFF and PNG, with the edit recorded in the file; keep presets and per-film defaults; export a 3D LUT.</p></div>
+      <div class="feature"><h3>Opens what your Mac opens</h3><p>RAW files from your camera, HEIC, JPEG, TIFF and PNG, decoded by macOS itself.</p></div>
+    </div>
+  </section>
+
+  <section id="speed">
+    <h2>Fast enough to edit live.</h2>
+    <p class="lede">The whole simulation, grain and halation included, runs on the GPU. Measured on a MacBook Pro
+      with an M1 Pro and 16 GB of memory, against the Python Spektrafilm 0.3.4 it ports, with the same film, paper and
+      settings.</p>
+    <div class="numbers">
+      <div class="number"><b>260×</b><span>faster than Python on a full render of the same photo</span></div>
+      <div class="number"><b>20 ms</b><span>for the live preview after a change, against 4.1 s</span></div>
+      <div class="number"><b>0.4 s</b><span>for a 24-megapixel photo with every effect, which Python can't render in 16 GB</span></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Python Spektrafilm 0.3.4</th><th>SpektraMac</th></tr></thead>
+        <tbody>
+          <tr><td>Full render, 2400 × 1600</td><td>18.5 s</td><td>70 ms</td></tr>
+          <tr><td>Preview, 1600 × 1067</td><td>4.1 s</td><td>20 ms</td></tr>
+          <tr><td>Full render, 6000 × 4000 (24 MP)</td><td>Stopped after 10 minutes, using over 33 GB of memory</td><td>0.41 s</td></tr>
+          <tr><td>Full render, 6960 × 4640 (32 MP)</td><td>–</td><td>0.58 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">Kodak Portra 400 printed on Kodak Portra Endura, with grain, halation, couplers and glare;
+      the previews in preview mode (no grain or blurs) on both. The best of several runs. Reproduce SpektraMac's with
+      <code>swift run -c release --package-path Engine spektra-cli benchmark photo.jpg</code>.</p>
+  </section>
+
+  <section id="accuracy">
+    <h2>Faithful to the reference.</h2>
+    <p class="lede">The port is tested stage by stage against dumps from the Python Spektrafilm 0.3.4: every step of
+      the pipeline, for negatives, slides and motion picture film, on a test chart and a photo. Where the Mac takes a
+      faster route, such as Apple's blurs, the difference is measured and kept small.</p>
+  </section>
+
+  <section id="build">
+    <h2>Build it.</h2>
+    <p class="lede">SpektraMac is free and open source. There's no download yet: build it with Xcode in a few minutes.</p>
+    <ol class="steps">
+      <li>On macOS 26.5 or newer, install <a href="https://developer.apple.com/xcode/">Xcode 27</a>.</li>
+      <li>Clone the repository and open the project:
+        <pre>git clone https://github.com/nainajnahO/SpektraMac.git
+open SpektraMac/SpektraMac.xcodeproj</pre></li>
+      <li>In the target's Signing &amp; Capabilities, choose your own team, or Sign to Run Locally.</li>
+      <li>Choose Product › Run (⌘R).</li>
+    </ol>
+  </section>
+
+  <footer>
+    <p>SpektraMac is licensed under the <a href="https://github.com/nainajnahO/SpektraMac/blob/main/LICENSE">GNU GPL v3</a>.
+      The photographic model, film and paper data and methods come from
+      <a href="https://github.com/andreavolpato/spektrafilm">Spektrafilm</a> by Andrea Volpato; the profile data are
+      licensed by their author under CC BY-SA 4.0.</p>
+    <p>Photos: <a href="https://commons.wikimedia.org/wiki/File:Sun_sets_on_Full_Artemis_II_Stack_at_Launch_Pad_39B_(Artemis_II_at_the_pad_sunsetting_jet_in_background_01292026_9).jpg">Artemis II at Launch Pad 39B</a>,
+      NASA/Sam Lott; <a href="https://commons.wikimedia.org/wiki/File:Modern_diner,_Pawtucket,_Rhode_Island_LCCN2011630228.tif">Modern diner, Pawtucket, Rhode Island</a>,
+      Carol M. Highsmith, Library of Congress. Both in the public domain.</p>
+  </footer>
+</main>
+<script>
+  const photos = [
+    { id: "artemis", name: "Artemis II", credit: "Artemis II at Launch Pad 39B. NASA/Sam Lott, public domain." },
+    { id: "diner", name: "Diner", credit: "Modern diner, Pawtucket, Rhode Island. Carol M. Highsmith, Library of Congress, public domain." },
+  ];
+  const films = [
+    { id: "portra-400", name: "Kodak Portra 400" },
+    { id: "ektar-100", name: "Kodak Ektar 100" },
+    { id: "gold-200", name: "Kodak Gold 200" },
+    { id: "pro-400h", name: "Fujifilm Pro 400H" },
+    { id: "velvia-100", name: "Fujifilm Velvia 100" },
+    { id: "kodachrome-64", name: "Kodachrome 64" },
+    { id: "vision3-250d", name: "Kodak Vision3 250D" },
+    { id: "vision3-500t", name: "Kodak Vision3 500T" },
+  ];
+  const state = { photo: photos[0], film: films[0] };
+  const compare = document.getElementById("compare");
+  const before = compare.querySelector(".before");
+  const after = compare.querySelector(".after");
+
+  function show() {
+    before.src = `images/looks/${state.photo.id}-original.jpg`;
+    after.src = `images/looks/${state.photo.id}-${state.film.id}.jpg`;
+    document.getElementById("film-label").textContent = state.film.name;
+    document.getElementById("credit").textContent = state.photo.credit;
+    for (const button of document.querySelectorAll(".chips button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.id === state.photo.id || button.dataset.id === state.film.id));
+    }
+  }
+
+  function chips(containerId, items, key) {
+    const container = document.getElementById(containerId);
+    for (const item of items) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = item.name;
+      button.dataset.id = item.id;
+      button.addEventListener("click", () => { state[key] = item; show(); });
+      container.append(button);
+    }
+  }
+
+  chips("photos", photos, "photo");
+  chips("films", films, "film");
+  compare.querySelector("input").addEventListener("input", event => {
+    compare.style.setProperty("--split", `${event.target.value}%`);
+  });
+  show();
+</script>
+</body>
+</html>

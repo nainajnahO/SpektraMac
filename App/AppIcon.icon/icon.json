@@ -1,0 +1,97 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "display-p3:0.20000,0.19000,0.21000,1.00000",
+      "display-p3:0.07000,0.07000,0.08000,1.00000"
+    ]
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "blend-mode" : "multiply",
+          "fill" : {
+            "solid" : "display-p3:0.00000,0.66000,0.92000,1.00000"
+          },
+          "glass" : false,
+          "image-name" : "Cyan.svg",
+          "name" : "Cyan",
+          "opacity" : 0.8
+        },
+        {
+          "blend-mode" : "multiply",
+          "fill" : {
+            "solid" : "display-p3:0.90000,0.12000,0.54000,1.00000"
+          },
+          "glass" : false,
+          "image-name" : "Magenta.svg",
+          "name" : "Magenta",
+          "opacity" : 0.8
+        },
+        {
+          "blend-mode" : "multiply",
+          "fill" : {
+            "solid" : "display-p3:1.00000,0.86000,0.00000,1.00000"
+          },
+          "glass" : false,
+          "image-name" : "Yellow.svg",
+          "name" : "Yellow",
+          "opacity" : 0.8
+        },
+        {
+          "fill" : {
+            "solid" : "display-p3:0.97000,0.96000,0.93000,1.00000"
+          },
+          "glass" : false,
+          "image-name" : "Frame.svg",
+          "name" : "Frame"
+        }
+      ],
+      "name" : "Frame",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      }
+    },
+    {
+      "layers" : [
+        {
+          "fill" : {
+            "solid" : "display-p3:0.97000,0.96000,0.93000,1.00000"
+          },
+          "glass" : true,
+          "image-name" : "Sprockets.svg",
+          "name" : "Sprockets",
+          "opacity" : 0.85,
+          "position" : {
+            "scale" : 0.91,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "name" : "Sprockets",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.3
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}
