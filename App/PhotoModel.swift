@@ -612,7 +612,7 @@ final class PhotoModel {
     var canSave: Bool { photo != nil && engine != nil && savePhase == nil }
     var canCancel: Bool { savePhase != nil }
 
-    /// Renders the photo at full resolution, sRGB-encoded, and writes it where the Save panel says:
+    /// Renders the photo at full resolution, encoded in Display P3, and writes it where the Save panel says:
     /// 16-bit TIFF or PNG, or JPEG, by the name's extension.
     func save() {
         guard let photo, let engine else { return }
