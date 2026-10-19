@@ -123,7 +123,7 @@ public struct ToneGraph: Sendable {
         /// negative's at a print exposure of 1. The contrasts scale the paper's response about 0
         /// (``printCurves(_:logExposure:morph:positive:)``), and the print exposure adds its log₁₀.
         public let paper: SIMD3<Float>
-        /// The print's colour for it: display-encoded sRGB, 0–1.
+        /// The print's colour for it: display-encoded Display P3, 0–1.
         public let print: SIMD3<Float>
     }
 
@@ -194,11 +194,17 @@ public actor Engine {
     /// The long side of the image thumbnails render from.
     private nonisolated let thumbnailMaxSize = 256
 
-    /// The colour space of preview and full renders: linear sRGB, Spektrafilm's default output
-    /// space, for the colour-managed display.
-    public static let outputColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
-    /// The colour space of export renders: sRGB with its transfer function.
-    public static let exportColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    /// The output colour space: Display P3, a Mac display's, rather than Spektrafilm's default sRGB,
+    /// so the output gamut compression keeps the saturated colours a print has that sRGB lacks.
+    static let outputSpace = "Display P3"
+    /// The colour space of preview and full renders: linear ``outputSpace``, for the
+    /// colour-managed display.
+    public static let outputColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)!
+    /// The colour space of export renders: ``outputSpace`` with its transfer function (sRGB's).
+    public static let exportColorSpace = CGColorSpace(name: CGColorSpace.displayP3)!
+    /// The colour space LUTs take and give (``lut(controls:exposureEV:size:)``): sRGB with its
+    /// transfer function.
+    static let lutColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     /// The input colour space: RGBImage's working space, linear.
     static let inputColorSpace = "ITU-R BT.2020"
 
@@ -387,7 +393,7 @@ public actor Engine {
                       colorSpace: Self.exportColorSpace)
     }
 
-    /// ``render(controls:mode:)`` for the screen: 8-bit sRGB, no larger than `maxPixels` on its
+    /// ``render(controls:mode:)`` for the screen: 8-bit Display P3, no larger than `maxPixels` on its
     /// long side. By default that's the most Core Animation can texture, 16384 px, so the canvas
     /// zooms into the render's own pixels. Core Image scales larger ones down on the GPU, so only
     /// that comes back from it.
@@ -399,7 +405,7 @@ public actor Engine {
         }
         let scaled = RGBImage.scaledDown(image.oriented(.downMirrored), maxPixels: maxPixels)
         guard let display = context.createCGImage(scaled, from: scaled.extent, format: .RGBA8,
-                                                         colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
+                                                         colorSpace: CGColorSpace(name: CGColorSpace.displayP3)!) else {
             throw DisplayError()
         }
         return display
@@ -528,6 +534,7 @@ public actor Engine {
         var parameters = Self.parameters(for: controls, film: film, print: print, database: neutralPrintFilters,
                                          mode: .export)
         parameters.applyPerPixelMode()
+        parameters.io.outputColorSpace = "sRGB"
         let simulation = try Simulation(parameters: parameters, film: film, print: print, gpu: gpu, tables: tables,
                                         cache: cache)
         // The lattice in LUT order, a row per blue level: red changes fastest, then green.
@@ -543,7 +550,7 @@ public actor Engine {
         }
         let lattice = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: size * size * 16,
                               size: CGSize(width: size * size, height: size), format: .RGBAf,
-                              colorSpace: Self.exportColorSpace)
+                              colorSpace: Self.lutColorSpace)
         let input = gpu.makeReadableTexture(width: size * size, height: size)
         try render(lattice, from: lattice.extent, into: input)
         let output = try gpu.run { encoder in
@@ -683,6 +690,7 @@ public actor Engine {
                            database: [String: [String: [String: SIMD3<Double>]]], mode: RenderMode) -> Parameters {
         var parameters = Parameters()
         parameters.io.inputColorSpace = inputColorSpace
+        parameters.io.outputColorSpace = outputSpace
         parameters.io.outputCctfEncoding = mode == .export  // the display is colour-managed: linear
         parameters.io.scanFilm = controls.scanFilm
         parameters.enlarger.printExposure = controls.printExposure

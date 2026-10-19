@@ -211,8 +211,8 @@ extension PhotoOpeningTests {
 
 /// The app's export parameters for each golden photo case's film and paper, and its preview
 /// parameters for the preview case, are Python's digested ones once the cases' own choices are
-/// applied: sRGB input with its CCTF, encoded output (which export has already), and no grain or
-/// glare (`deactivate_stochastic_effects`).
+/// applied: sRGB input with its CCTF, encoded sRGB output (export has the encoding already), and no
+/// grain or glare (`deactivate_stochastic_effects`).
 @Test(arguments: goldenCases.filter { !$0.hasPrefix("chart") })
 func controlsDigestLikePython(caseName: String) throws {
     let golden = try GoldenCase(caseName)
@@ -232,6 +232,7 @@ func controlsDigestLikePython(caseName: String) throws {
                                        database: try Tables.loadNeutralPrintFilters(), mode: preview ? .preview : .export)
     parameters.io.inputColorSpace = "sRGB"
     parameters.io.inputCctfDecoding = true
+    parameters.io.outputColorSpace = "sRGB"
     if preview {
         parameters.io.outputCctfEncoding = true
     }
@@ -391,9 +392,9 @@ extension PhotoOpeningTests {
     }
 }
 
-/// Exported files carry 16 bits (TIFF, PNG) or 8 (JPEG), the sRGB profile, the photo's metadata
-/// and the edit's record, and read back colour-managed as the colours written: a grey and a red block, sRGB
-/// 0.5 and (1, 0, 0), against colour-science's linear BT.2020 for the stored integers; and a NaN
+/// Exported files carry 16 bits (TIFF, PNG) or 8 (JPEG), the Display P3 profile, the photo's metadata
+/// and the edit's record, and read back colour-managed as the colours written: a grey and a red block,
+/// Display P3 0.5 and (1, 0, 0), against colour-science's linear BT.2020 for the stored integers; and a NaN
 /// pixel (outside the colour model) as black.
 @Test(arguments: [UTType.tiff, .png, .jpeg])
 func exportWritesProfileAndMetadata(type: UTType) throws {
@@ -439,7 +440,7 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     let source = try #require(CGImageSourceCreateWithURL(exported as CFURL, nil))
     let properties = try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
     #expect(properties[kCGImagePropertyDepth] as? Int == (type == .jpeg ? 8 : 16))
-    #expect(properties[kCGImagePropertyProfileName] as? String == "sRGB IEC61966-2.1")
+    #expect(properties[kCGImagePropertyProfileName] as? String == "Display P3")
     #expect(properties[kCGImagePropertyOrientation] as? Int == 1)
     let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
     #expect(exif?[kCGImagePropertyExifDateTimeOriginal] as? String == "2026:05:15 12:00:00")
@@ -464,12 +465,12 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
 
     // The stored integers (rounded), decoded by colour-science's formulas into linear BT.2020.
     let tables = try Tables.load()
-    let (sRGB, bt2020) = (tables.colourSpaces["sRGB"]!, tables.colourSpaces["ITU-R BT.2020"]!)
+    let (displayP3, bt2020) = (tables.colourSpaces["Display P3"]!, tables.colourSpaces["ITU-R BT.2020"]!)
     let maximum = type == .jpeg ? 255.0 : 65535.0
     func expected(_ encoded: SIMD3<Double>) -> SIMD3<Double> {
         let stored = (encoded * maximum).rounded(.toNearestOrAwayFromZero) / maximum
-        let linear = SIMD3(sRGB.decode(stored.x), sRGB.decode(stored.y), sRGB.decode(stored.z))
-        return simd_double3x3(rows: bt2020.xyzToRGB) * simd_double3x3(rows: sRGB.rgbToXYZ) * linear
+        let linear = SIMD3(displayP3.decode(stored.x), displayP3.decode(stored.y), displayP3.decode(stored.z))
+        return simd_double3x3(rows: bt2020.xyzToRGB) * simd_double3x3(rows: displayP3.rgbToXYZ) * linear
     }
     let decoded = try RGBImage(contentsOf: exported)
     #expect(decoded.width == width && decoded.height == height)
@@ -581,10 +582,10 @@ extension PhotoOpeningTests {
 extension PhotoOpeningTests {
     /// A LUT entry is what a render of a photo of that one sRGB colour gives, exposed the same (the
     /// As shot mark plus the offset), when nothing that depends on other pixels is on: patches of
-    /// lattice colours, black, white, grey and some in between, through the app's own path. Within a
-    /// quarter of an 8-bit level (measured: 3.7e-4): the photo's render still runs its blurs, through
-    /// half-float intermediates. Its `.cube` is the comments, the title, the size and the entries,
-    /// red fastest.
+    /// lattice colours, black, white, grey and some in between, through the chain an export renders,
+    /// in sRGB as the LUT is (the app's own renders are Display P3). Within a quarter of an 8-bit
+    /// level (measured: 3.7e-4): the photo's render still runs its blurs, through half-float
+    /// intermediates. Its `.cube` is the comments, the title, the size and the entries, red fastest.
     @Test func lutEntriesAreUniformRenders() async throws {
         let size = 5
         var controls = Controls()
@@ -606,14 +607,30 @@ extension PhotoOpeningTests {
                 (rgba[(y * width + x) * 4], rgba[(y * width + x) * 4 + 1], rgba[(y * width + x) * 4 + 2]) = (colour.x, colour.y, colour.z)
             }
         }
+        // Decoded into the working space as the engine opens a photo; the patches are the same in
+        // every row, so which row comes first doesn't matter.
         let photo = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
-                            size: CGSize(width: width, height: patch), format: .RGBAf, colorSpace: Engine.exportColorSpace)
-        _ = try await engine.open(photo)
-        let rendered = try await engine.render(controls: controls, mode: .export)
+                            size: CGSize(width: width, height: patch), format: .RGBAf, colorSpace: Engine.lutColorSpace)
+        var working = [Float](repeating: 0, count: width * patch * 4)
+        RGBImage.makeContext().render(photo, toBitmap: &working, rowBytes: width * 16, bounds: photo.extent,
+                                      format: .RGBAf, colorSpace: RGBImage.workingColorSpace)
+        let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
+        var parameters = Engine.parameters(for: controls, film: film, print: paper,
+                                           database: try Tables.loadNeutralPrintFilters(), mode: .export)
+        parameters.io.outputColorSpace = "sRGB"
+        let gpu = try GPU()
+        let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: try Tables.load())
+        let input = gpu.upload(rgb: rgb(fromRGBA: working, width: width, height: patch), width: width, height: patch)
+        let rendered = gpu.download(try gpu.run { encoder in
+            let logExposure = simulation.encodeExpose(
+                simulation.encodePreprocess(input, autoExposureEV: controls.exposureOffsetEV, on: encoder), on: encoder)
+            return simulation.encodePrintAndScan(simulation.encodeDevelop(logExposure, on: encoder),
+                                                 burnMask: simulation.encodeBurnMask(logExposure, on: encoder), on: encoder)
+        })
         for (index, colour) in colours.enumerated() {
             let pixel = (patch / 2 * width + index * patch + patch / 2) * 3
             let entry = ((colour.z * size + colour.y) * size + colour.x) * 3
-            let expected = (0..<3).map { min(max(rendered.pixels[pixel + $0], 0), 1) }
+            let expected = (0..<3).map { min(max(rendered[pixel + $0], 0), 1) }
             #expect(Difference(Array(lut.values[entry..<(entry + 3)]), expected.map(Double.init)).maxAbsolute < 1e-3, "\(colour): \(lut.values[entry..<(entry + 3)]) vs \(expected)")
         }
 
