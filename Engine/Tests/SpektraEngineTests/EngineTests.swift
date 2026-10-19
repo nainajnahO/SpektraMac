@@ -391,8 +391,8 @@ extension PhotoOpeningTests {
     }
 }
 
-/// Exported files carry 16 bits (TIFF, PNG) or 8 (JPEG), the sRGB profile and the photo's
-/// metadata, and read back colour-managed as the colours written: a grey and a red block, sRGB
+/// Exported files carry 16 bits (TIFF, PNG) or 8 (JPEG), the sRGB profile, the photo's metadata
+/// and the edit's record, and read back colour-managed as the colours written: a grey and a red block, sRGB
 /// 0.5 and (1, 0, 0), against colour-science's linear BT.2020 for the stored integers; and a NaN
 /// pixel (outside the colour model) as black.
 @Test(arguments: [UTType.tiff, .png, .jpeg])
@@ -412,6 +412,7 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
         kCGImagePropertyExifDictionary: [kCGImagePropertyExifDateTimeOriginal: "2026:05:15 12:00:00",
                                          kCGImagePropertyExifFNumber: 2.8],
         kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFMake: "Test", kCGImagePropertyTIFFModel: "Camera"],
+        kCGImagePropertyIPTCDictionary: [kCGImagePropertyIPTCKeywords: ["Holiday"]],
     ] as CFDictionary)
     #expect(CGImageDestinationFinalize(destination))
     let metadata = try #require(PhotoMetadata(contentsOf: photo))
@@ -426,10 +427,14 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     }
     pixels.replaceSubrange(0..<3, with: [.nan, .nan, .nan])
     let exported = directory.appending(component: "out").appendingPathExtension(for: type)
+    var controls = Controls()
+    controls.exposureOffsetEV = 0.3
+    let record = EditRecord(software: "SpektraMac 1.2", summary: "Kodak Portra 400 printed on Kodak Portra Endura · +0.3 EV",
+                            keywords: ["Kodak Portra 400", "SpektraMac"], controls: controls)
     let gpu = try GPU()
     try gpu.image(of: gpu.upload(rgb: pixels, width: width, height: height), bits: type == .jpeg ? 8 : 16,
                   colorSpace: Engine.exportColorSpace)
-        .write(to: exported, as: type, metadata: metadata)
+        .write(to: exported, as: type, metadata: metadata, record: record)
 
     let source = try #require(CGImageSourceCreateWithURL(exported as CFURL, nil))
     let properties = try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
@@ -444,6 +449,18 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     if type == .tiff {
         #expect(tiff?[kCGImagePropertyTIFFCompression] as? Int == 1)
     }
+    #expect(tiff?[kCGImagePropertyTIFFSoftware] as? String == record.software)
+    #expect(tiff?[kCGImagePropertyTIFFImageDescription] as? String == record.summary)
+    let iptc = properties[kCGImagePropertyIPTCDictionary] as? [CFString: Any]
+    #expect(iptc?[kCGImagePropertyIPTCCaptionAbstract] as? String == record.summary)
+    #expect(iptc?[kCGImagePropertyIPTCKeywords] as? [String] == ["Holiday", "Kodak Portra 400", "SpektraMac"])
+    let xmp = try #require(CGImageSourceCopyMetadataAtIndex(source, 0, nil))
+    func setting(_ name: String) -> String? {
+        CGImageMetadataCopyStringValueWithPath(xmp, nil, "\(EditRecord.prefix):\(name)" as CFString) as String?
+    }
+    #expect(setting("film") == "kodak_portra_400")
+    #expect(setting("exposureOffsetEV") == "0.3")
+    #expect(setting("grain") == "true")
 
     // The stored integers (rounded), decoded by colour-science's formulas into linear BT.2020.
     let tables = try Tables.load()

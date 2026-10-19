@@ -65,6 +65,7 @@ final class PhotoModel {
         savedDefaults(for: film) ?? factoryControls(for: film, from: controls)
     }
     var filmName: String { films.first { $0.stock == controls.film }?.name ?? controls.film }
+    var paperName: String { papers.first { $0.stock == controls.paper }?.name ?? controls.paper }
     var films: [ProfileInfo] { engine?.films ?? [] }
     var papers: [ProfileInfo] { engine?.papers ?? [] }
     /// The exposure the slider shows, in stops over the photo as shot: the controls' mark's
@@ -576,7 +577,7 @@ final class PhotoModel {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let type = UTType(filenameExtension: url.pathExtension) ?? .jpeg
-        let (controls, metadata) = (controls, metadata)
+        let (controls, metadata, record) = (controls, metadata, editRecord)
         savePhase = "Rendering \(url.lastPathComponent) at full resolution…"
         saveTask = Task {
             defer { savePhase = nil; saveTask = nil }
@@ -586,7 +587,7 @@ final class PhotoModel {
                 try Task.checkCancellation()
                 savePhase = "Writing \(url.lastPathComponent)…"
                 try await Task.detached(priority: .userInitiated) {
-                    try image.write(to: url, as: type, metadata: metadata)
+                    try image.write(to: url, as: type, metadata: metadata, record: record)
                 }.value
                 let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.seconds, .milliseconds]))
                 note("Saved \(url.lastPathComponent) in \(elapsed)")
@@ -603,6 +604,38 @@ final class PhotoModel {
         saveTask?.cancel()
     }
 
+    /// What a saved photo records of its edit: the film and paper (or the film, scanned), the
+    /// exposure as the slider shows it and the adjustments switched on, by their sidebar names.
+    private var editRecord: EditRecord {
+        func diffusion(_ filter: Parameters.DiffusionFilter.Family, _ strength: Double, on lens: String) -> String {
+            "\(filter.name) \(strength.formatted(.number.precision(.fractionLength(0...3)))) on the \(lens)"
+        }
+        var summary = [controls.scanFilm ? "\(filmName), scanned" : "\(filmName) printed on \(paperName)",
+                       "\(exposureText) EV"]
+        if controls.cameraDiffusion {
+            summary.append(diffusion(controls.cameraDiffusionFilter, controls.cameraDiffusionStrength, on: "lens"))
+        }
+        if controls.halation { summary.append("halation") }
+        if controls.couplers { summary.append("couplers") }
+        if controls.grain { summary.append("grain") }
+        if !controls.scanFilm {
+            if controls.burn { summary.append("burn") }
+            if controls.enlargerDiffusion {
+                summary.append(diffusion(controls.enlargerDiffusionFilter, controls.enlargerDiffusionStrength, on: "enlarger"))
+            }
+            if controls.glare { summary.append("glare") }
+        }
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        return EditRecord(software: "SpektraMac \(version)", summary: summary.joined(separator: " · "),
+                          keywords: (controls.scanFilm ? [filmName] : [filmName, paperName]) + ["SpektraMac"],
+                          controls: controls)
+    }
+
+    /// The exposure as the slider shows it, signed, to a tenth of a stop.
+    private var exposureText: String {
+        exposureEV.formatted(.number.precision(.fractionLength(1)).sign(strategy: .always(includingZero: false)))
+    }
+
     // MARK: LUTs
 
     var canExportLUT: Bool { engine != nil }
@@ -617,8 +650,7 @@ final class PhotoModel {
     /// Its title, the name LightCraft shows, is the file's.
     func exportLUT() {
         guard let engine else { return }
-        let paperName = papers.first { $0.stock == controls.paper }?.name ?? controls.paper
-        let stops = exposureEV.formatted(.number.precision(.fractionLength(1)).sign(strategy: .always(includingZero: false)))
+        let stops = exposureText
         let panel = NSSavePanel()
         panel.allowedContentTypes = [Self.cubeType]
         panel.nameFieldStringValue = controls.scanFilm ? filmName : "\(filmName) – \(paperName)"
