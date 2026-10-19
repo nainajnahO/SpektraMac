@@ -143,6 +143,14 @@ private struct SettingsPanel: View {
                 case .film:
                     ChoiceRow(title: "Film", sections: stockSections(model.films), selection: $model.film,
                               controls: $model.controls, choosing: model.controls(choosing:))
+                    ChoiceRow(title: "Format",
+                              sections: [.init(heading: nil, choices: PhotoModel.filmFormats.map { ($0.name, $0.mm) })],
+                              selection: $model.controls.filmFormatMm, controls: $model.controls) { mm in
+                        var controls = model.controls
+                        controls.filmFormatMm = mm
+                        return controls
+                    }
+                    .help("The film's size. A larger negative is enlarged less, so its grain, halation and glows come out finer.")
                     AdjustmentGroup("Halation", systemImage: "sun.haze", adjustment: .halation,
                                     isOn: $model.controls.halation) {
                         ValueSlider("Strength", value: $model.controls.halationAmount, in: 0...3, step: 0.05, neutral: 1,

@@ -66,6 +66,12 @@ final class PhotoModel {
     }
     var filmName: String { films.first { $0.stock == controls.film }?.name ?? controls.film }
     var paperName: String { papers.first { $0.stock == controls.paper }?.name ?? controls.paper }
+    /// The Format menu's sizes, by their frame's long edge as Spektrafilm takes them
+    /// (``Controls/filmFormatMm``): 120 as 60 mm, 4×5 as 120.
+    static let filmFormats: [(name: String, mm: Double)] = [("35 mm", 35), ("120", 60), ("4×5", 120)]
+    var filmFormatName: String {
+        Self.filmFormats.first { $0.mm == controls.filmFormatMm }?.name ?? "\(controls.filmFormatMm.formatted()) mm"
+    }
     var films: [ProfileInfo] { engine?.films ?? [] }
     var papers: [ProfileInfo] { engine?.papers ?? [] }
     /// The exposure the slider shows, in stops over the photo as shot: the controls' mark's
@@ -604,14 +610,15 @@ final class PhotoModel {
         saveTask?.cancel()
     }
 
-    /// What a saved photo records of its edit: the film and paper (or the film, scanned), the
-    /// exposure as the slider shows it and the adjustments switched on, by their sidebar names.
+    /// What a saved photo records of its edit: the film, its format and the paper (or the film,
+    /// scanned), the exposure as the slider shows it and the adjustments switched on, by their
+    /// sidebar names.
     private var editRecord: EditRecord {
         func diffusion(_ filter: Parameters.DiffusionFilter.Family, _ strength: Double, on lens: String) -> String {
             "\(filter.name) \(strength.formatted(.number.precision(.fractionLength(0...3)))) on the \(lens)"
         }
-        var summary = [controls.scanFilm ? "\(filmName), scanned" : "\(filmName) printed on \(paperName)",
-                       "\(exposureText) EV"]
+        let film = "\(filmName) (\(filmFormatName))"
+        var summary = [controls.scanFilm ? "\(film), scanned" : "\(film) printed on \(paperName)", "\(exposureText) EV"]
         if controls.cameraDiffusion {
             summary.append(diffusion(controls.cameraDiffusionFilter, controls.cameraDiffusionStrength, on: "lens"))
         }

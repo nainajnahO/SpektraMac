@@ -14,6 +14,10 @@ public struct Controls: Codable, Sendable, Hashable {
     public var paper = "kodak_portra_endura"
     /// Scan the developed film itself instead of a print of it (`io.scan_film`).
     public var scanFilm = false
+    /// The film's size, as its frame's long edge in mm (`camera.film_format_mm`). Grain, halation,
+    /// scatter and the diffusion filters' glow are sized on the film, so a larger film is enlarged
+    /// less and they come out finer.
+    public var filmFormatMm = 35.0
     /// The exposure: `exposureMark`'s reading for the photo (``MeteringReadings``) plus
     /// `exposureOffsetEV` stops. A new photo opens at the same mark's own reading.
     public var exposureMark = MeteringMark.centreWeighted
@@ -685,6 +689,7 @@ public actor Engine {
         parameters.io.inputColorSpace = inputColorSpace
         parameters.io.outputCctfEncoding = mode == .export  // the display is colour-managed: linear
         parameters.io.scanFilm = controls.scanFilm
+        parameters.camera.filmFormatMm = controls.filmFormatMm
         parameters.enlarger.printExposure = controls.printExposure
         parameters.enlarger.yFilterShift = controls.yFilterShift
         parameters.enlarger.mFilterShift = controls.mFilterShift
