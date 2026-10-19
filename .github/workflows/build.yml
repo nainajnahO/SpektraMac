@@ -25,3 +25,13 @@ jobs:
       - name: Test the engine
         # The parity tests skip themselves: their reference data isn't in the repository (README).
         run: swift test --package-path Engine
+      - name: Show crash reports
+        if: failure()
+        # A crash (such as in the GPU driver of the runner's virtual Mac) leaves its stack here.
+        run: |
+          for report in ~/Library/Logs/DiagnosticReports/*.ips; do
+            [ -e "$report" ] || continue
+            echo "== $report"
+            tail -n +2 "$report" | jq -r '.threads[] | select(.triggered) | .frames[] | "\(.imageIndex) \(.symbol // "?") +\(.symbolLocation // 0)"' 2>/dev/null | head -40
+            tail -n +2 "$report" | jq -r '.usedImages | to_entries[] | "\(.key) \(.value.name // .value.path // "?")"' 2>/dev/null | head -60
+          done
