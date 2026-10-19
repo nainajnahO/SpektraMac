@@ -1,0 +1,29 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch or pull request replaces a run still going.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Xcode 27, as the project needs: Xcode 26's compiler can't type-check some of the engine's
+    # expressions in time. GitHub's image for it is a preview.
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the app
+        # Unsigned: the runner has no signing certificate, and nothing is distributed.
+        run: >
+          xcodebuild -project SpektraMac.xcodeproj -scheme SpektraMac -configuration Release
+          -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+      - name: Test the engine
+        # The parity tests skip themselves: their reference data isn't in the repository (README).
+        # PhotoOpeningTests renders through the app's engine, and reading those renders back crashes
+        # the runner's virtual GPU driver (AppleParavirtGPU, in getBytes); they run on a Mac.
+        run: swift test --package-path Engine --skip PhotoOpeningTests

@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 @testable import SpektraEngine
 
 /// `golden/` at the repository root, written by `tools/golden.py`.
@@ -6,18 +7,19 @@ let goldenDirectory = URL(filePath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     .appending(component: "golden")
 
-struct MissingGoldenData: Error, CustomStringConvertible {
-    let path: String
-    var description: String { "\(path) not found: the parity tests need the reference data (see README)" }
+/// A file in `golden/`. The data isn't in the repository (see README), so a test that needs a file
+/// that isn't there is skipped, as on CI.
+func goldenFile(_ components: String...) throws -> URL {
+    let url = components.reduce(goldenDirectory) { $0.appending(component: $1) }
+    guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
+        try Test.cancel("\(url.path(percentEncoded: false)) not found: the parity tests need the reference data (see README)")
+    }
+    return url
 }
 
 /// One tap of a golden case, e.g. `golden("chart-kodak_portra_400-kodak_portra_endura", "rgb_out")`.
 func golden(_ caseName: String, _ tap: String) throws -> NPYArray {
-    let url = goldenDirectory.appending(components: caseName, "\(tap).npy")
-    guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
-        throw MissingGoldenData(path: url.path(percentEncoded: false))
-    }
-    return try NPYArray(contentsOf: url)
+    try NPYArray(contentsOf: goldenFile(caseName, "\(tap).npy"))
 }
 
 /// The golden cases `tools/golden.py` writes: every film pair on the chart and on the photo, and
@@ -49,13 +51,9 @@ struct GoldenCase: Decodable {
     }
 
     init(_ name: String) throws {
-        let url = goldenDirectory.appending(components: name, "params.json")
-        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
-            throw MissingGoldenData(path: url.path(percentEncoded: false))
-        }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        self = try decoder.decode(GoldenCase.self, from: Data(contentsOf: url))
+        self = try decoder.decode(GoldenCase.self, from: Data(contentsOf: goldenFile(name, "params.json")))
     }
 }
 
