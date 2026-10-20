@@ -220,18 +220,33 @@ final class PhotoModel {
 
     // MARK: Opening
 
+    /// How many opens have started: the newest one's photo is the one that shows (``open(_:)``).
+    @ObservationIgnored private var opensStarted = 0
+
+    /// Opens the photo at `url`. Photos chosen while others open show in the order chosen: an
+    /// earlier one still decoding is dropped (a 16-bit TIFF can take seconds, a JPEG chosen after it
+    /// a moment), and one the engine is already opening shows until the later one replaces it.
+    /// "Opening…" stays until the newest is done.
     func open(_ url: URL) {
         guard let engine else { return }
         // Files from the Open panel are security-scoped; dropped files are already accessible.
         let scoped = url.startAccessingSecurityScopedResource()
+        opensStarted += 1
+        let generation = opensStarted
         isLoading = true
         errorMessage = nil
         Task {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            defer {
+                if generation == opensStarted {
+                    isLoading = false
+                }
+            }
             do {
                 let (image, metadata) = try await Task.detached(priority: .userInitiated) {
                     (try RGBImage.decode(contentsOf: url), PhotoMetadata(contentsOf: url))
                 }.value
+                guard generation == opensStarted else { return }
                 // The engine opens the photo once it's done rendering the last one: stop that.
                 renderTask?.cancel()
                 stripTask?.cancel()
@@ -256,9 +271,10 @@ final class PhotoModel {
                 note("Opened \(url.lastPathComponent) (\(opened.width) × \(opened.height))")
                 loadOriginal(of: url)
             } catch {
+                // A photo chosen since says how it went instead.
+                guard generation == opensStarted else { return }
                 fail("Could not open \(url.lastPathComponent)", error)
             }
-            isLoading = false
         }
     }
 
