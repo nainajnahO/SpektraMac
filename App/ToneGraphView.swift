@@ -11,12 +11,12 @@ import SwiftUI
 /// the other two, which spread apart with the filter shifts. Its points set the print exposure and
 /// the contrasts (``ToneCurveLayer``). With the burn on, shading from a line at its threshold marks
 /// the tones it takes, and a dashed line where they print
-/// (``ToneCurve/burned(stops:threshold:exposures:)``). The sliders under Options and in Enlarger
+/// (``ToneGraph/Curve/burned(stops:threshold:)``). The sliders under Options and in Enlarger
 /// give exact values, and stand in for it with VoiceOver and the keyboard.
 struct ToneGraphView: View {
     @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
-    @SceneStorage("toneGraph.channel") private var channel = ToneChannel.neutral
+    @SceneStorage("toneGraph.channel") private var channel = ToneGraph.Channel.neutral
 
     /// The tones the graph shows: the print is black or white past them.
     static let tones: ClosedRange<Float> = -6...6
@@ -31,7 +31,7 @@ struct ToneGraphView: View {
             .overlay(alignment: .topLeading) {
                 // Where the curve is darkest, so it's clear of the menu.
                 Picker("Curve", selection: $channel) {
-                    ForEach(ToneChannel.allCases, id: \.self) { Text($0.rawValue) }
+                    ForEach(ToneGraph.Channel.allCases, id: \.self) { Text($0.name) }
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
@@ -74,10 +74,10 @@ struct ToneGraphView: View {
 /// from the chart's scales (``ToneCurveLayer``).
 private struct ToneChart<Overlay: View>: View, Equatable {
     let bins: [HistogramBin]
-    let channel: ToneChannel
+    let channel: ToneGraph.Channel
     let overlay: (ChartProxy) -> Overlay
 
-    init(bins: [HistogramBin], channel: ToneChannel, @ViewBuilder overlay: @escaping (ChartProxy) -> Overlay) {
+    init(bins: [HistogramBin], channel: ToneGraph.Channel, @ViewBuilder overlay: @escaping (ChartProxy) -> Overlay) {
         (self.bins, self.channel, self.overlay) = (bins, channel, overlay)
     }
 
@@ -123,13 +123,13 @@ private struct ToneChart<Overlay: View>: View, Equatable {
 /// else up or down, the contrast, about the middle point; and the burn's line sideways, its
 /// threshold, and up or down, its strength. The curve follows the controls
 /// at once, as a slider's bar does: it's predicted from the engine's last
-/// (``ToneCurve/predicted(for:from:)``), which comes with the photo's preview, and each new one
+/// (``ToneGraph/Curve/predicted(for:from:)``), which comes with the photo's preview, and each new one
 /// sets the drag's control again from it, so the grabbed point stays under the pointer.
 private struct ToneCurveLayer: View {
     @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
     let proxy: ChartProxy
-    let channel: ToneChannel
+    let channel: ToneGraph.Channel
     /// While the pointer is pressed in the graph, and what it's moving, if anything.
     @State private var isPressed = false
     @State private var drag: ToneDrag?
@@ -145,19 +145,16 @@ private struct ToneCurveLayer: View {
             if let toneGraph = model.toneGraph, let frame = proxy.plotFrame {
                 let plot = geometry[frame]
                 let controls = model.controls
-                let shown = ToneCurve(toneGraph.graph, channel: channel).predicted(for: controls, from: toneGraph.controls)
+                let shown = ToneGraph.Curve(toneGraph.graph, channel: channel).predicted(for: controls, from: toneGraph.controls)
                 // The other colours' curves under the one shown, faint.
-                let others = channel == .neutral ? [] : ToneChannel.colours.filter { $0 != channel }.map {
-                    ToneCurve(toneGraph.graph, channel: $0).predicted(for: controls, from: toneGraph.controls)
+                let others = channel == .neutral ? [] : ToneGraph.Channel.colours.filter { $0 != channel }.map {
+                    ToneGraph.Curve(toneGraph.graph, channel: $0).predicted(for: controls, from: toneGraph.controls)
                 }
                 let handles = shown.handles(sideDistance: Self.sideDistance)
                 let active = drag?.handle ?? hovered
-                // The burn's threshold and the curve it prints, while it's on. Its mask goes by the
-                // layers' mean exposure, as the engine's `burn_threshold` kernel takes it.
+                // The burn's threshold and the curve it prints, while it's on.
                 let threshold = Float(controls.burnThreshold)
-                let burned = controls.burn ? shown.burned(stops: Float(controls.burnStops), threshold: threshold,
-                                                          exposures: toneGraph.graph.curve.map { log2(exp2($0.film).sum() / 3) })
-                    : nil
+                let burned = controls.burn ? shown.burned(stops: Float(controls.burnStops), threshold: threshold) : nil
                 let burnLine = burned == nil ? nil : location(of: SIMD2(threshold, 0), in: plot)?.x
                 Canvas { context, _ in
                     context.clip(to: Path(roundedRect: plot, cornerRadius: 5))
@@ -198,7 +195,7 @@ private struct ToneCurveLayer: View {
                     for handle in handles {
                         guard let at = location(of: SIMD2(handle.tone, handle.print), in: plot) else { continue }
                         context.fill(Path(ellipseIn: CGRect(x: at.x - 4.5, y: at.y - 4.5, width: 9, height: 9)),
-                                     with: handle.id == active ? .style(.tint) : .color(.white))
+                                     with: ToneHandle(handle.kind) == active ? .style(.tint) : .color(.white))
                     }
                 }
                 .contentShape(.rect)
@@ -227,7 +224,7 @@ private struct ToneCurveLayer: View {
                 .onContinuousHover { phase in
                     switch phase {
                     case .active(let location) where isEnabled:
-                        hovered = grabbed(at: location, among: handles, plot: plot)?.id
+                        hovered = grabbed(at: location, among: handles, plot: plot).map { ToneHandle($0.kind) }
                             ?? (isNear(burnLine, location) ? .burn : nil)
                     case .active, .ended:
                         hovered = nil
@@ -273,7 +270,7 @@ private struct ToneCurveLayer: View {
         return CGPoint(x: plot.minX + x, y: plot.minY + y)
     }
 
-    private func path(of curve: ToneCurve, over tones: ClosedRange<Float> = ToneGraphView.tones, in plot: CGRect) -> Path {
+    private func path(of curve: ToneGraph.Curve, over tones: ClosedRange<Float> = ToneGraphView.tones, in plot: CGRect) -> Path {
         Path { path in
             for position in curve.points(in: tones) {
                 guard let at = location(of: position, in: plot) else { continue }
@@ -296,8 +293,8 @@ private struct ToneCurveLayer: View {
     }
 
     /// The point within ``grabDistance`` of `location`, the nearest.
-    private func grabbed(at location: CGPoint, among handles: [ToneCurve.Handle], plot: CGRect) -> ToneCurve.Handle? {
-        func distance(_ handle: ToneCurve.Handle) -> CGFloat {
+    private func grabbed(at location: CGPoint, among handles: [ToneGraph.Curve.Handle], plot: CGRect) -> ToneGraph.Curve.Handle? {
+        func distance(_ handle: ToneGraph.Curve.Handle) -> CGFloat {
             guard let at = self.location(of: SIMD2(handle.tone, handle.print), in: plot) else { return .infinity }
             return hypot(at.x - location.x, at.y - location.y)
         }
@@ -312,16 +309,16 @@ private struct ToneCurveLayer: View {
     /// What pressing at `location` grabs: a point of the curve shown under the pointer, else the
     /// burn's line (at `burnLine`, if it's shown), else the curve there, unless that's by the middle
     /// point, which the contrast leaves where it is.
-    private func beginDrag(at location: CGPoint, handles: [ToneCurve.Handle], curve: ToneCurve, burnLine: CGFloat?,
+    private func beginDrag(at location: CGPoint, handles: [ToneGraph.Curve.Handle], curve: ToneGraph.Curve, burnLine: CGFloat?,
                            plot: CGRect) -> ToneDrag? {
         guard isEnabled else { return nil }
         if let handle = grabbed(at: location, among: handles, plot: plot) {
-            return ToneDrag(handle: handle.id, tone: handle.tone, print: handle.print, controls: model.controls)
+            return ToneDrag(handle: ToneHandle(handle.kind), tone: handle.tone, print: handle.print, controls: model.controls)
         }
         if isNear(burnLine, location) {
             return ToneDrag(handle: .burn, tone: Float(model.controls.burnThreshold), print: 0, controls: model.controls)
         }
-        guard let middle = handles.first(where: { $0.id == .middle }),
+        guard let middle = handles.first(where: { $0.kind == .middle }),
               let tone = proxy.value(atX: location.x - plot.minX, as: Float.self), abs(tone - middle.tone) > 0.5 else {
             return nil
         }
@@ -333,7 +330,7 @@ private struct ToneCurveLayer: View {
     /// prediction misses.
     private func move(_ drag: ToneDrag) {
         guard let toneGraph = model.toneGraph else { return }
-        let (curve, rendered) = (ToneCurve(toneGraph.graph, channel: channel), toneGraph.controls)
+        let (curve, rendered) = (ToneGraph.Curve(toneGraph.graph, channel: channel), toneGraph.controls)
         switch drag.handle {
         case .middle:
             // The middle point is where the paper's exposure is 0, and the print exposure adds its
@@ -358,7 +355,7 @@ private struct ToneCurveLayer: View {
     /// The contrasts scale the paper's response about its exposure 0 (``ToneGraph/Point/paper``): a
     /// factor f gives exposure E the response `curve` has at f·E. So for brightness `print` at
     /// `tone`, f is the paper's exposure where `curve` has that brightness, over the one at `tone`.
-    private func scale(_ contrast: WritableKeyPath<Controls, Double>, of curve: ToneCurve, rendered: Controls,
+    private func scale(_ contrast: WritableKeyPath<Controls, Double>, of curve: ToneGraph.Curve, rendered: Controls,
                        at tone: Float, to print: Float) {
         let reached = curve.tone(where: curve.print, is: print, near: tone)
         let factor = curve.value(of: curve.paper, at: reached) / curve.value(of: curve.paper, at: tone)
@@ -379,18 +376,13 @@ private struct ToneCurveLayer: View {
 }
 
 /// The tone graph menu's choices: the neutral curve, or a colour's.
-private enum ToneChannel: String, CaseIterable {
-    case neutral = "Neutral", red = "Red", green = "Green", blue = "Blue"
-
-    static let colours: [ToneChannel] = [.red, .green, .blue]
-
-    /// Its layer and the print's channel; none for neutral.
-    var index: Int? {
+extension ToneGraph.Channel {
+    var name: String {
         switch self {
-        case .neutral: nil
-        case .red: 0
-        case .green: 1
-        case .blue: 2
+        case .neutral: "Neutral"
+        case .red: "Red"
+        case .green: "Green"
+        case .blue: "Blue"
         }
     }
 
@@ -408,6 +400,14 @@ private enum ToneChannel: String, CaseIterable {
 /// contrasts' either side. And the burn's line.
 private enum ToneHandle {
     case shadows, middle, highlights, burn
+
+    init(_ kind: ToneGraph.Curve.Handle.Kind) {
+        switch kind {
+        case .shadows: self = .shadows
+        case .middle: self = .middle
+        case .highlights: self = .highlights
+        }
+    }
 }
 
 /// One bar of the tone graph's histogram, its height 0–1.
@@ -426,118 +426,4 @@ private struct ToneDrag {
     let print: Float
     let controls: Controls
     var moved = SIMD2<Float>.zero
-}
-
-/// One colour's tone curve, or the neutral one, from a ``ToneGraph``: per grey of its ramp, the
-/// tone (the film's exposure, in stops), the paper's log₁₀ exposure and the print's brightness.
-private struct ToneCurve {
-    struct Handle {
-        let id: ToneHandle
-        let tone: Float
-        let print: Float
-    }
-
-    let channel: ToneChannel
-    let tones: [Float]
-    let paper: [Float]
-    let print: [Float]
-
-    init(channel: ToneChannel, tones: [Float], paper: [Float], print: [Float]) {
-        (self.channel, self.tones, self.paper, self.print) = (channel, tones, paper, print)
-    }
-
-    init(_ graph: ToneGraph, channel: ToneChannel) {
-        self.channel = channel
-        if let index = channel.index {
-            tones = graph.curve.map { $0.film[index] }
-            paper = graph.curve.map { $0.paper[index] }
-            print = graph.curve.map { $0.print[index] }
-        } else {
-            // The layers' mean, as the histogram has them together; the brightness as Rec. 709 luma.
-            tones = graph.curve.map { $0.film.sum() / 3 }
-            paper = graph.curve.map { $0.paper.sum() / 3 }
-            print = graph.curve.map { ($0.print * SIMD3(0.2126, 0.7152, 0.0722)).sum() }
-        }
-    }
-
-    /// The curve `controls` would make, from this one made with `rendered`: the print exposure
-    /// adds its log₁₀ to the paper's exposure, and the contrasts scale that about 0 (Contrast all
-    /// of it, Shadow contrast above 0, Highlight contrast below), the print's brightness for each
-    /// paper exposure staying this curve's. Exact for the print exposure (but for preflash) and
-    /// Contrast; near for the other two, as their sub-layers aren't all of the paper's response.
-    /// The other controls change nothing here: the engine's next curve shows them.
-    func predicted(for controls: Controls, from rendered: Controls) -> ToneCurve {
-        let shift = Float(log10(controls.printExposure / rendered.printExposure))
-        let contrast = Float(controls.printContrast / rendered.printContrast)
-        let change = SIMD3(shift, contrast * Float(controls.printShadowContrast / rendered.printShadowContrast),
-                           contrast * Float(controls.printHighlightContrast / rendered.printHighlightContrast))
-        guard shift.isFinite, change != SIMD3(0, 1, 1) else { return self }
-        return ToneCurve(channel: channel, tones: tones, paper: paper.map { $0 + shift },
-                         print: tones.map { brightness(at: $0, change) })
-    }
-
-    /// The brightness at `tone` with `change`: the paper's exposure shifted by its x, then scaled
-    /// by its y above 0 and its z below (``predicted(for:from:)``), looked up on this curve.
-    private func brightness(at tone: Float, _ change: SIMD3<Float>) -> Float {
-        let exposure = value(of: paper, at: tone) + change.x
-        let scaled = exposure > 0 ? exposure * change.y : exposure * change.z
-        return value(of: print, at: self.tone(where: paper, is: scaled, near: tone))
-    }
-
-    /// This curve burned in (``Parameters/Burn``) as the engine burns a photo, but with a mask not
-    /// fitted to its edges: each grey's paper exposure up by `stops` × its mask, log₁₀ 2 a stop, and
-    /// the brightness for that looked up on this curve, as ``predicted(for:from:)`` looks it up. The
-    /// mask is the `burn_threshold` kernel's over each grey's exposure in `exposures` (stops over
-    /// mid-grey): 0 under `threshold`, 1 from a stop over, smoothly between.
-    func burned(stops: Float, threshold: Float, exposures: [Float]) -> ToneCurve {
-        let burned = paper.indices.map { index in
-            paper[index] + log10(2) * stops * simd_smoothstep(threshold, threshold + 1, exposures[index])
-        }
-        let print = burned.indices.map { index in
-            value(of: self.print, at: tone(where: paper, is: burned[index], near: tones[index]))
-        }
-        return ToneCurve(channel: channel, tones: tones, paper: burned, print: print)
-    }
-
-    /// The middle point where the paper's exposure is 0 (a mid-grey negative's at a print exposure
-    /// of 1), and the side points `sideDistance` stops either side; none if it's never 0.
-    func handles(sideDistance: Float) -> [Handle] {
-        guard paper.contains(where: { $0 <= 0 }), paper.contains(where: { $0 >= 0 }) else { return [] }
-        let middle = tone(where: paper, is: 0, near: 0)
-        return [(ToneHandle.shadows, middle - sideDistance), (.middle, middle), (.highlights, middle + sideDistance)]
-            .map { Handle(id: $0, tone: $1, print: value(of: print, at: $1)) }
-    }
-
-    /// The ramp's greys within `range` as (tone, brightness), and the nearest past each end, so a
-    /// line through them reaches them.
-    func points(in range: ClosedRange<Float>) -> [SIMD2<Float>] {
-        let first = max((tones.firstIndex { $0 >= range.lowerBound } ?? 0) - 1, 0)
-        let last = min((tones.lastIndex { $0 <= range.upperBound } ?? tones.count - 1) + 1, tones.count - 1)
-        return (first...last).map { SIMD2(tones[$0], print[$0]) }
-    }
-
-    /// `values` at `tone`, between the ramp's greys; past its ends, the end's.
-    func value(of values: [Float], at tone: Float) -> Float {
-        guard let above = tones.firstIndex(where: { $0 >= tone }) else { return values[values.count - 1] }
-        guard above > 0 else { return values[0] }
-        let fraction = (tone - tones[above - 1]) / (tones[above] - tones[above - 1])
-        return values[above - 1] + fraction * (values[above] - values[above - 1])
-    }
-
-    /// The tone nearest `near` where `values` are `target`, brought within their range.
-    func tone(where values: [Float], is target: Float, near: Float) -> Float {
-        let target = min(max(target, values.min()!), values.max()!)
-        var nearest = near
-        var nearestDistance = Float.infinity
-        for index in values.indices.dropLast() {
-            let (from, to) = (values[index], values[index + 1])
-            guard min(from, to) <= target && target <= max(from, to) else { continue }
-            let fraction = from == to ? 0 : (target - from) / (to - from)
-            let tone = tones[index] + fraction * (tones[index + 1] - tones[index])
-            if abs(tone - near) < nearestDistance {
-                (nearest, nearestDistance) = (tone, abs(tone - near))
-            }
-        }
-        return nearest
-    }
 }

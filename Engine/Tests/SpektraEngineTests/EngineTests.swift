@@ -754,4 +754,66 @@ extension PhotoOpeningTests {
         }
         #expect(steeper.curve[160].print.y > brighter.curve[160].print.y)  // 2 stops up: lighter
     }
+
+    /// The curve predicted for another print exposure or contrast, the exact ones, is the engine's
+    /// own curve for it, for each colour and the neutral one, across the tones the graph shows:
+    /// within 0.02 of the print's brightness, the error of looking it up between the ramp's greys
+    /// where the curve is steepest (measured: 0.013).
+    @Test func predictedToneCurveIsTheEnginesCurve() async throws {
+        var rendered = Controls()
+        rendered.printExposure = 1.2
+        rendered.printContrast = 0.9
+        let engine = try Engine()
+        _ = try await engine.open(RGBImage(width: 16, height: 16, pixels: [Float](repeating: 0.18, count: 16 * 16 * 3)).ciImage)
+        let graph = try await engine.toneGraph(controls: rendered)
+        for (printExposure, contrast) in [(1.8, 0.9), (0.7, 0.9), (1.2, 1.4), (0.9, 0.6)] {
+            var controls = rendered
+            controls.printExposure = printExposure
+            controls.printContrast = contrast
+            let next = try await engine.toneGraph(controls: controls)
+            for channel in ToneGraph.Channel.allCases {
+                let predicted = ToneGraph.Curve(graph, channel: channel).predicted(for: controls, from: rendered)
+                let actual = ToneGraph.Curve(next, channel: channel)
+                let shown = actual.tones.indices.filter { (-6...6).contains(actual.tones[$0]) }
+                let error = shown.map { abs(predicted.print[$0] - actual.print[$0]) }.max() ?? .infinity
+                #expect(error < 0.02, "\(channel) at print exposure \(printExposure), contrast \(contrast): \(error)")
+            }
+        }
+    }
+
+    /// The burned curve is a burned render of a grey: a uniform photo burns uniformly, by the mask
+    /// of its exposure, so each colour of its print is the burned curve's at its grey of the ramp
+    /// (measured: within 7e-4).
+    @Test func burnedToneCurveIsABurnedRender() async throws {
+        let e: Float = 1
+        var controls = Controls()
+        controls.exposureOffsetEV = Double(e)
+        controls.halation = false
+        controls.grain = false
+        controls.glare = false
+        controls.burn = true
+        controls.burnStops = 2
+        controls.burnThreshold = Double(e) - 0.5  // halfway up the mask
+        let (width, height) = (16, 16)
+        let rgba = (0..<(width * height)).flatMap { _ in [Float](arrayLiteral: 0.5, 0.5, 0.5, 1) }
+        let photo = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+                            size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: Engine.exportColorSpace)
+        let engine = try Engine()
+        _ = try await engine.open(photo)
+        let rendered = try await engine.render(controls: controls, mode: .export)
+        // The graph leaves the burn out (`applyPerPixelMode`), as a LUT does.
+        let graph = try await engine.toneGraph(controls: controls)
+        let position = (e - ToneGraph.stops.lowerBound) / (ToneGraph.stops.upperBound - ToneGraph.stops.lowerBound)
+            * Float(graph.curve.count - 1)
+        let (below, fraction) = (Int(position), position - position.rounded(.down))
+        for channel in ToneGraph.Channel.colours {
+            let curve = ToneGraph.Curve(graph, channel: channel)
+            let burned = curve.burned(stops: Float(controls.burnStops), threshold: Float(controls.burnThreshold))
+            let printed = burned.print[below] * (1 - fraction) + burned.print[below + 1] * fraction
+            let unburned = curve.print[below] * (1 - fraction) + curve.print[below + 1] * fraction
+            let expected = min(max(rendered.pixels[channel.index!], 0), 1)
+            #expect(abs(printed - expected) < 2e-3, "\(channel): \(printed) vs \(expected)")
+            #expect(printed < unburned - 0.02)  // the burn darkens it
+        }
+    }
 }
