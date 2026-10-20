@@ -1,0 +1,20 @@
+name: Feature request
+description: Something you'd like SpektraMac to do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why?
+      description: What it would help with, or how you get by without it now.
+  - type: input
+    id: elsewhere
+    attributes:
+      label: Does another Mac app do this well?
+      description: Apple's own apps especially. SpektraMac follows how the Mac does things.
