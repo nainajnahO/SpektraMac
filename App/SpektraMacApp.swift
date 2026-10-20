@@ -1,3 +1,4 @@
+import SpektraEngine
 import SwiftUI
 
 @main
@@ -28,6 +29,8 @@ struct SpektraMacApp: App {
                     .keyboardShortcut(".", modifiers: .command)
                     .disabled(!model.canCancel)
             }
+            InspectorCommands()
+            ViewCommands(model: model)
             CommandMenu("Preset") {
                 Group {
                     Button("Open Preset…") { model.isImportingPreset = true }
@@ -48,6 +51,60 @@ struct SpektraMacApp: App {
                 .environment(model)
         }
         .defaultSize(width: 420, height: 480)
+        // Window › Log, as the toolbar's Log button.
+        .keyboardShortcut("l", modifiers: [.command, .option])
+    }
+}
+
+/// The View menu's commands for what the toolbar and the canvas do: Print or Film, the settings'
+/// tabs, zooming and the original. (Hiding the settings is ``InspectorCommands``'.)
+struct ViewCommands: Commands {
+    let model: PhotoModel
+    @FocusedValue(\.settingsCategory) private var category
+    @FocusedValue(\.showsSettings) private var showsSettings
+    @FocusedValue(\.canvasZoom) private var canvasZoom
+
+    var body: some Commands {
+        CommandGroup(before: .toolbar) {
+            // Choosing the one showing changes nothing.
+            Toggle("Print", isOn: Binding { !model.showsFilm } set: { _ in
+                if model.showsFilm { model.controls.scanFilm = false }
+            })
+                .keyboardShortcut("1")
+                .disabled(model.isSlideFilm || model.showsOriginal)
+            Toggle("Film", isOn: Binding { model.showsFilm } set: { _ in
+                if !model.showsFilm { model.controls.scanFilm = true }
+            })
+                .keyboardShortcut("2")
+                .disabled(model.showsOriginal)
+            Divider()
+            ForEach(Array(SettingsCategory.allCases.enumerated()), id: \.element) { index, tab in
+                // Choosing a tab shows the settings, if they're hidden.
+                Toggle("\(tab.rawValue) Settings", isOn: Binding { showsSettings?.wrappedValue == true && category?.wrappedValue == tab } set: { _ in
+                    category?.wrappedValue = tab
+                    showsSettings?.wrappedValue = true
+                })
+                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .option])
+                .disabled(category == nil)
+            }
+            Divider()
+            Button("Zoom In") { canvasZoom?.zoomIn?() }
+                .keyboardShortcut("+")
+                .disabled(canvasZoom?.zoomIn == nil)
+            Button("Zoom Out") { canvasZoom?.zoomOut?() }
+                .keyboardShortcut("-")
+                .disabled(canvasZoom?.zoomOut == nil)
+            Button("Zoom to Fit") { canvasZoom?.fit?() }
+                .keyboardShortcut("0")
+                .disabled(canvasZoom?.fit == nil)
+            Divider()
+            // As a click on the photo. Photos shows the original while M is held; a menu command
+            // switches.
+            Toggle("Show Original", isOn: Binding { model.showsOriginal } set: { model.showsOriginal = $0 })
+                .keyboardShortcut("m", modifiers: [])
+                .disabled(model.original == nil)
+            Divider()
+        }
     }
 }
 

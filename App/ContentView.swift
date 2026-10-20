@@ -57,6 +57,9 @@ struct ContentView: View {
             .onChange(of: undoManager, initial: true) { _, undoManager in
                 model.undoManager = undoManager
             }
+            // For the View menu (``ViewCommands``).
+            .focusedSceneValue(\.settingsCategory, $category)
+            .focusedSceneValue(\.showsSettings, $showsSettings)
             .dropDestination(for: URL.self) { urls, _ in
                 guard let url = urls.first else { return false }
                 model.open(url)
@@ -101,6 +104,21 @@ struct ContentView: View {
     }
 }
 
+extension FocusedValues {
+    /// The settings tab the window shows, and whether it shows the settings, for the View menu.
+    @Entry var settingsCategory: Binding<SettingsCategory>?
+    @Entry var showsSettings: Binding<Bool>?
+    /// What the View menu's zoom commands do to the canvas, while it has a photo.
+    @Entry var canvasZoom: CanvasZoom?
+}
+
+/// The canvas's zoom commands, each nil where it can't zoom that way.
+struct CanvasZoom {
+    let zoomIn: (() -> Void)?
+    let zoomOut: (() -> Void)?
+    let fit: (() -> Void)?
+}
+
 /// Print | Film, in a view of its own reading only what it shows (``PhotoModel/showsFilm``): the
 /// controls change at every step of a slider, and read here or in the window's body they laid out
 /// the toolbar again each time.
@@ -121,9 +139,10 @@ private struct ShowPicker: View {
 
 // MARK: - Canvas
 
-/// The photo fitted to the canvas below the toolbar and beside the settings panel. Scrolling (or
-/// pinching) zooms around the pointer, dragging moves the zoomed photo, clicking shows the original
-/// in place of the edit (and the edit again), and double-clicking shows all of it again. The canvas
+/// The photo fitted to the canvas below the toolbar and beside the settings panel. Pinching (or
+/// scrolling with ⌥) zooms around the pointer, scrolling or dragging moves the zoomed photo, as in
+/// Preview; clicking shows the original in place of the edit (and the edit again), and
+/// double-clicking shows all of it again. The View menu zooms too (``CanvasZoom``). The canvas
 /// reaches under the toolbar and the panel, so a zoomed photo shows through them, as in Photos.
 private struct ImageCanvas: View {
     @Environment(PhotoModel.self) private var model
@@ -134,8 +153,8 @@ private struct ImageCanvas: View {
     @State private var canvasSize: CGSize = .zero
     /// How much of the canvas the toolbar (top) and the settings panel (trailing) cover.
     @State private var insets = EdgeInsets()
-    /// Where the pointer is over the canvas below the toolbar and beside the panel: scrolling
-    /// zooms around it.
+    /// Where the pointer is over the canvas below the toolbar and beside the panel: scrolling moves
+    /// the photo under it, or zooms around it.
     @State private var pointer: CGPoint?
     /// The offset when the drag began, and the pinch's magnification so far.
     @State private var dragStart: CGSize?
@@ -224,14 +243,22 @@ private struct ImageCanvas: View {
                     }
                 }
                 .onAppear {
-                    // SwiftUI has no scroll-wheel events for a plain view, so AppKit's: over the
-                    // photo, scrolling zooms instead of scrolling. A trackpad's momentum after
-                    // the fingers lift is left out, so the zoom stops with them.
+                    // SwiftUI has no scroll-wheel events for a plain view, so AppKit's. Over the
+                    // photo, scrolling moves it while it's zoomed, as in Preview, momentum and all;
+                    // with ⌥ it zooms, the momentum left out so the zoom stops with the fingers.
                     scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
                         guard let pointer else { return event }
-                        if event.momentumPhase.isEmpty {
-                            let step = event.hasPreciseScrollingDeltas ? 0.01 : 0.15  // points, or wheel lines
-                            zoom(by: exp(event.scrollingDeltaY * step), at: pointer)
+                        if event.modifierFlags.contains(.option) {
+                            if event.momentumPhase.isEmpty {
+                                let step = event.hasPreciseScrollingDeltas ? 0.01 : 0.15  // points, or wheel lines
+                                zoom(by: exp(event.scrollingDeltaY * step), at: pointer)
+                            }
+                        } else if zoom > 1 {
+                            let step: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10  // points, or wheel lines
+                            offset = clamped(CGSize(width: offset.width + event.scrollingDeltaX * step,
+                                                    height: offset.height + event.scrollingDeltaY * step))
+                        } else {
+                            return event
                         }
                         return nil
                     }
@@ -255,6 +282,10 @@ private struct ImageCanvas: View {
             zoom = 1
             offset = .zero
         }
+        .focusedSceneValue(\.canvasZoom, model.photo == nil ? nil : CanvasZoom(
+            zoomIn: zoom < maxZoom ? { zoom(by: 2, at: visibleCentre) } : nil,
+            zoomOut: zoom > 1 ? { zoom(by: 0.5, at: visibleCentre) } : nil,
+            fit: zoom > 1 ? { zoom = 1; offset = .zero } : nil))
         .onChange(of: fittedLongSide, initial: true) { _, pixels in
             model.canvasLongSide = pixels
         }
@@ -315,13 +346,18 @@ private struct ImageCanvas: View {
         return Int((max(fitted.width, fitted.height) * displayScale).rounded(.up))
     }
 
-    /// Zooms by `factor`, keeping the photo's point under `anchor` (canvas coordinates) where it
-    /// is: from all of the photo to 4 points per photo pixel.
-    private func zoom(by factor: CGFloat, at anchor: CGPoint) {
-        guard let photo = model.photo else { return }
+    /// The most the photo zooms: 4 points per photo pixel.
+    private var maxZoom: CGFloat {
         let fitted = fittedSize(in: visibleSize)
-        guard fitted.width > 0 else { return }
-        let newZoom = min(max(zoom * factor, 1), max(1, 4 * CGFloat(photo.width) / fitted.width))
+        guard let photo = model.photo, fitted.width > 0 else { return 1 }
+        return max(1, 4 * CGFloat(photo.width) / fitted.width)
+    }
+
+    /// Zooms by `factor`, keeping the photo's point under `anchor` (canvas coordinates) where it
+    /// is: from all of the photo to ``maxZoom``.
+    private func zoom(by factor: CGFloat, at anchor: CGPoint) {
+        guard fittedSize(in: visibleSize).width > 0 else { return }
+        let newZoom = min(max(zoom * factor, 1), maxZoom)
         let applied = newZoom / zoom
         // The anchor's distance from the photo's centre scales with the zoom.
         let fromCentre = CGSize(width: anchor.x - visibleCentre.x, height: anchor.y - visibleCentre.y)
