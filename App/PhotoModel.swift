@@ -97,10 +97,11 @@ final class PhotoModel {
     }
     /// How close to a mark the slider lands on it, in stops.
     static let snap = 0.15
-    /// The exposure's range: −4…+8 stops, widened to whole stops past any reading outside it.
+    /// The exposure's range: −4…+8 stops, widened to whole stops past any reading outside it. Not
+    /// past the exposure: a drag held at the end would widen it, and the next step follow it.
     var exposureRange: ClosedRange<Double> {
-        let values = (photo?.metering.ev.compactMap { $0 } ?? []) + [exposureEV]
-        return min(-4, (values.min() ?? 0).rounded(.down) - 1)...max(8, (values.max() ?? 0).rounded(.up) + 1)
+        let readings = photo?.metering.ev.compactMap { $0 } ?? []
+        return min(-4, (readings.min() ?? 0).rounded(.down) - 1)...max(8, (readings.max() ?? 0).rounded(.up) + 1)
     }
     /// The marks the exposure is on: those whose reading for this photo rounds to it.
     var marksAtExposure: [MeteringMark] {
