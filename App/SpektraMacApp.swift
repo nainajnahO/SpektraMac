@@ -18,6 +18,14 @@ struct SpektraMacApp: App {
             CommandGroup(after: .newItem) {
                 Button("Open…", systemImage: "folder") { model.isImporting = true }
                     .keyboardShortcut("o", modifiers: .command)
+                Menu("Open Recent", systemImage: "clock") {
+                    ForEach(model.recentPhotos, id: \.self) { url in
+                        Button(url.lastPathComponent) { model.open(url) }
+                    }
+                    Divider()
+                    Button("Clear Menu") { model.clearRecentPhotos() }
+                        .disabled(model.recentPhotos.isEmpty)
+                }
                 Divider()
                 Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
                     .keyboardShortcut("s", modifiers: .command)

@@ -65,6 +65,8 @@ struct ContentView: View {
                 model.open(url)
                 return true
             }
+            // Photos sent by Finder's Open With and the Dock icon (the app's document types).
+            .onOpenURL { url in model.open(url) }
         .fileImporter(isPresented: $model.isImporting, allowedContentTypes: [.image]) { result in
             switch result {
             case .success(let url): model.open(url)
