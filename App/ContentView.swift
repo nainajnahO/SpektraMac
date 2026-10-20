@@ -141,9 +141,9 @@ private struct SettingsPanel: View {
                                     format: .number.precision(.fractionLength(1)), unit: "EV")
                             .help("Raises the brightest highlights before they reach the film, rebuilding light the camera clipped, so bright lights glow more.")
                     }
-                    DiffusionGroup(adjustment: .cameraDiffusion, isOn: \.cameraDiffusion, family: \.cameraDiffusionFilter,
-                                   strength: \.cameraDiffusionStrength, size: \.cameraDiffusionSize,
-                                   warmth: \.cameraDiffusionWarmth)
+                    DiffusionGroup(title: "Lens diffusion", adjustment: .cameraDiffusion, isOn: \.cameraDiffusion,
+                                   family: \.cameraDiffusionFilter, strength: \.cameraDiffusionStrength,
+                                   size: \.cameraDiffusionSize, warmth: \.cameraDiffusionWarmth)
                 case .film:
                     ChoiceRow(title: "Film", sections: stockSections(model.films), selection: $model.film,
                               controls: $model.controls, choosing: model.controls(choosing:))
@@ -246,9 +246,10 @@ private struct SettingsPanel: View {
                             }
                             .help("How bright a part of the photo must be to burn, in stops over mid-grey. About +2.5 is where a screen's white sits; lower takes in more. Holding a Burn slider shows what burns, white on black.")
                         }
-                        DiffusionGroup(adjustment: .enlargerDiffusion, isOn: \.enlargerDiffusion,
-                                       family: \.enlargerDiffusionFilter, strength: \.enlargerDiffusionStrength,
-                                       size: \.enlargerDiffusionSize, warmth: \.enlargerDiffusionWarmth)
+                        DiffusionGroup(title: "Enlarger diffusion", adjustment: .enlargerDiffusion,
+                                       isOn: \.enlargerDiffusion, family: \.enlargerDiffusionFilter,
+                                       strength: \.enlargerDiffusionStrength, size: \.enlargerDiffusionSize,
+                                       warmth: \.enlargerDiffusionWarmth)
                         AdjustmentGroup("Glare", systemImage: "sun.max", adjustment: .glare, isOn: $model.controls.glare) {
                             ValueSlider("Amount", value: $model.controls.glareAmount, in: 0...1, step: 0.01,
                                         format: .number.precision(.fractionLength(2)), unit: "%")
@@ -295,7 +296,6 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
         self.isOn = isOn
         self.main = main()
         self.options = options()
-        // By adjustment, not title: the camera's and the enlarger's diffusion share theirs.
         _isExpanded = SceneStorage(wrappedValue: true, "adjustment.\(adjustment)")
         _showsOptions = SceneStorage(wrappedValue: false, "adjustment.\(adjustment).options")
     }
@@ -682,6 +682,7 @@ private extension MeteringMark {
 /// glow's size and warmth under Options, each the controls at its key path.
 private struct DiffusionGroup: View {
     @Environment(PhotoModel.self) private var model
+    let title: String
     let adjustment: PhotoModel.Adjustment
     let isOn: WritableKeyPath<Controls, Bool>
     let family: WritableKeyPath<Controls, Parameters.DiffusionFilter.Family>
@@ -692,7 +693,7 @@ private struct DiffusionGroup: View {
     var body: some View {
         @Bindable var model = model
         let controls = $model.controls
-        AdjustmentGroup("Diffusion", systemImage: "camera.filters", adjustment: adjustment,
+        AdjustmentGroup(title, systemImage: "camera.filters", adjustment: adjustment,
                         isOn: controls[dynamicMember: isOn]) {
             ChoiceRow(title: "Filter",
                       sections: [.init(heading: nil, choices: Parameters.DiffusionFilter.Family.allCases.map { ($0.name, $0) })],
