@@ -1,5 +1,7 @@
 # Contributor Covenant 3.0 Code of Conduct
 
+SpektraMac has one maintainer, [@nainajnahO](https://github.com/nainajnahO), who reads every report and decides what to do about it.
+
 ## Our Pledge
 
 We pledge to make our community welcoming, safe, and equitable for all.
@@ -46,40 +48,38 @@ We agree to restrict the following behaviors in our community. Instances, threat
 
 Tensions can occur between community members even when they are trying their best to collaborate. Not every conflict represents a code of conduct violation, and this Code of Conduct reinforces encouraged behaviors and norms that can help avoid conflicts and minimize harm.
 
-When an incident does occur, it is important to report it promptly. To report a possible violation, **[NOTE: describe your means of reporting here.]**
+When an incident does occur, it is important to report it promptly. To report a possible violation, **email [tuck.sinuous-8g@icloud.com](mailto:tuck.sinuous-8g@icloud.com)**. Only the maintainer reads it.
 
-Community Moderators take reports of violations seriously and will make every effort to respond in a timely manner. They will investigate all reports of code of conduct violations, reviewing messages, logs, and recordings, or interviewing witnesses and other participants. Community Moderators will keep investigation and enforcement actions as transparent as possible while prioritizing safety and confidentiality. In order to honor these values, enforcement actions are carried out in private with the involved parties, but communicating to the whole community may be part of a mutually agreed upon resolution.
+The maintainer takes reports of violations seriously and will make every effort to respond within a month. They will investigate all reports of code of conduct violations by reading the issues, pull requests and comments involved, and asking the people involved. The maintainer will keep investigation and enforcement actions as transparent as possible while prioritizing safety and confidentiality. In order to honor these values, enforcement actions are carried out in private with the involved parties, but communicating to the whole community may be part of a mutually agreed upon resolution.
 
 
 ## Addressing and Repairing Harm
 
-**[NOTE: The remedies and repairs outlined below are suggestions based on best practices in code of conduct enforcement. If your community has its own established enforcement process, be sure to edit this section to describe your own policies.]**
-
-If an investigation by the Community Moderators finds that this Code of Conduct has been violated, the following enforcement ladder may be used to determine how best to repair harm, based on the incident's impact on the individuals involved and the community as a whole. Depending on the severity of a violation, lower rungs on the ladder may be skipped.
+If an investigation by the maintainer finds that this Code of Conduct has been violated, the following enforcement ladder may be used to determine how best to repair harm, based on the incident's impact on the individuals involved and the community as a whole. Depending on the severity of a violation, lower rungs on the ladder may be skipped.
 
 1) Warning
    1) Event: A violation involving a single incident or series of incidents.
-   2) Consequence: A private, written warning from the Community Moderators.
+   2) Consequence: A private, written warning from the maintainer.
    3) Repair: Examples of repair include a private written apology, acknowledgement of responsibility, and seeking clarification on expectations.
 2) Temporarily Limited Activities
    1) Event: A repeated incidence of a violation that previously resulted in a warning, or the first incidence of a more serious violation.
    2) Consequence: A private, written warning with a time-limited cooldown period designed to underscore the seriousness of the situation and give the community members involved time to process the incident. The cooldown period may be limited to particular communication channels or interactions with particular community members.
    3) Repair: Examples of repair may include making an apology, using the cooldown period to reflect on actions and impact, and being thoughtful about re-entering community spaces after the period is over.
 3) Temporary Suspension
-   1) Event: A pattern of repeated violation which the Community Moderators have tried to address with warnings, or a single serious violation.
+   1) Event: A pattern of repeated violation which the maintainer has tried to address with warnings, or a single serious violation.
    2) Consequence: A private written warning with conditions for return from suspension. In general, temporary suspensions give the person being suspended time to reflect upon their behavior and possible corrective actions.
    3) Repair: Examples of repair include respecting the spirit of the suspension, meeting the specified conditions for return, and being thoughtful about how to reintegrate with the community when the suspension is lifted.
 4) Permanent Ban
-   1) Event: A pattern of repeated code of conduct violations that other steps on the ladder have failed to resolve, or a violation so serious that the Community Moderators determine there is no way to keep the community safe with this person as a member.
-   2) Consequence: Access to all community spaces, tools, and communication channels is removed. In general, permanent bans should be rarely used, should have strong reasoning behind them, and should only be resorted to if working through other remedies has failed to change the behavior.
+   1) Event: A pattern of repeated code of conduct violations that other steps on the ladder have failed to resolve, or a violation so serious that the maintainer determines there is no way to keep the community safe with this person as a member.
+   2) Consequence: The person is blocked on GitHub, so they can no longer open issues or pull requests, review or comment in the repository. In general, permanent bans should be rarely used, should have strong reasoning behind them, and should only be resorted to if working through other remedies has failed to change the behavior.
    3) Repair: There is no possible repair in cases of this severity.
 
-This enforcement ladder is intended as a guideline. It does not limit the ability of Community Managers to use their discretion and judgment, in keeping with the best interests of our community.
+This enforcement ladder is intended as a guideline. It does not limit the ability of the maintainer to use their discretion and judgment, in keeping with the best interests of our community.
 
 
 ## Scope
 
-This Code of Conduct applies within all community spaces, and also applies when an individual is officially representing the community in public or other spaces. Examples of representing our community include using an official email address, posting via an official social media account, or acting as an appointed representative at an online or offline event.
+This Code of Conduct applies in SpektraMac's repository on GitHub: its issues, pull requests, reviews and comments.
 
 
 ## Attribution
