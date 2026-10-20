@@ -301,13 +301,13 @@ public actor Engine {
     /// renders it once into a texture, and its preview (at most ``previewMaxSize`` on the long side)
     /// from that on the GPU. Vision looks for the metering marks' regions in the preview, and each
     /// image is metered once at every mark, in place. Throws ``PhotoTooLargeError`` for a photo over
-    /// ``maxSide`` on a side, keeping the open one.
+    /// ``maxSide`` on a side. A photo that fails to open leaves the open one open, to render on.
     public func open(_ image: CIImage) throws -> OpenedPhoto {
         let extent = image.extent.integral
         let (width, height) = (Int(extent.width), Int(extent.height))
         guard max(width, height) <= Self.maxSide else { throw PhotoTooLargeError(width: width, height: height) }
-        // The previous photo goes, and the memory set aside for renders of all of it.
-        photo = nil
+        // The memory set aside for renders of all of the previous photo goes; the photo itself stays
+        // until this one has opened.
         releaseFullSizeMemory()
         let full = gpu.makeReadableTexture(width: width, height: height)
         try render(image, from: extent, into: full)
