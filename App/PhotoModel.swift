@@ -241,7 +241,14 @@ final class PhotoModel {
                 isRenderingFullResolution = false
                 awaitsFullResolution = false
                 isPreviewing = false
-                let opened = try await engine.open(image)
+                let opened: Engine.OpenedPhoto
+                do {
+                    opened = try await engine.open(image)
+                } catch {
+                    // The engine keeps the open photo: its renders, stopped above, start again.
+                    scheduleRender()
+                    throw error
+                }
                 self.metadata = metadata
                 photo = Photo(name: url.lastPathComponent, width: opened.width, height: opened.height,
                               previewWidth: opened.previewWidth, previewHeight: opened.previewHeight,
