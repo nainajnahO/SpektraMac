@@ -38,9 +38,9 @@ one, exposed the same way (see [Exposure](#exposure)), and SpektraMac starts wit
 
 **The photo.** It fits the window to start with.
 
-- **Zoom:** pinch on a trackpad, or scroll with ⌥ held, to zoom around the pointer, up to 4 screen points per pixel;
-  or **View › Zoom In** (⌘+) and **Zoom Out** (⌘−). Zoomed in, SpektraMac renders the photo at full resolution.
-- **Move:** scroll with two fingers (or the mouse wheel), or drag the photo, as in Preview.
+- **Zoom:** scroll, or pinch on a trackpad, to zoom around the pointer, up to 4 screen points per pixel; or **View ›
+  Zoom In** (⌘+) and **Zoom Out** (⌘−). Zoomed in, SpektraMac renders the photo at full resolution.
+- **Move:** drag the photo.
 - **Compare:** click the photo, or choose **View › Show Original** (M), to see the original in its place, at the same
   zoom; do it again to see the film. While the original shows, the window's subtitle reads "Original" and the
   settings are greyed out. The original is the photo as macOS shows it, as in Preview.

@@ -258,6 +258,9 @@ private struct ImageCanvas: View {
                     .onEnded { _ in dragStart = nil })
                 .simultaneousGesture(MagnifyGesture()
                     .onChanged { pinch in
+                        // Pinched shut, the magnification reaches 0, and 0 over 0 would make the
+                        // zoom not a number, the photo gone: until it's above 0 again, no change.
+                        guard pinch.magnification > 0 else { return }
                         zoom(by: pinch.magnification / pinched, at: pinch.startLocation)
                         pinched = pinch.magnification
                     }
@@ -284,22 +287,14 @@ private struct ImageCanvas: View {
                     }
                 }
                 .onAppear {
-                    // SwiftUI has no scroll-wheel events for a plain view, so AppKit's. Over the
-                    // photo, scrolling moves it while it's zoomed, as in Preview, momentum and all;
-                    // with ⌥ it zooms, the momentum left out so the zoom stops with the fingers.
+                    // SwiftUI has no scroll-wheel events for a plain view, so AppKit's: over the
+                    // photo, scrolling zooms instead of scrolling. A trackpad's momentum after
+                    // the fingers lift is left out, so the zoom stops with them.
                     scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
                         guard let pointer else { return event }
-                        if event.modifierFlags.contains(.option) {
-                            if event.momentumPhase.isEmpty {
-                                let step = event.hasPreciseScrollingDeltas ? 0.01 : 0.15  // points, or wheel lines
-                                zoom(by: exp(event.scrollingDeltaY * step), at: pointer)
-                            }
-                        } else if zoom > 1 {
-                            let step: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10  // points, or wheel lines
-                            offset = clamped(CGSize(width: offset.width + event.scrollingDeltaX * step,
-                                                    height: offset.height + event.scrollingDeltaY * step))
-                        } else {
-                            return event
+                        if event.momentumPhase.isEmpty {
+                            let step = event.hasPreciseScrollingDeltas ? 0.01 : 0.15  // points, or wheel lines
+                            zoom(by: exp(event.scrollingDeltaY * step), at: pointer)
                         }
                         return nil
                     }
