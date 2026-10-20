@@ -23,7 +23,8 @@ glow come from how those materials behave rather than from a filter.
    Dock icon. In Finder, **Open With › SpektraMac** opens it too. The photos you've opened are in **File › Open
    Recent** and the Dock icon's menu. SpektraMac opens anything your Mac can: camera RAW, HEIC, JPEG, TIFF, PNG and
    more, up to 16,384 pixels on a side (the most the graphics processor takes). A larger photo, such as a stitched
-   panorama, is refused with a message saying so.
+   panorama, is refused with a message saying so. A spinner shows while the first photo opens: a RAW file takes a few
+   seconds.
 2. Choose a film in the **Film** tab, and a paper in the **Print** tab.
 3. Adjust what you like, then **File › Save…** (⌘S).
 
@@ -275,8 +276,8 @@ menu, or type its extension:
 | TIFF | 16 | Uncompressed |
 | PNG | 16 | |
 
-Saved photos are in Display P3, with its colour profile. While it saves, the window's subtitle shows the progress,
-and **Cancel** (⌘.) stops it. Quitting while it saves asks first, as the photo isn't saved if you quit.
+Saved photos are in Display P3, with its colour profile. While it saves, a bar over the bottom of the photo shows
+what it's doing, with **Cancel** (⌘.) to stop it. Quitting while it saves asks first, as the photo isn't saved if you quit.
 
 Saving keeps the original's metadata: its EXIF, GPS and IPTC, and the camera's make, model, date, artist and
 copyright. It also records the edit:

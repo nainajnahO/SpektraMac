@@ -20,9 +20,6 @@ struct ContentView: View {
                 }
                 ToolbarItemGroup {
                     Button("Open…", systemImage: "folder") { model.isImporting = true }
-                    if model.canCancel {
-                        Button("Cancel", systemImage: "xmark.circle") { model.cancel() }
-                    }
                     Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
                         .disabled(!model.canSave)
                     Button("Log", systemImage: "list.bullet.rectangle") { openWindow(id: "log") }
@@ -179,6 +176,10 @@ private struct ImageCanvas: View {
                     if let failure = model.engineFailure {
                         ContentUnavailableView("Metal is unavailable", systemImage: "exclamationmark.triangle",
                                                description: Text("SpektraMac simulates film on the graphics processor, through Metal. \(failure)."))
+                    } else if model.isLoading || (model.photo != nil && model.errorMessage == nil) {
+                        // A photo opening, or rendering for the first time: seconds for a RAW file.
+                        ProgressView()
+                            .controlSize(.large)
                     } else {
                         ContentUnavailableView {
                             Label("No photo", systemImage: "photo")
@@ -188,6 +189,23 @@ private struct ImageCanvas: View {
                             Button("Open…") { model.isImporting = true }
                         }
                     }
+                }
+            }
+            // Saving's progress and Cancel, over the photo rather than in the toolbar, which would
+            // move its other buttons to make room. The render is one pass on the GPU, with no
+            // stages to count, so the spinner says only that it's working, and the text what.
+            .overlay(alignment: .bottom) {
+                if let phase = model.savePhase {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(phase)
+                        Button("Cancel") { model.cancel() }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .glassEffect()
+                    .padding(.bottom, 16)
                 }
             }
     }
