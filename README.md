@@ -23,7 +23,8 @@
   <a href="https://nainajnaho.github.io/SpektraMac/">Website</a> ·
   <a href="docs/guide.md">User guide</a> ·
   <a href="https://github.com/nainajnahO/SpektraMac/releases">Releases</a> ·
-  <a href="#build-from-source">Build from source</a>
+  <a href="#build-from-source">Build from source</a> ·
+  <a href="ACCESSIBILITY.md">Accessibility</a>
 </p>
 
 ![SpektraMac with a photo open: the photo on the left, the film settings on the right](docs/images/screenshot.webp)
