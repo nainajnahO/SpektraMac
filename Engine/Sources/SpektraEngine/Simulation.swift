@@ -109,10 +109,7 @@ public struct Simulation {
         inputToXYZ = toFilmXYZ(inputColourSpace)
 
         // Printing constants (PrintingStage._film_cmy_to_print_log_raw).
-        let sensitivity = print.data.logSensitivity.map { log in
-            let linear = SIMD3(pow(10, log.x), pow(10, log.y), pow(10, log.z))
-            return linear.replacing(with: 0, where: .!(linear .== linear))  // np.nan_to_num
-        }
+        let sensitivity = print.data.sensitivity
         let lamp = tables.illuminants[parameters.enlarger.illuminant]!
         let light = enlargerLight(lamp, filters: parameters.enlarger.printFilters, dichroics: tables.dichroicFilters)
         // Bands where a profile's density data is missing transmit nothing (density_to_light).

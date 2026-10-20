@@ -30,7 +30,6 @@ public struct ProfileInfo: Decodable, Sendable {
     public enum Stage: String, Decodable, Sendable { case filming, printing }
     public enum Use: String, Decodable, Sendable { case still, cine }
     public enum Antihalation: String, Decodable, Sendable { case strong, weak, no }
-    public enum ChannelModel: String, Decodable, Sendable { case color, bw }
 
     public let stock: String
     public let name: String
@@ -40,17 +39,12 @@ public struct ProfileInfo: Decodable, Sendable {
     public let use: Use
     public let antihalation: Antihalation
     public let targetPrint: String?
-    public let channelModel: ChannelModel
-    public let densitometer: String
-    public let logSensitivityDensityOverMin: Double
     public let referenceIlluminant: String
     public let viewingIlluminant: String
 
     enum CodingKeys: String, CodingKey {
-        case stock, name, type, support, stage, use, antihalation, densitometer
+        case stock, name, type, support, stage, use, antihalation
         case targetPrint = "target_print"
-        case channelModel = "channel_model"
-        case logSensitivityDensityOverMin = "log_sensitivity_density_over_min"
         case referenceIlluminant = "reference_illuminant"
         case viewingIlluminant = "viewing_illuminant"
     }
@@ -65,7 +59,6 @@ public struct ProfileData: Decodable, Sendable {
     public let hanatos2025AdaptationSurfaceParams: [[Double]]
     public let channelDensity: [SIMD3<Double>]
     public let baseDensity: [Double]
-    public let midscaleNeutralDensity: [Double]
     public let logExposure: [Double]
     public let densityCurves: [SIMD3<Double>]
     /// Per log-exposure point: one CMY triple per sensitivity sub-layer (256 × 3 × 3).
@@ -92,7 +85,6 @@ public struct ProfileData: Decodable, Sendable {
         case hanatos2025AdaptationSurfaceParams = "hanatos2025_adaptation_surface_params"
         case channelDensity = "channel_density"
         case baseDensity = "base_density"
-        case midscaleNeutralDensity = "midscale_neutral_density"
         case logExposure = "log_exposure"
         case densityCurves = "density_curves"
         case densityCurvesLayers = "density_curves_layers"
@@ -117,12 +109,20 @@ public struct ProfileData: Decodable, Sendable {
         hanatos2025AdaptationSurfaceParams = try matrix(.hanatos2025AdaptationSurfaceParams)
         channelDensity = try triples(matrix(.channelDensity))
         baseDensity = try vector(.baseDensity)
-        midscaleNeutralDensity = try vector(.midscaleNeutralDensity)
         logExposure = try vector(.logExposure)
         densityCurves = try triples(matrix(.densityCurves))
         densityCurvesLayers = try c.decode([[[Double?]]].self, forKey: .densityCurvesLayers)
             .map { triples($0.map { $0.map { $0 ?? .nan } }) }
         densityCurvesModel = try c.decode(DensityCurvesModel.self, forKey: .densityCurvesModel)
+    }
+
+    /// The spectral sensitivity, `10 ** log_sensitivity`, with what's missing (NaN) as 0, as
+    /// `np.nan_to_num` has it.
+    var sensitivity: [SIMD3<Double>] {
+        logSensitivity.map { log in
+            let linear = SIMD3(pow(10, log.x), pow(10, log.y), pow(10, log.z))
+            return linear.replacing(with: 0, where: .!(linear .== linear))
+        }
     }
 }
 

@@ -4,16 +4,11 @@ import Foundation
 /// 380–780 nm / 5 nm grid (`Resources/tables.json`, written by `tools/export_tables.py`).
 public struct Tables: Decodable, Sendable {
     public let spektrafilmVersion: String
-    public let colourVersion: String
     public let wavelengths: [Double]
     /// CIE 1931 2° colour matching functions x̄ ȳ z̄.
     public let cmfs: [SIMD3<Double>]
     /// Spektrafilm's `standard_illuminant(label)`: spectra normalised to a mean of 1.
     public let illuminants: [String: [Double]]
-    /// Schott KG3 heat-absorbing filter transmittance.
-    public let kg3HeatFilter: [Double]
-    /// Canon 24 mm f/2.8 IS lens transmittance (for the `TH-KG3-L` illuminant).
-    public let lensTransmission: [Double]
     /// Transmittance of the enlarger's analytic C, M, Y dichroic filters at full strength.
     public let dichroicFilters: [SIMD3<Double>]
     public let colourSpaces: [String: ColourSpace]
