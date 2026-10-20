@@ -30,9 +30,7 @@ struct SettingsPanel: View {
                                     format: .number.precision(.fractionLength(1)), unit: "EV")
                             .help("Raises the brightest highlights before they reach the film, rebuilding light the camera clipped, so bright lights glow more.")
                     }
-                    DiffusionGroup(title: "Lens diffusion", adjustment: .cameraDiffusion, isOn: \.cameraDiffusion,
-                                   family: \.cameraDiffusionFilter, strength: \.cameraDiffusionStrength,
-                                   size: \.cameraDiffusionSize, warmth: \.cameraDiffusionWarmth)
+                    DiffusionGroup(title: "Lens diffusion", adjustment: .cameraDiffusion, filter: \.cameraDiffusion)
                 case .film:
                     ChoiceRow(title: "Film", sections: stockSections(model.films), selection: $model.film,
                               controls: $model.controls, choosing: model.controls(choosing:))
@@ -133,9 +131,7 @@ struct SettingsPanel: View {
                             .help("How bright a part of the photo must be to burn, in stops over mid-grey. About +2.5 is where a screen's white sits; lower takes in more. Holding a Burn slider shows what burns, white on black.")
                         }
                         DiffusionGroup(title: "Enlarger diffusion", adjustment: .enlargerDiffusion,
-                                       isOn: \.enlargerDiffusion, family: \.enlargerDiffusionFilter,
-                                       strength: \.enlargerDiffusionStrength, size: \.enlargerDiffusionSize,
-                                       warmth: \.enlargerDiffusionWarmth)
+                                       filter: \.enlargerDiffusion)
                         AdjustmentGroup("Glare", systemImage: "sun.max", adjustment: .glare, isOn: $model.controls.glare) {
                             ValueSlider("Amount", value: $model.controls.glareAmount, in: Controls.range(\.glareAmount), step: 0.01,
                                         format: .number.precision(.fractionLength(2)), unit: "%")
@@ -570,36 +566,36 @@ private struct DiffusionGroup: View {
     @Environment(PhotoModel.self) private var model
     let title: String
     let adjustment: PhotoModel.Adjustment
-    let isOn: WritableKeyPath<Controls, Bool>
-    let family: WritableKeyPath<Controls, Parameters.DiffusionFilter.Family>
-    let strength: WritableKeyPath<Controls, Double> & Sendable
-    let size: WritableKeyPath<Controls, Double> & Sendable
-    let warmth: WritableKeyPath<Controls, Double> & Sendable
+    let filter: WritableKeyPath<Controls, Parameters.DiffusionFilter>
 
     var body: some View {
         @Bindable var model = model
-        let controls = $model.controls
-        AdjustmentGroup(title, systemImage: "camera.filters", adjustment: adjustment,
-                        isOn: controls[dynamicMember: isOn]) {
+        let settings = $model.controls[dynamicMember: filter]
+        AdjustmentGroup(title, systemImage: "camera.filters", adjustment: adjustment, isOn: settings.active) {
             ChoiceRow(title: "Filter",
                       sections: [.init(heading: nil, choices: Parameters.DiffusionFilter.Family.allCases.map { ($0.name, $0) })],
-                      selection: controls[dynamicMember: family], controls: controls) { choice in
+                      selection: settings.filterFamily, controls: $model.controls) { choice in
                 var choosing = model.controls
-                choosing[keyPath: family] = choice
+                choosing[keyPath: filter].filterFamily = choice
                 return choosing
             }
             .help("Glimmerglass keeps detail and glows faintly; Black Pro-Mist gives a tight, punchy halo; Pro-Mist a broader pastel haze; CineBloom a wide glow that lifts the whole frame.")
-            ValueSlider("Strength", value: controls[dynamicMember: strength], in: Controls.range(strength), step: 0.125,
+            ValueSlider("Strength", value: settings.strength, in: range(\.strength), step: 0.125,
                         format: .number.precision(.fractionLength(0...3)))
                 .help("The filter's grade, as filters are sold: 1/8, 1/4, 1/2, 1 and 2. Stronger spreads more of the light into the glow.")
         } options: {
-            ValueSlider("Size", value: controls[dynamicMember: size], in: Controls.range(size), step: 0.05, neutral: 1,
+            ValueSlider("Size", value: settings.spatialScale, in: range(\.spatialScale), step: 0.05, neutral: 1,
                         format: .number.precision(.fractionLength(2)))
                 .help("How far the glow reaches, over the filter's own.")
-            ValueSlider("Warmth", value: controls[dynamicMember: warmth], in: Controls.range(warmth), step: 0.05, neutral: 0,
+            ValueSlider("Warmth", value: settings.haloWarmth, in: range(\.haloWarmth), step: 0.05, neutral: 0,
                         format: .number.precision(.fractionLength(2)).sign(strategy: .always(includingZero: false)))
                 .help("Warmer light at the glow's outer rim and cooler at its centre, over the filter's own; below 0, the reverse.")
         }
+    }
+
+    /// The range of one of this filter's settings (``Controls/ranges``).
+    private func range(_ setting: WritableKeyPath<Parameters.DiffusionFilter, Double>) -> ClosedRange<Double> {
+        Controls.range(filter.appending(path: setting))
     }
 }
 

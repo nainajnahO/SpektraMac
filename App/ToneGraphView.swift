@@ -358,7 +358,7 @@ private struct ToneCurveLayer: View {
     /// The contrasts scale the paper's response about its exposure 0 (``ToneGraph/Point/paper``): a
     /// factor f gives exposure E the response `curve` has at f·E. So for brightness `print` at
     /// `tone`, f is the paper's exposure where `curve` has that brightness, over the one at `tone`.
-    private func scale(_ contrast: WritableKeyPath<Controls, Double> & Sendable, of curve: ToneCurve, rendered: Controls,
+    private func scale(_ contrast: WritableKeyPath<Controls, Double>, of curve: ToneCurve, rendered: Controls,
                        at tone: Float, to print: Float) {
         let reached = curve.tone(where: curve.print, is: print, near: tone)
         let factor = curve.value(of: curve.paper, at: reached) / curve.value(of: curve.paper, at: tone)
@@ -368,7 +368,7 @@ private struct ToneCurveLayer: View {
 
     /// Sets `control` to `value` within its range, to a ten-thousandth: finer than shows, so the
     /// drag is smooth, and a new curve that agrees changes nothing.
-    private func set(_ control: WritableKeyPath<Controls, Double> & Sendable, to value: Double) {
+    private func set(_ control: WritableKeyPath<Controls, Double>, to value: Double) {
         let range = Controls.range(control)
         let value = min(max((value * 10_000).rounded() / 10_000, range.lowerBound), range.upperBound)
         // Setting the controls renders, even to what they are.

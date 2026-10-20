@@ -221,13 +221,8 @@ func controlsDigestLikePython(caseName: String) throws {
     controls.film = golden.film
     controls.paper = try golden.printProfile().info.stock
     controls.scanFilm = golden.params.io.scanFilm
-    let (camera, enlarger) = (golden.params.camera.diffusionFilter, golden.params.enlarger.diffusionFilter)
-    (controls.cameraDiffusion, controls.cameraDiffusionFilter, controls.cameraDiffusionStrength,
-     controls.cameraDiffusionSize, controls.cameraDiffusionWarmth) =
-        (camera.active, camera.filterFamily, camera.strength, camera.spatialScale, camera.haloWarmth)
-    (controls.enlargerDiffusion, controls.enlargerDiffusionFilter, controls.enlargerDiffusionStrength,
-     controls.enlargerDiffusionSize, controls.enlargerDiffusionWarmth) =
-        (enlarger.active, enlarger.filterFamily, enlarger.strength, enlarger.spatialScale, enlarger.haloWarmth)
+    controls.cameraDiffusion = golden.params.camera.diffusionFilter
+    controls.enlargerDiffusion = golden.params.enlarger.diffusionFilter
     let preview = caseName.hasPrefix("preview")
     var parameters = Engine.parameters(for: controls, film: try Profile.load(golden.film), print: try golden.printProfile(),
                                        database: try Tables.loadNeutralPrintFilters(), mode: preview ? .preview : .export)
@@ -463,6 +458,9 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     #expect(setting("film") == "kodak_portra_400")
     #expect(setting("exposureOffsetEV") == "0.3")
     #expect(setting("grain") == "true")
+    // A diffusion filter's settings by its name and theirs.
+    #expect(setting("cameraDiffusionStrength") == "0.5")
+    #expect(setting("enlargerDiffusionFilterFamily") == "blackProMist")
 
     // The stored integers (rounded), decoded by colour-science's formulas into linear BT.2020.
     let tables = try Tables.load()
@@ -554,10 +552,12 @@ extension PhotoOpeningTests {
     }
 }
 
-/// Every number of the controls has a range, which holds its default.
+/// Every number of the controls, a diffusion filter's too, has a range, which holds its default.
 @Test func everyControlHasARange() {
-    let numbers = Mirror(reflecting: Controls()).children.filter { $0.value is Double }
-    #expect(numbers.count == Controls.ranges.count)
+    func numbers(in value: Any) -> Int {
+        Mirror(reflecting: value).children.reduce(0) { $0 + ($1.value is Double ? 1 : numbers(in: $1.value)) }
+    }
+    #expect(numbers(in: Controls()) == Controls.ranges.count)
     #expect(Controls().clampedToRanges() == Controls())
 }
 
@@ -565,14 +565,14 @@ extension PhotoOpeningTests {
 @Test func presetValuesAreClampedToTheirRanges() {
     var controls = Controls()
     controls.printContrast = 0
-    controls.cameraDiffusionSize = 1e20
-    controls.enlargerDiffusionSize = 1e20
+    controls.cameraDiffusion.spatialScale = 1e20
+    controls.enlargerDiffusion.spatialScale = 1e20
     controls.grainSize = 0
     controls.exposureOffsetEV = -1000
     let clamped = controls.clampedToRanges()
     #expect(clamped.printContrast == Controls.range(\.printContrast).lowerBound)
-    #expect(clamped.cameraDiffusionSize == Controls.range(\.cameraDiffusionSize).upperBound)
-    #expect(clamped.enlargerDiffusionSize == Controls.range(\.enlargerDiffusionSize).upperBound)
+    #expect(clamped.cameraDiffusion.spatialScale == Controls.range(\.cameraDiffusion.spatialScale).upperBound)
+    #expect(clamped.enlargerDiffusion.spatialScale == Controls.range(\.enlargerDiffusion.spatialScale).upperBound)
     #expect(clamped.grainSize == Controls.range(\.grainSize).lowerBound)
     #expect(clamped.exposureOffsetEV == Controls.range(\.exposureOffsetEV).lowerBound)
 }
@@ -583,10 +583,10 @@ extension PhotoOpeningTests {
     @Test func clampedPresetValuesRender() async throws {
         var controls = Controls()
         controls.printContrast = 0
-        controls.cameraDiffusion = true
-        controls.cameraDiffusionSize = 1e20
-        controls.enlargerDiffusion = true
-        controls.enlargerDiffusionSize = 1e20
+        controls.cameraDiffusion.active = true
+        controls.cameraDiffusion.spatialScale = 1e20
+        controls.enlargerDiffusion.active = true
+        controls.enlargerDiffusion.spatialScale = 1e20
         controls.grainSize = 0
         let engine = try Engine()
         _ = try await engine.open(RGBImage(width: 64, height: 48, pixels: [Float](repeating: 0.18, count: 64 * 48 * 3)).ciImage)

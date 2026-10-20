@@ -705,16 +705,17 @@ final class PhotoModel {
         }
         var summary = [controls.scanFilm ? "\(filmName), scanned" : "\(filmName) printed on \(paperName)",
                        "\(exposureText) EV"]
-        if controls.cameraDiffusion {
-            summary.append(diffusion(controls.cameraDiffusionFilter, controls.cameraDiffusionStrength, on: "lens"))
+        if controls.cameraDiffusion.active {
+            summary.append(diffusion(controls.cameraDiffusion.filterFamily, controls.cameraDiffusion.strength, on: "lens"))
         }
         if controls.halation { summary.append("halation") }
         if controls.couplers { summary.append("couplers") }
         if controls.grain { summary.append("grain") }
         if !controls.scanFilm {
             if controls.burn { summary.append("burn") }
-            if controls.enlargerDiffusion {
-                summary.append(diffusion(controls.enlargerDiffusionFilter, controls.enlargerDiffusionStrength, on: "enlarger"))
+            if controls.enlargerDiffusion.active {
+                summary.append(diffusion(controls.enlargerDiffusion.filterFamily, controls.enlargerDiffusion.strength,
+                                         on: "enlarger"))
             }
             if controls.glare { summary.append("glare") }
         }
@@ -898,10 +899,6 @@ final class PhotoModel {
             reset.highlightBoost = defaults.highlightBoost
         case .cameraDiffusion:
             reset.cameraDiffusion = defaults.cameraDiffusion
-            reset.cameraDiffusionFilter = defaults.cameraDiffusionFilter
-            reset.cameraDiffusionStrength = defaults.cameraDiffusionStrength
-            reset.cameraDiffusionSize = defaults.cameraDiffusionSize
-            reset.cameraDiffusionWarmth = defaults.cameraDiffusionWarmth
         case .halation:
             reset.halation = defaults.halation
             reset.halationAmount = defaults.halationAmount
@@ -931,10 +928,6 @@ final class PhotoModel {
             reset.burnThreshold = defaults.burnThreshold
         case .enlargerDiffusion:
             reset.enlargerDiffusion = defaults.enlargerDiffusion
-            reset.enlargerDiffusionFilter = defaults.enlargerDiffusionFilter
-            reset.enlargerDiffusionStrength = defaults.enlargerDiffusionStrength
-            reset.enlargerDiffusionSize = defaults.enlargerDiffusionSize
-            reset.enlargerDiffusionWarmth = defaults.enlargerDiffusionWarmth
         case .glare:
             reset.glare = defaults.glare
             reset.glareAmount = defaults.glareAmount

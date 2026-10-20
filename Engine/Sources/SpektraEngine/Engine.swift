@@ -62,20 +62,12 @@ public struct Controls: Codable, Sendable, Hashable {
     /// Area of one silver halide particle in µm², and the grain's final blur in pixels.
     public var grainSize = 0.2
     public var grainSoftness = 0.65
-    /// A diffusion filter on the camera's lens (Pro-Mist and the like): its family, its strength in
-    /// the stops filters are sold in, its glow's size as a multiplier of the family's, and warmth
-    /// added to the family's halo warmth.
-    public var cameraDiffusion = false
-    public var cameraDiffusionFilter = Parameters.DiffusionFilter.Family.blackProMist
-    public var cameraDiffusionStrength = 0.5
-    public var cameraDiffusionSize = 1.0
-    public var cameraDiffusionWarmth = 0.0
+    /// A diffusion filter on the camera's lens (Pro-Mist and the like), as Spektrafilm takes it: on
+    /// or off, its family, its strength in the stops filters are sold in, its glow's size as a
+    /// multiplier of the family's, and warmth added to the family's halo warmth.
+    public var cameraDiffusion = Parameters.DiffusionFilter()
     /// The same on the enlarger's lens, over the print.
-    public var enlargerDiffusion = false
-    public var enlargerDiffusionFilter = Parameters.DiffusionFilter.Family.blackProMist
-    public var enlargerDiffusionStrength = 0.5
-    public var enlargerDiffusionSize = 1.0
-    public var enlargerDiffusionWarmth = 0.0
+    public var enlargerDiffusion = Parameters.DiffusionFilter()
 
     public init() {}
 
@@ -130,18 +122,21 @@ public struct Controls: Codable, Sendable, Hashable {
             // Not down to 0: the particle count per pixel divides by the area.
             \.grainSize: 0.05...2,
             \.grainSoftness: 0...2,
-            \.cameraDiffusionStrength: diffusionStrength,
-            \.cameraDiffusionSize: diffusionSize,
-            \.cameraDiffusionWarmth: diffusionWarmth,
-            \.enlargerDiffusionStrength: diffusionStrength,
-            \.enlargerDiffusionSize: diffusionSize,
-            \.enlargerDiffusionWarmth: diffusionWarmth,
+            \.cameraDiffusion.strength: diffusionStrength,
+            \.cameraDiffusion.spatialScale: diffusionSize,
+            \.cameraDiffusion.haloWarmth: diffusionWarmth,
+            \.enlargerDiffusion.strength: diffusionStrength,
+            \.enlargerDiffusion.spatialScale: diffusionSize,
+            \.enlargerDiffusion.haloWarmth: diffusionWarmth,
         ]
     }()
 
-    /// `control`'s range (``ranges``).
-    public static func range(_ control: WritableKeyPath<Controls, Double> & Sendable) -> ClosedRange<Double> {
-        guard let range = ranges[control] else { preconditionFailure("No range for \(control)") }
+    /// `control`'s range (``ranges``): also for a key path made by appending, such as a diffusion
+    /// filter's strength from the filter's.
+    public static func range(_ control: WritableKeyPath<Controls, Double>) -> ClosedRange<Double> {
+        guard let range = ranges.first(where: { $0.key == control })?.value else {
+            preconditionFailure("No range for \(control)")
+        }
         return range
     }
 
@@ -800,14 +795,8 @@ public actor Engine {
         parameters.filmRender.grain.active = controls.grain
         parameters.filmRender.grain.particleAreaUm2 = controls.grainSize
         parameters.filmRender.grain.blur = controls.grainSoftness
-        parameters.camera.diffusionFilter = Parameters.DiffusionFilter(
-            active: controls.cameraDiffusion, filterFamily: controls.cameraDiffusionFilter,
-            strength: controls.cameraDiffusionStrength, spatialScale: controls.cameraDiffusionSize,
-            haloWarmth: controls.cameraDiffusionWarmth)
-        parameters.enlarger.diffusionFilter = Parameters.DiffusionFilter(
-            active: controls.enlargerDiffusion, filterFamily: controls.enlargerDiffusionFilter,
-            strength: controls.enlargerDiffusionStrength, spatialScale: controls.enlargerDiffusionSize,
-            haloWarmth: controls.enlargerDiffusionWarmth)
+        parameters.camera.diffusionFilter = controls.cameraDiffusion
+        parameters.enlarger.diffusionFilter = controls.enlargerDiffusion
         parameters.applyNeutralPrintFilters(film: film, print: print, database: database)
         if mode == .preview || mode == .thumbnail {
             parameters.applyPreviewMode()
