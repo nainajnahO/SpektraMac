@@ -333,6 +333,7 @@ The exposure is the Exposure slider's offset.
 | Log | ⌥⌘L |
 | Open Preset | ⇧⌘O |
 | Save Preset | ⇧⌘S |
+| SpektraMac Help (this guide) | ⌘? |
 
 ## Films and papers
 
