@@ -51,12 +51,6 @@ extension GPU {
         encode("log_exposure", on: encoder, textures: [input, output], grid: output.size)
     }
 
-    /// `10 ** input`.
-    public func encodeExp10(on encoder: Encoder, input: any MTLTexture,
-                            output: any MTLTexture) {
-        encode("exp10_rgb", on: encoder, textures: [input, output], grid: output.size)
-    }
-
     /// `matrix · rgb + offset` per pixel; `rows` is the matrix as NumPy writes it.
     public func encodeMatrix(on encoder: Encoder, input: any MTLTexture,
                              output: any MTLTexture, rows: [SIMD3<Double>], offset: SIMD3<Double> = .zero) {

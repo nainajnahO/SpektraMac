@@ -51,13 +51,6 @@ kernel void log_exposure(texture2d<float, access::read> input [[texture(0)]],
     output.write(float4(log10(fmax(input.read(gid).rgb, 0.0) + 1e-10), 1.0), gid);
 }
 
-// 10**x: log exposure back to light.
-kernel void exp10_rgb(texture2d<float, access::read> input [[texture(0)]],
-                      texture2d<float, access::write> output [[texture(1)]],
-                      uint2 gid [[thread_position_in_grid]]) {
-    output.write(float4(exp10(input.read(gid).rgb), 1.0), gid);
-}
-
 // rgb' = M · rgb + offset (colour-space changes, coupler inhibition).
 kernel void matrix_rgb(texture2d<float, access::read> input [[texture(0)]],
                        texture2d<float, access::write> output [[texture(1)]],

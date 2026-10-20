@@ -25,13 +25,8 @@ public struct Parameters: Codable, Sendable, Equatable {
     public struct Camera: Codable, Sendable, Equatable {
         public var exposureCompensationEv = 0.0
         public var autoExposure = true
-        /// Only `center_weighted` is ported.
-        public var autoExposureMethod = "center_weighted"
         public var lensBlurUm = 0.0
         public var filmFormatMm = 35.0
-        /// Band-pass filter edges (amplitude, wavelength nm, width nm); amplitude 0 is off.
-        public var filterUv = [0.0, 410, 8]
-        public var filterIr = [0.0, 675, 15]
         public var diffusionFilter = DiffusionFilter()
     }
 
@@ -93,16 +88,8 @@ public struct Parameters: Codable, Sendable, Equatable {
 
 extension Parameters {
     public struct Settings: Codable, Sendable, Equatable {
-        /// Only `hanatos2025` is ported.
-        public var rgbToRawMethod = "hanatos2025"
         public var applyHanatos2025AdaptationWindow = true
-        /// Not ported (off by default).
-        public var applyHanatos2025AdaptationSurface = false
-        /// Not ported (0 by default).
-        public var spectralGaussianBlur = 0.0
         public var neutralPrintFiltersFromDatabase = true
-        /// Long side, in pixels, of the image the GUI previews on.
-        public var previewMaxSize = 640
     }
 
     /// `digest_params` with `settings.preview_mode`: the preview leaves out the blurs and grain
@@ -234,7 +221,6 @@ extension Parameters {
     /// default).
     public struct Grain: Codable, Sendable, Equatable {
         public var active = true
-        public var sublayersActive = true
         /// Area of one silver halide particle in µm², before the scales.
         public var particleAreaUm2 = 0.2
         /// Particle area scale per channel (C, M, Y layers) and per sub-layer (fast to slow).

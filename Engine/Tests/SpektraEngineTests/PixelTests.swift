@@ -40,12 +40,6 @@ func interpolationMatchesFastInterp(name: String) throws {
     }
 }
 
-@Test func exp10MatchesNumPy() throws {
-    try checkPrimitive("pow10", tolerance: 1e-6) { gpu, encoder, input, output in
-        gpu.encodeExp10(on: encoder, input: input, output: output)
-    }
-}
-
 @Test func matrixMatchesNumPy() throws {
     let matrix = try rows(golden("primitives", "matmul_matrix"))
     try checkPrimitive("matmul", tolerance: 1e-6) { gpu, encoder, input, output in
