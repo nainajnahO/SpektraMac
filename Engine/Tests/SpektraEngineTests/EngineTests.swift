@@ -550,6 +550,17 @@ extension PhotoOpeningTests {
         let sliver = try await engine.display(controls: Controls(), mode: .reduced(longSide: 2))
         #expect(sliver.width == 2 && sliver.height == 1)
     }
+
+    /// A render adds its command buffers' GPU time to the engine's total, for the app's Log graph.
+    @Test func renderingAddsUpGPUTime() async throws {
+        let url = try writePNG([UInt8](repeating: 128, count: 64 * 4 * 3), width: 64, height: 4)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let engine = try Engine()
+        _ = try await engine.open(RGBImage.decode(contentsOf: url))
+        let before = engine.gpuTime.seconds
+        _ = try await engine.render(controls: Controls(), mode: .full)
+        #expect(engine.gpuTime.seconds > before)
+    }
 }
 
 /// Every number of the controls, a diffusion filter's too, has a range, which holds its default.

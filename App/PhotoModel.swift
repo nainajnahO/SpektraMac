@@ -207,6 +207,8 @@ final class PhotoModel {
     /// 0.5 s on the first launch after a build, as Metal compiles the shaders. The Film and Paper
     /// menus fill, and photos open, once it's here.
     private var engine: Engine?
+    /// The GPU time of the engine's own work so far, in seconds, for the Log's graph.
+    var gpuSeconds: Double { engine?.gpuTime.seconds ?? 0 }
     /// The engine being made, which opening a photo waits for: one dropped as the app starts opens
     /// once it's here.
     private let makingEngine: Task<Engine, any Error>

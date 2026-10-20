@@ -91,7 +91,11 @@ for example when a slider returns to an earlier value.
 
 **Status and Log.** The window's subtitle says what SpektraMac is doing, and the photo's size when it's idle. The
 **Log** button (⌥⌘L) opens a window listing what was opened, rendered and saved, with timings, and any errors: the last
-1,000 entries. The Console app keeps them all (search for SpektraMac). When something you asked for fails (opening a
+1,000 entries. The Console app keeps them all (search for SpektraMac). Above the list, a graph shows how hard
+SpektraMac works the Mac each second over the last minute, while the window is open: **CPU**, its processor time
+as a share of all the cores, and **GPU**, the time its film simulation takes on the graphics processor. (The GPU
+line leaves out the last step of drawing a render to the screen or a file, and macOS gives no figure for one app's
+whole GPU use.) When something you asked for fails (opening a
 photo, saving, exporting a LUT, a preset), an alert says what and why.
 
 ## Camera

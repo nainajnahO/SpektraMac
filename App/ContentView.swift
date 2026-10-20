@@ -1,3 +1,4 @@
+import Charts
 import SpektraEngine
 import SwiftUI
 import UniformTypeIdentifiers
@@ -444,23 +445,90 @@ private struct ImageCanvas: View {
 // MARK: - Log
 
 struct LogView: View {
+    /// How much SpektraMac worked the Mac over one second (``LogView/sampleUsage()``).
+    struct Usage: Identifiable {
+        var id: Date { time }
+        let time: Date
+        /// The app's processor time, as a share of all the cores' time.
+        let cpu: Double
+        /// The GPU time of the engine's own command buffers, as a share of the second.
+        let gpu: Double
+    }
+
     @Environment(PhotoModel.self) private var model
+    /// The last minute's, while the window is open.
+    @State private var usage: [Usage] = []
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 6) {
-                ForEach(model.log) { entry in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(entry.time, format: .dateTime.hour().minute().second())
-                            .foregroundStyle(.secondary)
-                        Text(entry.message)
-                            .textSelection(.enabled)
+        VStack(spacing: 0) {
+            usageGraph
+                .padding(10)
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(model.log) { entry in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(entry.time, format: .dateTime.hour().minute().second())
+                                .foregroundStyle(.secondary)
+                            Text(entry.message)
+                                .textSelection(.enabled)
+                        }
+                        .font(.system(.caption, design: .monospaced))
                     }
-                    .font(.system(.caption, design: .monospaced))
                 }
+                .padding(10)
             }
-            .padding(10)
+            .defaultScrollAnchor(.bottom)
         }
-        .defaultScrollAnchor(.bottom)
+        .task { await sampleUsage() }
+    }
+
+    /// The CPU and GPU use over the last minute, as lines; one element for VoiceOver, which reads
+    /// the last second's.
+    private var usageGraph: some View {
+        let end = usage.last?.time ?? .now
+        let percent = FloatingPointFormatStyle<Double>.Percent.percent.precision(.fractionLength(0))
+        return Chart(usage) { second in
+            LineMark(x: .value("Time", second.time), y: .value("Use", second.cpu))
+                .foregroundStyle(by: .value("Processor", "CPU"))
+            LineMark(x: .value("Time", second.time), y: .value("Use", second.gpu))
+                .foregroundStyle(by: .value("Processor", "GPU"))
+        }
+        .chartXScale(domain: end.addingTimeInterval(-60)...end)
+        .chartXAxis(.hidden)
+        .chartYScale(domain: 0...1)
+        .chartYAxis {
+            AxisMarks(values: [0, 0.5, 1]) {
+                AxisGridLine()
+                AxisValueLabel(format: percent)
+            }
+        }
+        .frame(height: 80)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("CPU and GPU use over the last minute")
+        .accessibilityValue(usage.last.map { "CPU \($0.cpu.formatted(percent)), GPU \($0.gpu.formatted(percent))" } ?? "")
+    }
+
+    /// Adds a second's use to ``usage`` each second until the window closes, keeping a minute's.
+    /// The CPU's is the process's processor time on all its threads (`CLOCK_PROCESS_CPUTIME_ID`);
+    /// the GPU's, the engine's command buffers' (``PhotoModel/gpuSeconds``), as macOS has no
+    /// public figure for one app's GPU use.
+    private func sampleUsage() async {
+        func cpuSeconds() -> Double { Double(clock_gettime_nsec_np(CLOCK_PROCESS_CPUTIME_ID)) / 1e9 }
+        let cores = Double(ProcessInfo.processInfo.activeProcessorCount)
+        var last = (time: ContinuousClock.now, cpu: cpuSeconds(), gpu: model.gpuSeconds)
+        while true {
+            do {
+                try await Task.sleep(for: .seconds(1))
+            } catch {
+                return
+            }
+            let now = (time: ContinuousClock.now, cpu: cpuSeconds(), gpu: model.gpuSeconds)
+            let seconds = (now.time - last.time) / .seconds(1)
+            usage.append(Usage(time: .now, cpu: (now.cpu - last.cpu) / seconds / cores, gpu: (now.gpu - last.gpu) / seconds))
+            let minuteAgo = Date.now.addingTimeInterval(-60)
+            usage.removeAll { $0.time < minuteAgo }
+            last = now
+        }
     }
 }
