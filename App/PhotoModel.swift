@@ -687,34 +687,49 @@ final class PhotoModel {
     var canSave: Bool { photo != nil && engine != nil && savePhase == nil }
     var canCancel: Bool { savePhase != nil }
 
+    /// Shows `panel` as a sheet on the key window (the photo's, unless the Log is in front), or on
+    /// its own if no window is, and gives the place chosen.
+    private func destination(from panel: NSSavePanel) async -> URL? {
+        let response = if let window = NSApp.keyWindow {
+            await panel.beginSheetModal(for: window)
+        } else {
+            await panel.begin()
+        }
+        return response == .OK ? panel.url : nil
+    }
+
     /// Renders the photo at full resolution, encoded in Display P3, and writes it where the Save panel says:
-    /// 16-bit TIFF or PNG, or JPEG, by the name's extension.
+    /// 16-bit TIFF or PNG, or JPEG, as its format menu sets the name's extension. The suggested name
+    /// has the film in it, so saving can't replace a JPEG original by accident.
     func save() {
         guard let photo, let engine else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.jpeg, .tiff, .png]
-        panel.nameFieldStringValue = (photo.name as NSString).deletingPathExtension + ".jpg"
+        panel.showsContentTypes = true
+        panel.nameFieldStringValue = "\((photo.name as NSString).deletingPathExtension) – \(filmName).jpg"
         panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        let type = UTType(filenameExtension: url.pathExtension) ?? .jpeg
-        let (controls, metadata, record) = (controls, metadata, editRecord)
-        savePhase = "Rendering \(url.lastPathComponent) at full resolution…"
-        saveTask = Task {
-            defer { savePhase = nil; saveTask = nil }
-            let start = ContinuousClock.now
-            do {
-                let image = try await engine.export(controls: controls, as: type)
-                try Task.checkCancellation()
-                savePhase = "Writing \(url.lastPathComponent)…"
-                try await Task.detached(priority: .userInitiated) {
-                    try image.write(to: url, as: type, metadata: metadata, record: record)
-                }.value
-                let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.seconds, .milliseconds]))
-                note("Saved \(url.lastPathComponent) in \(elapsed)")
-            } catch is CancellationError {
-                note("Cancelled saving \(url.lastPathComponent)")
-            } catch {
-                fail("Couldn't save “\(url.lastPathComponent)”", error, alert: true)
+        Task {
+            guard let url = await destination(from: panel) else { return }
+            let type = UTType(filenameExtension: url.pathExtension) ?? .jpeg
+            let (controls, metadata, record) = (controls, metadata, editRecord)
+            savePhase = "Rendering \(url.lastPathComponent) at full resolution…"
+            saveTask = Task {
+                defer { savePhase = nil; saveTask = nil }
+                let start = ContinuousClock.now
+                do {
+                    let image = try await engine.export(controls: controls, as: type)
+                    try Task.checkCancellation()
+                    savePhase = "Writing \(url.lastPathComponent)…"
+                    try await Task.detached(priority: .userInitiated) {
+                        try image.write(to: url, as: type, metadata: metadata, record: record)
+                    }.value
+                    let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.seconds, .milliseconds]))
+                    note("Saved \(url.lastPathComponent) in \(elapsed)")
+                } catch is CancellationError {
+                    note("Cancelled saving \(url.lastPathComponent)")
+                } catch {
+                    fail("Couldn't save “\(url.lastPathComponent)”", error, alert: true)
+                }
             }
         }
     }
@@ -777,16 +792,16 @@ final class PhotoModel {
         panel.nameFieldStringValue = controls.scanFilm ? filmName : "\(filmName) – \(paperName)"
         panel.message = "The LUT carries this exposure (\(stops) EV) and every setting a LUT can hold. Grain, halation, glare, the burn, highlight boost and the sharper edges of the couplers' Edge contrast depend on neighbouring pixels or the whole photo, so they're left out."
         panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        let (controls, exposureEV) = (controls, exposureEV)
-        let comments = [
-            "Made with SpektraMac from Spektrafilm by Andrea Volpato (https://github.com/andreavolpato/spektrafilm).",
-            "Film and paper data: CC BY-SA 4.0.",
-            controls.scanFilm ? "Film: \(filmName), scanned" : "Film: \(filmName), printed on \(paperName)",
-            "Exposure: \(stops) EV",
-            "Input and output: sRGB, encoded",
-        ]
         Task {
+            guard let url = await destination(from: panel) else { return }
+            let (controls, exposureEV) = (controls, exposureEV)
+            let comments = [
+                "Made with SpektraMac from Spektrafilm by Andrea Volpato (https://github.com/andreavolpato/spektrafilm).",
+                "Film and paper data: CC BY-SA 4.0.",
+                controls.scanFilm ? "Film: \(filmName), scanned" : "Film: \(filmName), printed on \(paperName)",
+                "Exposure: \(stops) EV",
+                "Input and output: sRGB, encoded",
+            ]
             do {
                 let lut = try await engine.lut(controls: controls, exposureEV: exposureEV, size: Self.lutSize)
                 try lut.cube(title: url.deletingPathExtension().lastPathComponent, comments: comments)
@@ -807,12 +822,14 @@ final class PhotoModel {
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "\(filmName).json"
         panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try controls.preset().write(to: url, options: .atomic)
-            note("Saved preset \(url.lastPathComponent)")
-        } catch {
-            fail("Couldn't save the preset", error, alert: true)
+        Task {
+            guard let url = await destination(from: panel) else { return }
+            do {
+                try controls.preset().write(to: url, options: .atomic)
+                note("Saved preset \(url.lastPathComponent)")
+            } catch {
+                fail("Couldn't save the preset", error, alert: true)
+            }
         }
     }
 

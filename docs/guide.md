@@ -265,8 +265,9 @@ Stray light over the print as you look at it, which lifts the blacks a little, a
 
 ## Saving
 
-**File › Save…** (⌘S) renders the photo at full resolution with every effect and saves it. The file's extension
-picks the format:
+**File › Save…** (⌘S) renders the photo at full resolution with every effect and saves it. The Save sheet suggests
+the photo's name with the film in it, so it doesn't replace the original by accident. Choose the format in its format
+menu, or type its extension:
 
 | Format | Bits per channel | Notes |
 |---|---|---|
