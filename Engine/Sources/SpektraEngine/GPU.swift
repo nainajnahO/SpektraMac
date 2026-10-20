@@ -21,10 +21,18 @@ public final class GPU {
     /// one per FFT size, the most recently used last (``fftConvolution(width:height:)``).
     var fftConvolutions: [(size: SIMD2<Int>, convolution: FFTConvolution)] = []
 
-    public enum SetupError: Error {
+    public enum SetupError: LocalizedError {
         case noDevice
         case noQueue
         case missingKernel(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .noDevice: "This Mac has no Metal device"
+            case .noQueue: "Metal couldn't make a command queue"
+            case .missingKernel(let name): "The Metal kernel \(name) is missing"
+            }
+        }
     }
 
     public init() throws {

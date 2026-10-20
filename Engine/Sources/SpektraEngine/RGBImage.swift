@@ -23,9 +23,9 @@ public struct RGBImage: Sendable {
     /// (`"ITU-R BT.2020"` without CCTF decoding) and which holds what cameras record.
     public static let workingColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearITUR_2020)!
 
-    public struct DecodeError: Error, CustomStringConvertible {
+    public struct DecodeError: LocalizedError {
         public let url: URL
-        public var description: String { "Can't read \(url.lastPathComponent) as an image" }
+        public var errorDescription: String? { "Can't read \(url.lastPathComponent) as an image" }
     }
 
     /// Decodes any file Core Image reads, upright and colour-managed into ``workingColorSpace``.
@@ -124,9 +124,9 @@ public struct RGBImage: Sendable {
 }
 
 extension CGImage {
-    public struct EncodeError: Error, CustomStringConvertible {
+    public struct EncodeError: LocalizedError {
         public let url: URL
-        public var description: String { "Can't write \(url.lastPathComponent)" }
+        public var errorDescription: String? { "Can't write \(url.lastPathComponent)" }
     }
 
     /// Writes the image, as ``Engine/export(controls:as:)`` makes it, about as `save_image_oiio`

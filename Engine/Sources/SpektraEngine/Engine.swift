@@ -490,8 +490,8 @@ public actor Engine {
         return display
     }
 
-    public struct DisplayError: Error, CustomStringConvertible {
-        public var description: String { "Core Image couldn't draw the render" }
+    public struct DisplayError: LocalizedError {
+        public var errorDescription: String? { "Core Image couldn't draw the render" }
     }
 
     /// Renders from the first step `controls` change since the last render of the same image: a

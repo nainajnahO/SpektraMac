@@ -56,8 +56,8 @@ struct MeteringRegions: Sendable {
         _ = try MeteringRegions(finding: tiny)
     }
 
-    struct VisionError: Error, CustomStringConvertible {
-        var description: String { "Vision returned no person mask or heat map" }
+    struct VisionError: LocalizedError {
+        var errorDescription: String? { "Vision returned no person mask or heat map" }
     }
 
     /// `mark`'s weights over a `width × height` grid, row-major from the top: Centre-weighted's
@@ -115,8 +115,8 @@ struct WeightMap: Sendable {
         self.init(values: values, width: width, height: height)
     }
 
-    struct UnexpectedFormat: Error, CustomStringConvertible {
-        var description: String { "Vision returned a map that isn't 32-bit float" }
+    struct UnexpectedFormat: LocalizedError {
+        var errorDescription: String? { "Vision returned a map that isn't 32-bit float" }
     }
 
     /// The map scaled to `width × height` (vImage's high-quality resampling), clamped to 0…1.

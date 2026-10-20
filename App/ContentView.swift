@@ -72,6 +72,11 @@ struct ContentView: View {
             case .failure(let error): model.importFailed(error)
             }
         }
+        .alert(model.failure?.title ?? "", isPresented: Binding { model.failure != nil } set: { if !$0 { model.failure = nil } },
+               presenting: model.failure) { _ in
+        } message: { failure in
+            Text(failure.message)
+        }
     }
 
     /// What the app is doing, else the last error (until a photo is opened), else what the canvas
@@ -1538,12 +1543,17 @@ private struct ImageCanvas: View {
             // Over the canvas below the toolbar and beside the panel, so centred there.
             .overlay {
                 if model.displayImage == nil {
-                    ContentUnavailableView {
-                        Label("No photo", systemImage: "photo")
-                    } description: {
-                        Text("Drop a photo here or open one to simulate it on film.")
-                    } actions: {
-                        Button("Open…") { model.isImporting = true }
+                    if let failure = model.engineFailure {
+                        ContentUnavailableView("Metal is unavailable", systemImage: "exclamationmark.triangle",
+                                               description: Text("SpektraMac simulates film on the graphics processor, through Metal. \(failure)."))
+                    } else {
+                        ContentUnavailableView {
+                            Label("No photo", systemImage: "photo")
+                        } description: {
+                            Text("Drop a photo here or open one to simulate it on film.")
+                        } actions: {
+                            Button("Open…") { model.isImporting = true }
+                        }
                     }
                 }
             }
