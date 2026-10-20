@@ -276,7 +276,8 @@ The **Preset** menu keeps settings for later.
 - **Save Preset…** (⇧⌘S) saves every setting, film and paper included, as a small `.json` file.
 - **Open Preset…** (⇧⌘O) applies one.
 - **Make Default for** *film* keeps the current settings for that film. Choosing the film again applies them, and
-  the groups' ↩ buttons return to them.
+  the groups' ↩ buttons return to them. SpektraMac also starts with them if the film is the one it starts with
+  (Kodak Portra 400).
 - **Restore Factory Defaults** forgets them and sets everything back to SpektraMac's defaults.
 
 ## Exporting a LUT

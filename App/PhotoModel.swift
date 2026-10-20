@@ -211,6 +211,11 @@ final class PhotoModel {
                 errorMessage = "Metal is unavailable: \(error.localizedDescription)"
                 return
             }
+            // The starting film's saved defaults, as choosing it applies them: the reset buttons go
+            // back to them. Once the films are here, so the Print | Film switch knows a slide.
+            if let defaults = savedDefaults(for: controls.film) {
+                controls = defaults
+            }
             // On the engine's queue, so the first photo opened doesn't wait for it.
             do {
                 try await engine?.loadVision()
