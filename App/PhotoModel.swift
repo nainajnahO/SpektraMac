@@ -46,12 +46,16 @@ final class PhotoModel {
     var showsOriginal = false
     /// The photo's EXIF, GPS and IPTC records, for saved renderings.
     @ObservationIgnored private var metadata: PhotoMetadata?
-    /// What the sidebar and the Print | Film switch set; every change re-renders the preview.
+    /// What the sidebar and the Print | Film switch set; every change re-renders the preview, and
+    /// can be undone (``registerUndo(from:)``), a drag or a menu's choice in one step.
     var controls = Controls() {
         didSet {
             showsFilm = controls.scanFilm
             isSlideFilm = films.first { $0.stock == controls.film }?.type == .positive
             scheduleRender()
+            if controlsBeforeChange == nil && controls != oldValue {
+                registerUndo(from: oldValue)
+            }
         }
     }
     /// What the toolbar's Print | Film switch shows, as the controls have it: apart from them, so
@@ -130,8 +134,14 @@ final class PhotoModel {
     /// once it's let go.
     var isAdjusting = false {
         didSet {
-            if !isAdjusting && awaitsRelease {
-                render(from: .reduced)
+            guard isAdjusting != oldValue else { return }
+            if isAdjusting {
+                beginChange()
+            } else {
+                endChange()
+                if awaitsRelease {
+                    render(from: .reduced)
+                }
             }
         }
     }
@@ -228,7 +238,10 @@ final class PhotoModel {
             // The starting film's saved defaults, as choosing it applies them: the reset buttons go
             // back to them. Once the films are here, so the Print | Film switch knows a slide.
             if let defaults = savedDefaults(for: controls.film) {
+                // Where the app starts, not an edit to undo.
+                undoManager?.disableUndoRegistration()
                 controls = defaults
+                undoManager?.enableUndoRegistration()
             }
             // On the engine's queue, so the first photo opened doesn't wait for it.
             do {
@@ -801,7 +814,9 @@ final class PhotoModel {
                     NSLocalizedDescriptionKey: "Unknown film or paper (\(preset.film), \(preset.paper))",
                 ])
             }
+            actionName = "Open Preset"
             controls = checked(preset, from: url.lastPathComponent)
+            actionName = nil
             note("Opened preset \(url.lastPathComponent)")
         } catch {
             fail("Couldn't open the preset", error, alert: true)
@@ -819,10 +834,25 @@ final class PhotoModel {
     }
 
     /// Forgets the film's saved defaults and returns every control to the app's own.
+    /// Undo brings the saved defaults back with the controls.
     func restoreFactoryDefaults() {
-        UserDefaults.standard.removeObject(forKey: Self.defaultsKey(controls.film))
+        setSavedDefaults(nil, for: controls.film)
+        actionName = "Restore Factory Defaults"
         controls = factoryControls(for: controls.film, from: Controls())
+        actionName = nil
+        // The defaults' undo, in the same step, has the name even if the controls were already these.
+        undoManager?.setActionName("Restore Factory Defaults")
         note("Restored the factory defaults for \(filmName)")
+    }
+
+    /// Stores `preset` as `film`'s saved defaults, or forgets them for nil; Undo puts back what was.
+    private func setSavedDefaults(_ preset: Data?, for film: String) {
+        let key = Self.defaultsKey(film)
+        let previous = UserDefaults.standard.data(forKey: key)
+        UserDefaults.standard.set(preset, forKey: key)
+        undoManager?.registerUndo(withTarget: self) { model in
+            model.setSavedDefaults(previous, for: film)
+        }
     }
 
     private static func defaultsKey(_ film: String) -> String { "filmDefaults.\(film)" }
@@ -866,6 +896,68 @@ final class PhotoModel {
         }
         controls.scanFilm = info.type == .positive
         return controls
+    }
+
+    // MARK: Undo
+
+    /// The window's undo manager, which Edit › Undo and Redo use (``ContentView`` sets it). Undo goes
+    /// back through the settings whichever photo is open, as they carry over from one to the next.
+    @ObservationIgnored weak var undoManager: UndoManager?
+    /// The controls as a drag or an open menu found them: what they change undoes in one step once
+    /// it ends (``endChange()``).
+    @ObservationIgnored private var controlsBeforeChange: Controls?
+    /// The next undo step's name, for a change named by what made it rather than what it changed.
+    @ObservationIgnored private var actionName: String?
+
+    /// Holds the changes to the controls a drag or an open menu makes, to undo in one step.
+    func beginChange() {
+        if controlsBeforeChange == nil {
+            controlsBeforeChange = controls
+        }
+    }
+
+    /// Ends what ``beginChange()`` began: if the controls changed, one undo step sets them back.
+    func endChange() {
+        guard let before = controlsBeforeChange else { return }
+        controlsBeforeChange = nil
+        if controls != before {
+            registerUndo(from: before)
+        }
+    }
+
+    /// Lets Undo set the controls back to `previous`, named after the settings group the change was
+    /// in unless ``actionName`` names it. Undoing sets the controls, which registers Redo, as named.
+    private func registerUndo(from previous: Controls) {
+        guard let undoManager else { return }
+        let name = actionName ?? Self.groupName(changedFrom: previous, to: controls)
+        undoManager.registerUndo(withTarget: self) { model in
+            model.actionName = name
+            model.controls = previous
+            model.actionName = nil
+        }
+        undoManager.setActionName(name)
+    }
+
+    /// The settings group a change is in, as the panel names it, by the first control it changed.
+    private static func groupName(changedFrom old: Controls, to new: Controls) -> String {
+        let changed = zip(Mirror(reflecting: old).children, Mirror(reflecting: new).children)
+            .first { "\($0.value)" != "\($1.value)" }?.0.label ?? ""
+        return switch changed {
+        case "film": "Film"
+        case "paper": "Paper"
+        case "scanFilm": "Print or Film"
+        case "exposureMark", "exposureOffsetEV", "highlightBoost": "Exposure"
+        case "printExposure", "yFilterShift", "mFilterShift", "preflash": "Enlarger"
+        case "printContrast", "printHighlightContrast", "printShadowContrast": "Contrast"
+        case "cameraDiffusion": "Lens Diffusion"
+        case "enlargerDiffusion": "Enlarger Diffusion"
+        case let name where name.hasPrefix("burn"): "Burn"
+        case let name where name.hasPrefix("glare"): "Glare"
+        case let name where name.hasPrefix("halation") || name.hasPrefix("scatter"): "Halation"
+        case let name where name.hasPrefix("coupler"): "Couplers"
+        case let name where name.hasPrefix("grain"): "Grain"
+        default: "Settings"
+        }
     }
 
     // MARK: Adjustments

@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @Environment(PhotoModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.undoManager) private var undoManager
     @SceneStorage("showsSettings") private var showsSettings = true
     @SceneStorage("settingsCategory") private var category = SettingsCategory.film
 
@@ -52,6 +53,9 @@ struct ContentView: View {
                         }
                         ToolbarSpacer(.flexible)
                     }
+            }
+            .onChange(of: undoManager, initial: true) { _, undoManager in
+                model.undoManager = undoManager
             }
             .dropDestination(for: URL.self) { urls, _ in
                 guard let url = urls.first else { return false }
