@@ -72,7 +72,8 @@ Pro). When you let go, the finished look renders at the size of the window. Rend
 for example when a slider returns to an earlier value.
 
 **Status and Log.** The window's subtitle says what SpektraMac is doing, and the photo's size when it's idle. The
-**Log** button opens a window listing what was opened, rendered and saved, with timings, and any errors.
+**Log** button opens a window listing what was opened, rendered and saved, with timings, and any errors: the last
+1,000 entries. The Console app keeps them all (search for SpektraMac).
 
 ## Camera
 

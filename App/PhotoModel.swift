@@ -913,8 +913,15 @@ final class PhotoModel {
 
     // MARK: Helpers
 
+    /// The most entries ``log`` keeps: each step of a slider adds one, and the Log window lays them
+    /// all out at each. Console keeps every message (``logger``).
+    private static let logLimit = 1000
+
     private func note(_ message: String) {
         log.append(LogEntry(message: message))
+        if log.count > Self.logLimit {
+            log.removeFirst(log.count - Self.logLimit)
+        }
         logger.notice("\(message, privacy: .public)")
     }
 
