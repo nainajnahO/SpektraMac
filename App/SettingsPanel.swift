@@ -430,6 +430,8 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
         func menuWillOpen(_ menu: NSMenu) {
             opened = parent.controls
             chosen = nil
+            // What the pointer shows and what's chosen undo in one step.
+            parent.model.beginChange()
             // Outward from the current choice, as the pointer moves from it.
             let order = menu.items.compactMap { $0.representedObject as? Value }
             let current = order.firstIndex(of: parent.selection) ?? 0
@@ -453,6 +455,7 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
                 guard let opened else { return }
                 self.opened = nil
                 show(chosen, from: opened)
+                parent.model.endChange()
             }
         }
 

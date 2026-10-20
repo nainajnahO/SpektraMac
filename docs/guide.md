@@ -67,6 +67,11 @@ strip to set the value where you point. The white line marks the current value.
 **Menus.** In the Film, Paper and diffusion filter menus, the photo shows whichever item the pointer is on, so you can
 look through films before choosing one. Closing the menu without choosing puts the photo back.
 
+**Undo.** **Edit › Undo** (⌘Z) takes back the last change to the settings, and **Edit › Redo** (⇧⌘Z) makes it again. A
+whole drag of a slider, strip or the tone graph is one step, as is a choice from a menu, a group's ↩, an opened preset
+and Restore Factory Defaults (which also brings the film's saved defaults back). The settings carry over from photo to
+photo, and so does what you can undo.
+
 **Speed.** While you drag a slider, the photo shows a quick preview without grain or blurs (about 20 ms on an M1
 Pro). When you let go, the finished look renders at the size of the window. Renders already made come back at once,
 for example when a slider returns to an earlier value.
@@ -306,6 +311,8 @@ The exposure is the Exposure slider's offset.
 | Save | ⌘S |
 | Export LUT | ⇧⌘E |
 | Cancel saving | ⌘. |
+| Undo | ⌘Z |
+| Redo | ⇧⌘Z |
 | Open Preset | ⇧⌘O |
 | Save Preset | ⇧⌘S |
 
