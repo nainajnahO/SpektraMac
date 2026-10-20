@@ -8,6 +8,7 @@ about making a change easy to review. Everyone taking part follows the [code of 
 - **A bug, or something you'd like?** [Open an issue](https://github.com/nainajnahO/SpektraMac/issues/new). For a bug,
   say which Mac and macOS, which SpektraMac (a release, or the commit you built), the photo's format, the film and
   paper, and anything the Log window shows.
+- **A security problem?** Don't open an issue: report it privately, as [SECURITY.md](SECURITY.md) says.
 - **Small fixes**, such as a crash, a typo or a wrong label, can go straight to a pull request.
 - **Anything bigger**, such as a new control, a change to the simulation or a reworked view, starts with an issue, so
   we can agree on it before you spend time on it. To take on an open issue, say so in it.
