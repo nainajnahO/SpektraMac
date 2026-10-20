@@ -742,13 +742,13 @@ final class PhotoModel {
         saveTask?.cancel()
     }
 
-    /// The finished photo, for Share, Copy and dragging it out, while a photo is open.
+    /// The finished photo, for Share and Copy, while a photo is open.
     var finishedPhoto: FinishedPhoto? {
         photo.map { FinishedPhoto(model: self, name: ($0.name as NSString).deletingPathExtension) }
     }
 
     /// The finished photo as a JPEG named `name`, as Save writes one, in a folder of its own in the
-    /// temporary folder: what Share, Copy and a drag out send (``FinishedPhoto``).
+    /// temporary folder: what Share and Copy send (``FinishedPhoto``).
     func finishedFile(named name: String) async throws -> URL {
         let engine = try await makingEngine.value
         let (controls, metadata, record) = (controls, metadata, editRecord)
@@ -1139,7 +1139,7 @@ final class PhotoModel {
     }
 }
 
-/// The finished photo as Share, Copy and a drag out send it: a JPEG at full resolution, as Save
+/// The finished photo as Share and Copy send it: a JPEG at full resolution, as Save
 /// writes one, rendered only when what receives it asks (``PhotoModel/finishedFile(named:)``).
 nonisolated struct FinishedPhoto: Transferable {
     let model: PhotoModel

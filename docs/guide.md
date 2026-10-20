@@ -40,9 +40,7 @@ one, exposed the same way (see [Exposure](#exposure)), and SpektraMac starts wit
 
 - **Zoom:** pinch on a trackpad, or scroll with ⌥ held, to zoom around the pointer, up to 4 screen points per pixel;
   or **View › Zoom In** (⌘+) and **Zoom Out** (⌘−). Zoomed in, SpektraMac renders the photo at full resolution.
-- **Move:** scroll with two fingers (or the mouse wheel), or drag the photo while it's zoomed in, as in Preview.
-- **Drag out:** while the photo fits the window, drag it to Finder or another app to drop the finished photo there
-  (see [Saving](#saving)).
+- **Move:** scroll with two fingers (or the mouse wheel), or drag the photo, as in Preview.
 - **Compare:** click the photo, or choose **View › Show Original** (M), to see the original in its place, at the same
   zoom; do it again to see the film. While the original shows, the window's subtitle reads "Original" and the
   settings are greyed out. The original is the photo as macOS shows it, as in Preview.
@@ -294,10 +292,9 @@ copyright. It also records the edit:
 - **Keywords:** the film, the paper and SpektraMac, after the photo's own.
 - **XMP:** every setting, under `spektramac:`.
 
-**Share, Copy and drag out.** The toolbar's **Share** button sends the finished photo to Messages, Mail, Photos,
-AirDrop and more. **Edit › Copy** (⌘C) copies it, and dragging the photo out of the window, while it fits, drops it in
-Finder or another app. Each is a JPEG at full resolution with the metadata above, as Save makes one, rendered when
-it's sent, so it can take a few seconds.
+**Share and Copy.** The toolbar's **Share** button sends the finished photo to Messages, Mail, Photos, AirDrop and
+more, and **Edit › Copy** (⌘C) copies it. Each is a JPEG at full resolution with the metadata above, as Save makes
+one, rendered when it's sent, so it can take a few seconds.
 
 ## Presets and film defaults
 
