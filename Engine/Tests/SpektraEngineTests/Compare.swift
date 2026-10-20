@@ -7,12 +7,12 @@ let goldenDirectory = URL(filePath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     .appending(component: "golden")
 
-/// A file in `golden/`. The data isn't in the repository (see README), so a test that needs a file
+/// A file in `golden/`. The data isn't in the repository (see CONTRIBUTING.md), so a test that needs a file
 /// that isn't there is skipped, as on CI.
 func goldenFile(_ components: String...) throws -> URL {
     let url = components.reduce(goldenDirectory) { $0.appending(component: $1) }
     guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
-        try Test.cancel("\(url.path(percentEncoded: false)) not found: the parity tests need the reference data (see README)")
+        try Test.cancel("\(url.path(percentEncoded: false)) not found: the parity tests need the reference data (see CONTRIBUTING.md)")
     }
     return url
 }

@@ -124,19 +124,9 @@ There's no download yet. You need macOS 26.5 or newer and [Xcode 27](https://dev
 | `Engine/Sources/SpektraEngine/Resources/` | Film and paper profiles and spectral tables exported from Spektrafilm |
 | `docs/` | User guide and the website, served by GitHub Pages |
 
-Run the engine's tests with `swift test -c release -Xswiftc -enable-testing --package-path Engine`. Optimized, they
-take about a minute on an M1 Pro instead of six; `-enable-testing` keeps the `@testable import` they rely on. Every
-pull request is built and tested on GitHub Actions. See the [releases](https://github.com/nainajnahO/SpektraMac/releases)
-for what's changed, [PLAN.md](PLAN.md) for the porting plan and the
-[issues](https://github.com/nainajnahO/SpektraMac/issues) for what's next.
-
-### Reference data
-
-The parity tests compare every stage against dumps from the original Python Spektrafilm 0.3.4 in `golden/<case>/`:
-one float32 `.npy` per pipeline tap, the film's spectral lookup table and the parameters used. Neither the dumps
-(about 230 MB) nor the Python scripts that make them and that exported the bundled data are in the repository;
-without `golden/`, those tests are skipped, as on CI. `golden/manifest.json` (committed) holds a checksum of every
-file, so `git diff` shows whether a regeneration changed anything.
+To run the tests or send a change, see [CONTRIBUTING.md](CONTRIBUTING.md). See the
+[releases](https://github.com/nainajnahO/SpektraMac/releases) for what's changed, [PLAN.md](PLAN.md) for the porting
+plan and the [issues](https://github.com/nainajnahO/SpektraMac/issues) for what's next.
 
 ## Credits and licence
 
