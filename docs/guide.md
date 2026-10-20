@@ -63,7 +63,7 @@ With Full Keyboard Access, ← and → step the value.
 **Strips.** Some settings are a strip of small frames of your photo across the setting's range. Click or drag on the
 strip to set the value where you point. The white line marks the current value.
 
-**Menus.** In the Film, Paper and Diffusion filter menus, the photo shows whichever item the pointer is on, so you can
+**Menus.** In the Film, Paper and diffusion filter menus, the photo shows whichever item the pointer is on, so you can
 look through films before choosing one. Closing the menu without choosing puts the photo back.
 
 **Speed.** While you drag a slider, the photo shows a quick preview without grain or blurs (about 20 ms on an M1
@@ -105,9 +105,10 @@ under the strip says so.
 - **Highlight boost** (0–10 EV, off at 0) raises the brightest highlights before they reach the film, rebuilding
   light the camera clipped, so bright lights glow more.
 
-### Diffusion
+### Lens diffusion
 
-A diffusion filter on the camera's lens, which spreads some light into a glow. Off by default.
+A diffusion filter on the camera's lens. It scatters some of the scene's light before it reaches the film, so bright
+areas glow into the darker ones around them, as in the halos around lamps. Off by default.
 
 - **Filter:**
   - **Glimmerglass** keeps detail and glows faintly.
@@ -228,10 +229,12 @@ While you hold a Burn slider, the photo shows what burns, white on black.
 On the tone graph, orange shading marks the tones that burn, and a dashed line shows where they print. Drag the line
 sideways for the threshold, or up and down for the strength.
 
-### Diffusion
+### Enlarger diffusion
 
-A diffusion filter on the enlarger's lens, over the print. It has the same filters and settings as the camera's
-[Diffusion](#diffusion). Off by default.
+A diffusion filter on the enlarger's lens, over the print. It scatters the light after it has passed through the
+negative, and most of that light comes through the parts that print dark. So the print's dark areas spread softly into
+the lighter ones around them, instead of bright areas glowing as with [Lens diffusion](#lens-diffusion). It has the
+same filters and settings. Off by default.
 
 ### Glare
 
