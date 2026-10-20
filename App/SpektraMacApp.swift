@@ -39,6 +39,11 @@ struct SpektraMacApp: App {
             }
             InspectorCommands()
             ViewCommands(model: model)
+            // The user guide, where the website links it: there's no help book.
+            CommandGroup(replacing: .help) {
+                Link("SpektraMac Help", destination: URL(string: "https://github.com/nainajnahO/SpektraMac/blob/main/docs/guide.md")!)
+                    .keyboardShortcut("?", modifiers: .command)
+            }
             CommandMenu("Preset") {
                 Group {
                     Button("Open Preset…") { model.isImportingPreset = true }
