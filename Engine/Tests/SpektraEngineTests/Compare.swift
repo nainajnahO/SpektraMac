@@ -2,7 +2,8 @@ import Foundation
 import Testing
 @testable import SpektraEngine
 
-/// `golden/` at the repository root, written by `tools/golden.py`.
+/// `golden/` at the repository root, written by `tools/golden.py`, which stays on the development Mac
+/// rather than in the repository (#139): without it, the parity tests don't run.
 let goldenDirectory = URL(filePath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     .appending(component: "golden")

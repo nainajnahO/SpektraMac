@@ -1,7 +1,8 @@
 import Foundation
 
 /// Spectral and colorimetric tables from colour-science and Spektrafilm, sampled on the
-/// 380–780 nm / 5 nm grid (`Resources/tables.json`, written by `tools/export_tables.py`).
+/// 380–780 nm / 5 nm grid (`Resources/tables.json`, written by `tools/export_tables.py`, which stays
+/// on the development Mac rather than in the repository: #139).
 public struct Tables: Decodable, Sendable {
     public let spektrafilmVersion: String
     public let wavelengths: [Double]
