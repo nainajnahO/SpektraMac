@@ -20,7 +20,8 @@ glow come from how those materials behave rather than from a filter.
 ## Getting started
 
 1. Open a photo with **File › Open…** (⌘O), the **Open…** button, or by dropping it on the window. SpektraMac opens
-   anything your Mac can: camera RAW, HEIC, JPEG, TIFF, PNG and more.
+   anything your Mac can: camera RAW, HEIC, JPEG, TIFF, PNG and more, up to 16,384 pixels on a side (the most the
+   graphics processor takes). A larger photo, such as a stitched panorama, is refused with a message saying so.
 2. Choose a film in the **Film** tab, and a paper in the **Print** tab.
 3. Adjust what you like, then **File › Save…** (⌘S).
 
