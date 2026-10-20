@@ -257,13 +257,24 @@ final class PhotoModel {
 
     /// How many opens have started: the newest one's photo is the one that shows (``open(_:)``).
     @ObservationIgnored private var opensStarted = 0
+    /// The photos opened lately, newest first, for File › Open Recent: AppKit's list of recent
+    /// documents, which keeps them between launches, with access to them, and fills the Dock
+    /// icon's menu.
+    private(set) var recentPhotos = NSDocumentController.shared.recentDocumentURLs
+
+    func clearRecentPhotos() {
+        NSDocumentController.shared.clearRecentDocuments(nil)
+        recentPhotos = []
+    }
 
     /// Opens the photo at `url`. Photos chosen while others open show in the order chosen: an
     /// earlier one still decoding is dropped (a 16-bit TIFF can take seconds, a JPEG chosen after it
     /// a moment), and one the engine is already opening shows until the later one replaces it.
-    /// "Opening…" stays until the newest is done.
+    /// "Opening…" stays until the newest is done. An opened photo goes to the top of
+    /// ``recentPhotos``.
     func open(_ url: URL) {
-        // Files from the Open panel are security-scoped; dropped files are already accessible.
+        // Files from the Open panel and Open Recent are security-scoped; dropped files and those
+        // sent by Finder or the Dock are already accessible.
         let scoped = url.startAccessingSecurityScopedResource()
         opensStarted += 1
         let generation = opensStarted
@@ -300,6 +311,8 @@ final class PhotoModel {
                               previewWidth: opened.previewWidth, previewHeight: opened.previewHeight,
                               metering: opened.metering, meteringOverlays: opened.meteringOverlays)
                 note("Opened \(url.lastPathComponent) (\(opened.width) × \(opened.height))")
+                NSDocumentController.shared.noteNewRecentDocumentURL(url)
+                recentPhotos = NSDocumentController.shared.recentDocumentURLs
                 loadOriginal(of: url)
             } catch {
                 // A photo chosen since says how it went instead.
