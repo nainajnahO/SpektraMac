@@ -39,7 +39,7 @@ public struct Parameters: Codable, Sendable, Equatable {
     /// like), which spreads part of the light into a glow around bright areas
     /// (``GPU/encodeDiffusionFilter(on:input:filter:pixelSizeUm:)``). Its per-group fine-tuning
     /// (`core_intensity` … `bloom_size`) is not ported (1, no change, by default).
-    public struct DiffusionFilter: Codable, Sendable, Equatable {
+    public struct DiffusionFilter: Codable, Sendable, Hashable {
         public var active = false
         public var filterFamily = Family.blackProMist
         /// Commercial filter stops: 1/8, 1/4, 1/2, 1, 2, interpolated between.

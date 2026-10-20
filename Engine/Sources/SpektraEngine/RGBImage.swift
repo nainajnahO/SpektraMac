@@ -160,7 +160,7 @@ extension CGImage {
         guard CGImageMetadataRegisterNamespaceForPrefix(settings, EditRecord.namespace as CFString,
                                                         EditRecord.prefix as CFString, nil)
         else { throw EncodeError(url: url) }
-        for case let (name?, value) in Mirror(reflecting: record.controls).children {
+        for (name, value) in Self.settings(of: record.controls) {
             guard let tag = CGImageMetadataTagCreate(EditRecord.namespace as CFString, EditRecord.prefix as CFString,
                                                      name as CFString, .default, "\(value)" as CFString),
                   CGImageMetadataSetTagWithPath(settings, nil, "\(EditRecord.prefix):\(name)" as CFString, tag)
@@ -168,6 +168,17 @@ extension CGImage {
         }
         CGImageDestinationAddImageAndMetadata(destination, self, settings, properties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw EncodeError(url: url) }
+    }
+
+    /// `value`'s stored properties by name, for the XMP: a struct's (a diffusion filter's) by its name
+    /// and theirs, so the lens filter's strength is `cameraDiffusionStrength`.
+    static func settings(of value: Any, prefix: String = "") -> [(name: String, value: Any)] {
+        Mirror(reflecting: value).children.flatMap { child -> [(name: String, value: Any)] in
+            guard let label = child.label else { return [] }
+            let name = prefix.isEmpty ? label : prefix + label.prefix(1).uppercased() + label.dropFirst()
+            return Mirror(reflecting: child.value).displayStyle == .struct
+                ? settings(of: child.value, prefix: name) : [(name, child.value)]
+        }
     }
 }
 
