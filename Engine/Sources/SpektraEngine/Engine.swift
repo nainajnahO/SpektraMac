@@ -317,6 +317,11 @@ public actor Engine {
         let metering: MeteringReadings
         var exposure: Step?
         var film: Step?
+
+        /// The exposure `controls` give this image: their mark's reading for it plus their offset.
+        func exposureEV(for controls: Controls) -> Double {
+            metering.reading(resolving: controls.exposureMark).ev + controls.exposureOffsetEV
+        }
     }
 
     /// A step's result and what it was made from: the film, the parameters it reads and the
@@ -329,6 +334,14 @@ public actor Engine {
         }
         let key: Key
         let texture: any MTLTexture
+
+        /// The keys of the film's exposure and of the developed film for `controls`, rendered with
+        /// `parameters` at `exposureEV`.
+        static func keys(for controls: Controls, parameters: Parameters,
+                         exposureEV: Double) -> (exposure: Key, film: Key) {
+            (Key(film: controls.film, parameters: Engine.exposureParameters(parameters), exposureEV: exposureEV),
+             Key(film: controls.film, parameters: Engine.filmParameters(parameters), exposureEV: exposureEV))
+        }
     }
 
     /// What ``open(_:)`` found out about a photo.
@@ -494,48 +507,59 @@ public actor Engine {
     /// again; switching grain develops the film's exposure again; the rest starts over. The same
     /// kernels run as for a render from scratch, so the result is the same. Also returns the burn's
     /// mask, if it's on.
+    ///
+    /// The work is in functions of its own, so each one's copies of the photo and the parameters
+    /// leave the stack before the next: a debug build keeps every temporary of a function on its
+    /// stack at once, and the engine's queue has 512 KB.
     private func renderTexture(controls: Controls, mode: RenderMode) throws
         -> (output: any MTLTexture, burnMask: (any MTLTexture)?) {
         guard photo != nil else { preconditionFailure("Rendering before a photo is open") }
-        let film = profiles[controls.film]!, print = profiles[controls.paper]!
-        let parameters = Self.parameters(for: controls, film: film, print: print, database: neutralPrintFilters,
-                                         mode: mode)
+        let parameters = parameters(for: controls, mode: mode)
         let simulation: Simulation
         if let current = self.simulation, current.parameters == parameters,
-           current.film.info.stock == film.info.stock, current.print.info.stock == print.info.stock {
+           current.film.info.stock == controls.film, current.print.info.stock == controls.paper {
             simulation = current
         } else {
-            simulation = try Simulation(parameters: parameters, film: film, print: print, gpu: gpu, tables: tables,
-                                        cache: cache)
+            simulation = try Simulation(parameters: parameters, film: profiles[controls.film]!,
+                                        print: profiles[controls.paper]!, gpu: gpu, tables: tables, cache: cache)
             self.simulation = simulation
         }
-        let image: WritableKeyPath<Photo, PhotoImage>
+        let image = try image(for: mode)
+        setAsideMemory(for: image)
+        // In place, so the steps these controls don't match are released before the render.
+        return try render(&photo![keyPath: image], controls: controls, parameters: parameters, simulation: simulation)
+    }
+
+    /// The image of the photo `mode` renders, made first if it's a thumbnail or a reduced image not
+    /// made yet.
+    private func image(for mode: RenderMode) throws -> WritableKeyPath<Photo, PhotoImage> {
+        // Read once: in a debug build each read of `photo` is a copy on the stack.
+        let photo = self.photo!
         switch mode {
         case .preview:
-            image = \.preview
+            return \.preview
         case .thumbnail:
-            if photo!.thumbnail == nil {
-                let full = photo!.full
-                let thumbnail = try scaled(full.texture, toLongSide: thumbnailMaxSize)
-                photo!.thumbnail = thumbnail === full.texture ? full : metered(thumbnail, regions: photo!.regions)
+            if photo.thumbnail == nil {
+                let thumbnail = try scaled(photo.full.texture, toLongSide: thumbnailMaxSize)
+                self.photo!.thumbnail = thumbnail === photo.full.texture
+                    ? photo.full : metered(thumbnail, regions: photo.regions)
             }
-            image = \.thumbnail!
+            return \.thumbnail!
         case .reduced(let longSide):
-            let full = photo!.full.texture
-            if longSide >= max(full.width, full.height) {
-                image = \.full
-            } else {
-                let last = photo!.reduced.texture
-                if max(last.width, last.height) != longSide {
-                    photo!.reduced = metered(try scaled(full, toLongSide: longSide), regions: photo!.regions)
-                }
-                image = \.reduced
+            let full = photo.full.texture
+            guard longSide < max(full.width, full.height) else { return \.full }
+            let last = photo.reduced.texture
+            if max(last.width, last.height) != longSide {
+                self.photo!.reduced = metered(try scaled(full, toLongSide: longSide), regions: photo.regions)
             }
+            return \.reduced
         case .full, .export:
-            image = \.full
+            return \.full
         }
+    }
 
-        // Intermediates from the memory set aside for renders of this size.
+    /// Makes the render's intermediates from the memory set aside for renders of `image`'s size.
+    private func setAsideMemory(for image: WritableKeyPath<Photo, PhotoImage>) {
         let source = photo![keyPath: image].texture
         if image == \Photo.full && source !== photo!.preview.texture {
             fullSizeMemory = gpu.reservedMemory(width: source.width, height: source.height, keeping: fullSizeMemory)
@@ -548,31 +572,32 @@ public actor Engine {
                                               textures: GPU.reservedTextures + 6, keeping: screenMemory)
             gpu.heap = screenMemory
         }
+    }
 
-        let exposureEV = photo![keyPath: image].metering.reading(resolving: controls.exposureMark).ev
-            + controls.exposureOffsetEV
-
+    /// Renders `image` from the first step `controls` change since its last render, and keeps its
+    /// film exposure and developed film for the next.
+    private func render(_ image: inout PhotoImage, controls: Controls, parameters: Parameters,
+                        simulation: Simulation) throws -> (output: any MTLTexture, burnMask: (any MTLTexture)?) {
+        let exposureEV = image.exposureEV(for: controls)
+        let keys = Step.keys(for: controls, parameters: parameters, exposureEV: exposureEV)
         // What's still valid of the last render; the rest is released before this one.
-        let exposureKey = Step.Key(film: controls.film, parameters: Self.exposureParameters(parameters),
-                                   exposureEV: exposureEV)
-        let filmKey = Step.Key(film: controls.film, parameters: Self.filmParameters(parameters), exposureEV: exposureEV)
-        if photo![keyPath: image].exposure?.key != exposureKey {
-            photo![keyPath: image].exposure = nil
+        if image.exposure?.key != keys.exposure {
+            image.exposure = nil
         }
-        if photo![keyPath: image].film?.key != filmKey {
-            photo![keyPath: image].film = nil
+        if image.film?.key != keys.film {
+            image.film = nil
         }
-        let last = photo![keyPath: image]
+        let (texture, keptExposure, keptFilm) = (image.texture, image.exposure?.texture, image.film?.texture)
         let (logExposure, cmyFilm, burnMask, output) = try gpu.run { encoder in
-            let logExposure = last.exposure?.texture ?? simulation.encodeExpose(
-                simulation.encodePreprocess(last.texture, autoExposureEV: exposureEV, on: encoder), on: encoder)
-            let cmyFilm = last.film?.texture ?? simulation.encodeDevelop(logExposure, on: encoder)
+            let logExposure = keptExposure ?? simulation.encodeExpose(
+                simulation.encodePreprocess(texture, autoExposureEV: exposureEV, on: encoder), on: encoder)
+            let cmyFilm = keptFilm ?? simulation.encodeDevelop(logExposure, on: encoder)
             let burnMask = simulation.encodeBurnMask(logExposure, on: encoder)
             return (logExposure, cmyFilm, burnMask,
                     simulation.encodePrintAndScan(cmyFilm, burnMask: burnMask, on: encoder))
         }
-        photo![keyPath: image].exposure = Step(key: exposureKey, texture: logExposure)
-        photo![keyPath: image].film = Step(key: filmKey, texture: cmyFilm)
+        image.exposure = Step(key: keys.exposure, texture: logExposure)
+        image.film = Step(key: keys.film, texture: cmyFilm)
         return (output, burnMask)
     }
 
@@ -604,13 +629,11 @@ public actor Engine {
     /// renders as an image size² wide, and a texture is at most 16384.
     public func lut(controls: Controls, exposureEV: Double, size: Int) throws -> LUT {
         precondition((2...128).contains(size))
-        let film = profiles[controls.film]!, print = profiles[controls.paper]!
-        var parameters = Self.parameters(for: controls, film: film, print: print, database: neutralPrintFilters,
-                                         mode: .export)
+        var parameters = parameters(for: controls, mode: .export)
         parameters.applyPerPixelMode()
         parameters.io.outputColorSpace = "sRGB"
-        let simulation = try Simulation(parameters: parameters, film: film, print: print, gpu: gpu, tables: tables,
-                                        cache: cache)
+        let simulation = try Simulation(parameters: parameters, film: profiles[controls.film]!,
+                                        print: profiles[controls.paper]!, gpu: gpu, tables: tables, cache: cache)
         // The lattice in LUT order, a row per blue level: red changes fastest, then green.
         let axis = (0..<size).map { Float($0) / Float(size - 1) }
         var rgba = [Float]()
@@ -642,8 +665,6 @@ public actor Engine {
     /// preview's film exposure, kept from its last render if that had these controls' exposure.
     public func toneGraph(controls: Controls) throws -> ToneGraph {
         guard photo != nil else { preconditionFailure("A tone graph before a photo is open") }
-        // Here rather than in a function holding parameters: a debug build's render takes most of
-        // the queue's 512 KB stack.
         if !previewHasExposure(of: controls) {
             _ = try renderTexture(controls: controls, mode: .preview)
         }
@@ -653,11 +674,10 @@ public actor Engine {
 
     /// Whether the preview's last render made its film exposure as `controls` set it, as it keys it.
     private func previewHasExposure(of controls: Controls) -> Bool {
-        let parameters = Self.parameters(for: controls, film: profiles[controls.film]!, print: profiles[controls.paper]!,
-                                         database: neutralPrintFilters, mode: .preview)
-        let exposureEV = photo!.preview.metering.reading(resolving: controls.exposureMark).ev + controls.exposureOffsetEV
-        return photo!.preview.exposure?.key
-            == Step.Key(film: controls.film, parameters: Self.exposureParameters(parameters), exposureEV: exposureEV)
+        let preview = photo!.preview
+        let keys = Step.keys(for: controls, parameters: parameters(for: controls, mode: .preview),
+                             exposureEV: preview.exposureEV(for: controls))
+        return preview.exposure?.key == keys.exposure
     }
 
     /// The last tone curve and what it was rendered from: the exposure doesn't change it.
@@ -670,8 +690,7 @@ public actor Engine {
     /// mean to) × 2^``ToneGraph/stops``, in the input space, through the film, the paper and the scan.
     private func toneCurve(controls: Controls) throws -> [ToneGraph.Point] {
         let film = profiles[controls.film]!, print = profiles[controls.paper]!
-        var parameters = Self.parameters(for: controls, film: film, print: print, database: neutralPrintFilters,
-                                         mode: .export)
+        var parameters = parameters(for: controls, mode: .export)
         parameters.applyPerPixelMode()
         parameters.io.scanFilm = false
         if let last = lastToneCurve, last.parameters == parameters, last.film == controls.film,
@@ -756,6 +775,12 @@ public actor Engine {
         key.filmRender.dirCouplers = defaults.filmRender.dirCouplers
         key.filmRender.grain = defaults.filmRender.grain
         return key
+    }
+
+    /// ``parameters(for:film:print:database:mode:)`` with `controls`' film and paper.
+    private func parameters(for controls: Controls, mode: RenderMode) -> Parameters {
+        Self.parameters(for: controls, film: profiles[controls.film]!, print: profiles[controls.paper]!,
+                        database: neutralPrintFilters, mode: mode)
     }
 
     /// `controls` over Spektrafilm's defaults, in the app's colour spaces, digested as
