@@ -275,7 +275,8 @@ copyright. It also records the edit:
 The **Preset** menu keeps settings for later.
 
 - **Save Preset…** (⇧⌘S) saves every setting, film and paper included, as a small `.json` file.
-- **Open Preset…** (⇧⌘O) applies one.
+- **Open Preset…** (⇧⌘O) applies one. A preset is plain text you can edit; a value outside its setting's range is
+  brought to the nearest end of it, and a slide film shows as **Film**. The Log says what was changed.
 - **Make Default for** *film* keeps the current settings for that film. Choosing the film again applies them, and
   the groups' ↩ buttons return to them. SpektraMac also starts with them if the film is the one it starts with
   (Kodak Portra 400).

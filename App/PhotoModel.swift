@@ -525,8 +525,8 @@ final class PhotoModel {
     func range(of strip: Strip) -> ClosedRange<Double> {
         switch strip {
         case .exposure: exposureRange
-        case .couplerSaturation: 0...1.5
-        case .printExposure: 0...2
+        case .couplerSaturation: Controls.range(\.couplerSaturation)
+        case .printExposure: Controls.range(\.printExposure)
         }
     }
 
@@ -786,7 +786,7 @@ final class PhotoModel {
                     NSLocalizedDescriptionKey: "Unknown film or paper (\(preset.film), \(preset.paper))",
                 ])
             }
-            controls = preset
+            controls = checked(preset, from: url.lastPathComponent)
             note("Opened preset \(url.lastPathComponent)")
         } catch {
             fail("Could not open the preset", error)
@@ -815,11 +815,30 @@ final class PhotoModel {
     private func savedDefaults(for film: String) -> Controls? {
         guard let preset = UserDefaults.standard.data(forKey: Self.defaultsKey(film)) else { return nil }
         do {
-            return try Controls(preset: preset)
+            return checked(try Controls(preset: preset), from: "the saved defaults for \(film)")
         } catch {
             fail("Ignored the saved defaults for \(film)", error)
             return nil
         }
+    }
+
+    /// `controls` read from a preset (or a film's saved defaults), which can be edited by hand, made
+    /// what the app can render: every number within its range, and a slide viewed directly, as the
+    /// Print | Film switch has it. Says in the log what it changed, if `source` names the preset.
+    private func checked(_ controls: Controls, from source: String? = nil) -> Controls {
+        var checked = controls.clampedToRanges()
+        if films.first(where: { $0.stock == controls.film })?.type == .positive {
+            checked.scanFilm = true
+        }
+        if let source {
+            let changed = zip(Mirror(reflecting: controls).children, Mirror(reflecting: checked).children)
+                .filter { "\($0.value)" != "\($1.value)" }
+                .compactMap(\.0.label)
+            if !changed.isEmpty {
+                note("Changed \(changed.formatted(.list(type: .and))) from \(source) to what SpektraMac can render")
+            }
+        }
+        return checked
     }
 
     /// `controls` with `film`, its target paper (if it has one) and slides viewed directly.
@@ -856,7 +875,7 @@ final class PhotoModel {
     /// app's own.
     private func resetting(_ adjustment: Adjustment, in controls: Controls) -> Controls {
         let defaults = UserDefaults.standard.data(forKey: Self.defaultsKey(controls.film))
-            .flatMap { try? Controls(preset: $0) } ?? Controls()
+            .flatMap { try? Controls(preset: $0) }.map { checked($0) } ?? Controls()
         var reset = controls
         switch adjustment {
         case .exposure:

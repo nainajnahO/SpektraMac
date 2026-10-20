@@ -90,6 +90,70 @@ public struct Controls: Codable, Sendable, Hashable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(self)
     }
+
+    /// Each number's range: what its slider spans, and what a preset is brought within
+    /// (``clampedToRanges()``). Outside them the engine can stop or render black.
+    public static let ranges: [WritableKeyPath<Controls, Double> & Sendable: ClosedRange<Double>] = {
+        // The paper's contrasts: the tone graph's side points' whole way. By 3 they're at the
+        // paper's black or white (past 4 the middle drifts); below 0.1 they barely move closer to its
+        // mid-grey (measured on Portra Endura, 2383 and Crystal Archive). At 0 the engine stops.
+        let contrast = 0.1...3.0
+        let filterShift = -100.0...100.0
+        // Filters are sold from 1/8 to 2. The size multiplies the glow's width, which a huge one
+        // makes too wide to size its convolution by, stopping the engine.
+        let diffusionStrength = 0.125...2.0, diffusionSize = 0.0...3.0, diffusionWarmth = -1.5...1.5
+        return [
+            // The Exposure slider's −4…+8 stops, from a mark at either end of them.
+            \.exposureOffsetEV: -12...12,
+            \.highlightBoost: 0...10,
+            \.printExposure: 0...2,
+            \.yFilterShift: filterShift,
+            \.mFilterShift: filterShift,
+            \.preflash: 0...0.05,
+            // The tone graph's burn line's whole way: the threshold stays within its −6…+6 stops.
+            \.burnStops: 0...3,
+            \.burnThreshold: 0...6,
+            \.printContrast: contrast,
+            \.printHighlightContrast: contrast,
+            \.printShadowContrast: contrast,
+            \.glareAmount: 0...1,
+            \.glareRoughness: 0...1,
+            \.glareSoftness: 0...3,
+            \.halationAmount: 0...3,
+            \.halationSize: 0...3,
+            \.scatterAmount: 0...1,
+            \.scatterSize: 0...3,
+            // At most 1.5: much stronger inhibition (both at 2, say) breaks Spektrafilm's curves
+            // corrected for it, greys and all, in Python as here.
+            \.couplerSaturation: 0...1.5,
+            \.couplerEdgeContrast: 0...1.5,
+            // Not down to 0: the particle count per pixel divides by the area.
+            \.grainSize: 0.05...2,
+            \.grainSoftness: 0...2,
+            \.cameraDiffusionStrength: diffusionStrength,
+            \.cameraDiffusionSize: diffusionSize,
+            \.cameraDiffusionWarmth: diffusionWarmth,
+            \.enlargerDiffusionStrength: diffusionStrength,
+            \.enlargerDiffusionSize: diffusionSize,
+            \.enlargerDiffusionWarmth: diffusionWarmth,
+        ]
+    }()
+
+    /// `control`'s range (``ranges``).
+    public static func range(_ control: WritableKeyPath<Controls, Double> & Sendable) -> ClosedRange<Double> {
+        guard let range = ranges[control] else { preconditionFailure("No range for \(control)") }
+        return range
+    }
+
+    /// The controls with every number brought within its range: for a preset, which can be edited
+    /// by hand.
+    public func clampedToRanges() -> Controls {
+        var controls = self
+        for (control, range) in Self.ranges {
+            controls[keyPath: control] = min(max(controls[keyPath: control], range.lowerBound), range.upperBound)
+        }
+        return controls
+    }
 }
 
 /// A 3D colour lookup table: `size`³ RGB outputs for inputs evenly spaced over [0, 1], red

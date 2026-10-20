@@ -554,6 +554,48 @@ extension PhotoOpeningTests {
     }
 }
 
+/// Every number of the controls has a range, which holds its default.
+@Test func everyControlHasARange() {
+    let numbers = Mirror(reflecting: Controls()).children.filter { $0.value is Double }
+    #expect(numbers.count == Controls.ranges.count)
+    #expect(Controls().clampedToRanges() == Controls())
+}
+
+/// The values from #189 that stopped the engine or rendered black come within range.
+@Test func presetValuesAreClampedToTheirRanges() {
+    var controls = Controls()
+    controls.printContrast = 0
+    controls.cameraDiffusionSize = 1e20
+    controls.enlargerDiffusionSize = 1e20
+    controls.grainSize = 0
+    controls.exposureOffsetEV = -1000
+    let clamped = controls.clampedToRanges()
+    #expect(clamped.printContrast == Controls.range(\.printContrast).lowerBound)
+    #expect(clamped.cameraDiffusionSize == Controls.range(\.cameraDiffusionSize).upperBound)
+    #expect(clamped.enlargerDiffusionSize == Controls.range(\.enlargerDiffusionSize).upperBound)
+    #expect(clamped.grainSize == Controls.range(\.grainSize).lowerBound)
+    #expect(clamped.exposureOffsetEV == Controls.range(\.exposureOffsetEV).lowerBound)
+}
+
+extension PhotoOpeningTests {
+    /// Those values, clamped, render a photo with every effect without stopping the engine, and
+    /// without NaN or black.
+    @Test func clampedPresetValuesRender() async throws {
+        var controls = Controls()
+        controls.printContrast = 0
+        controls.cameraDiffusion = true
+        controls.cameraDiffusionSize = 1e20
+        controls.enlargerDiffusion = true
+        controls.enlargerDiffusionSize = 1e20
+        controls.grainSize = 0
+        let engine = try Engine()
+        _ = try await engine.open(RGBImage(width: 64, height: 48, pixels: [Float](repeating: 0.18, count: 64 * 48 * 3)).ciImage)
+        let rendered = try await engine.render(controls: controls.clampedToRanges(), mode: .full)
+        #expect(!rendered.pixels.contains { $0.isNaN })
+        #expect(rendered.pixels.contains { $0 > 0.01 })
+    }
+}
+
 /// A preset written and read back is the same controls; its JSON names them plainly.
 @Test func presetRoundTrip() throws {
     var controls = Controls()
