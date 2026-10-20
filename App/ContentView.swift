@@ -198,7 +198,7 @@ private struct ImageCanvas: View {
                 // photo would make that the window's minimum.
                 GeometryReader { _ in
                     let fitted = fittedSize(in: visibleSize)
-                    Image(decorative: model.showsOriginal ? model.original ?? image : image, scale: 1)
+                    Image(model.showsOriginal ? model.original ?? image : image, scale: 1, label: Text(photoDescription))
                         .resizable()
                         .interpolation(.high)
                         .overlay { meteringOverlay }
@@ -328,6 +328,15 @@ private struct ImageCanvas: View {
                 .background(.black)
                 .allowsHitTesting(false)
         }
+    }
+
+    /// What VoiceOver reads for the photo: its name and what it shows.
+    private var photoDescription: String {
+        let name = model.photo?.name ?? "Photo"
+        if model.showsOriginal, model.original != nil {
+            return "\(name), the original"
+        }
+        return model.showsFilm ? "\(name) on \(model.filmName)" : "\(name) on \(model.filmName), printed on \(model.paperName)"
     }
 
     /// The photo's size scaled to fit `size`, with a margin: the photo's own shape, whichever

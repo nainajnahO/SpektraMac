@@ -70,6 +70,11 @@ strip to set the value where you point. The white line marks the current value.
 **Menus.** In the Film, Paper and diffusion filter menus, the photo shows whichever item the pointer is on, so you can
 look through films before choosing one. Closing the menu without choosing puts the photo back.
 
+**VoiceOver and Increase Contrast.** VoiceOver reads each group's name and whether it's open, and each slider's and
+strip's value with its unit. It describes the photo and the tone graph, each as one item. On the Exposure strip,
+VoiceOver's actions (VO-Command-Space) go to each metering mark. With **Increase Contrast** (System Settings ›
+Accessibility › Display), the sliders' fill and value line are stronger.
+
 **Undo.** **Edit › Undo** (⌘Z) takes back the last change to the settings, and **Edit › Redo** (⇧⌘Z) makes it again. A
 whole drag of a slider, strip or the tone graph is one step, as is a choice from a menu, a group's ↩, an opened preset
 and Restore Factory Defaults (which also brings the film's saved defaults back). The settings carry over from photo to

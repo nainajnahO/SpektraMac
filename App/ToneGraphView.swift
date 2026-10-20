@@ -12,7 +12,8 @@ import SwiftUI
 /// the contrasts (``ToneCurveLayer``). With the burn on, shading from a line at its threshold marks
 /// the tones it takes, and a dashed line where they print
 /// (``ToneGraph/Curve/burned(stops:threshold:)``). The sliders under Options and in Enlarger
-/// give exact values, and stand in for it with VoiceOver and the keyboard.
+/// give exact values, and stand in for it with VoiceOver and the keyboard; VoiceOver has the graph
+/// as one element, saying how bright its points print, in place of the chart's marks.
 struct ToneGraphView: View {
     @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
@@ -28,6 +29,9 @@ struct ToneGraphView: View {
             }
             .equatable()
             .opacity(isEnabled ? 1 : 0.5)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Tone curve")
+            .accessibilityValue(description(of: toneGraph))
             .overlay(alignment: .topLeading) {
                 // Where the curve is darkest, so it's clear of the menu.
                 Picker("Curve", selection: $channel) {
@@ -45,6 +49,25 @@ struct ToneGraphView: View {
             RoundedRectangle(cornerRadius: 5).fill(.quaternary)
                 .frame(height: 130)
         }
+    }
+
+    /// What VoiceOver reads for the curve the graph shows: how bright its points print, and where
+    /// the burn starts while it's on.
+    private func description(of toneGraph: (graph: ToneGraph, controls: Controls)) -> String {
+        let controls = model.controls
+        let curve = ToneGraph.Curve(toneGraph.graph, channel: channel).predicted(for: controls, from: toneGraph.controls)
+        let handles = curve.handles(sideDistance: ToneCurveLayer.sideDistance)
+        var text = "\(channel.name) curve."
+        if handles.count == 3 {
+            let bright = handles.map { Double($0.print).formatted(.percent.precision(.fractionLength(0))) }
+            let side = ToneCurveLayer.sideDistance.formatted()
+            text += " The middle point, at \(Double(handles[1].tone).formatted(ExposureStrip.stops)) stops, prints \(bright[1]) bright;"
+                + " \(side) stops under it, \(bright[0]); \(side) stops over, \(bright[2])."
+        }
+        if controls.burn {
+            text += " Burn from \(controls.burnThreshold.formatted(ExposureStrip.stops)) stops."
+        }
+        return text
     }
 
     /// The photo's share at each tone, as the menu shows it (neutral: the layers together), scaled
@@ -136,7 +159,7 @@ private struct ToneCurveLayer: View {
     @State private var hovered: ToneHandle?
 
     /// How far the side points are from the middle one, in stops.
-    private static let sideDistance: Float = 2
+    static let sideDistance: Float = 2
     /// How close to a point the pointer grabs it, in points.
     private static let grabDistance: CGFloat = 10
 
