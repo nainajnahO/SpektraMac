@@ -5,7 +5,7 @@ import simd
 
 /// Spektrafilm's `SimulationPipeline`: the stages between the pipeline taps
 /// (`rgb_in → rgb_pre → log_e_film → cmy_film → log_e_print → cmy_print → rgb_out`), encoded on
-/// the GPU. Grows stage by stage as the port proceeds (PLAN.md).
+/// the GPU.
 /// Holds GPU resources (the film's LUT texture), so it is not Sendable: the Engine actor owns one.
 public struct Simulation {
     /// Seed of the stochastic kernels: fixed, so rendering the same image again draws the same noise.

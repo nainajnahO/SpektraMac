@@ -1,7 +1,6 @@
 import Foundation
 import SpektraEngine
 
-// Grows into `render` and stage-dump commands as the engine is ported (PLAN.md).
 let arguments = CommandLine.arguments.dropFirst()
 switch arguments.first {
 case "benchmark":

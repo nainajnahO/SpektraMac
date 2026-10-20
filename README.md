@@ -125,8 +125,8 @@ There's no download yet. You need macOS 26.5 or newer and [Xcode 27](https://dev
 | `docs/` | User guide |
 
 To run the tests or send a change, see [CONTRIBUTING.md](CONTRIBUTING.md). See the
-[releases](https://github.com/nainajnahO/SpektraMac/releases) for what's changed, [PLAN.md](PLAN.md) for the porting
-plan and the [issues](https://github.com/nainajnahO/SpektraMac/issues) for what's next.
+[releases](https://github.com/nainajnahO/SpektraMac/releases) for what's changed and the
+[issues](https://github.com/nainajnahO/SpektraMac/issues) for what's next.
 
 ## Credits and licence
 
