@@ -35,22 +35,25 @@ one, exposed the same way (see [Exposure](#exposure)), and SpektraMac starts wit
 
 **The photo.** It fits the window to start with.
 
-- **Zoom:** scroll, or pinch on a trackpad, to zoom around the pointer, up to 4 screen points per pixel. Zoomed in,
-  SpektraMac renders the photo at full resolution.
-- **Move:** drag the photo.
-- **Compare:** click the photo to see the original in its place, at the same zoom, and click again to see the film.
-  While the original shows, the window's subtitle reads "Original" and the settings are greyed out. The original is
-  the photo as macOS shows it, as in Preview.
-- **Fit:** double-click to fit the photo again.
+- **Zoom:** pinch on a trackpad, or scroll with ⌥ held, to zoom around the pointer, up to 4 screen points per pixel;
+  or **View › Zoom In** (⌘+) and **Zoom Out** (⌘−). Zoomed in, SpektraMac renders the photo at full resolution.
+- **Move:** scroll with two fingers (or the mouse wheel), or drag the photo, as in Preview.
+- **Compare:** click the photo, or choose **View › Show Original** (M), to see the original in its place, at the same
+  zoom; do it again to see the film. While the original shows, the window's subtitle reads "Original" and the
+  settings are greyed out. The original is the photo as macOS shows it, as in Preview.
+- **Fit:** double-click, or **View › Zoom to Fit** (⌘0), to fit the photo again.
 
 **Show: Print | Film** (the centre of the toolbar).
+
+Or **View › Print** (⌘1) and **View › Film** (⌘2).
 
 - **Print** shows the negative printed on the paper: the finished photo.
 - **Film** shows the developed film itself, as a scanner sees it: the orange negative, or a slide. A slide can only
   be shown as film, because the papers are made for negatives.
 
-**The settings** are on the right. Show or hide them with the **Adjust** button. They're in three tabs that follow
-the light: **Camera**, **Film** and **Print**.
+**The settings** are on the right. Show or hide them with the **Adjust** button or **View › Hide Inspector** (⌃⌘I).
+They're in three tabs that follow the light: **Camera**, **Film** and **Print** (**View › Camera Settings** ⌥⌘1,
+**Film Settings** ⌥⌘2, **Print Settings** ⌥⌘3).
 
 - **Groups:** each tab is made of groups. Click a group's title to fold it.
 - **Reset:** ↩ returns the group to the film's defaults.
@@ -77,7 +80,7 @@ Pro). When you let go, the finished look renders at the size of the window. Rend
 for example when a slider returns to an earlier value.
 
 **Status and Log.** The window's subtitle says what SpektraMac is doing, and the photo's size when it's idle. The
-**Log** button opens a window listing what was opened, rendered and saved, with timings, and any errors: the last
+**Log** button (⌥⌘L) opens a window listing what was opened, rendered and saved, with timings, and any errors: the last
 1,000 entries. The Console app keeps them all (search for SpektraMac). When something you asked for fails (opening a
 photo, saving, exporting a LUT, a preset), an alert says what and why.
 
@@ -313,6 +316,12 @@ The exposure is the Exposure slider's offset.
 | Cancel saving | ⌘. |
 | Undo | ⌘Z |
 | Redo | ⇧⌘Z |
+| Print, Film | ⌘1, ⌘2 |
+| Camera, Film, Print settings | ⌥⌘1, ⌥⌘2, ⌥⌘3 |
+| Show or hide the settings | ⌃⌘I |
+| Zoom in, out, to fit | ⌘+, ⌘−, ⌘0 |
+| Show the original | M |
+| Log | ⌥⌘L |
 | Open Preset | ⇧⌘O |
 | Save Preset | ⇧⌘S |
 
