@@ -1,0 +1,47 @@
+name: Accessibility barrier
+description: Something in SpektraMac gets in the way of an accessibility setting or assistive technology.
+labels: [accessibility]
+body:
+  - type: textarea
+    id: doing
+    attributes:
+      label: What were you trying to do?
+    validations:
+      required: true
+  - type: checkboxes
+    id: using
+    attributes:
+      label: What were you using?
+      options:
+        - label: VoiceOver
+        - label: Voice Control
+        - label: Full Keyboard Access
+        - label: Switch Control
+        - label: Zoom
+        - label: Increase Contrast
+        - label: Reduce Transparency
+        - label: Reduce Motion
+        - label: Something else (say what below)
+  - type: textarea
+    id: barrier
+    attributes:
+      label: What got in the way?
+      description: What you heard, saw or couldn't reach, and what you expected.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: SpektraMac version
+      description: In SpektraMac › About SpektraMac, or the commit you built.
+      placeholder: "1.3"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: In Apple menu › About This Mac.
+      placeholder: "26.5"
+    validations:
+      required: true
