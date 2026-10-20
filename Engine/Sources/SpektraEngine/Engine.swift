@@ -284,13 +284,28 @@ public actor Engine {
         public let meteringOverlays: [MeteringMark: CGImage]
     }
 
+    /// The most pixels on a side of a Metal texture, and of what Core Animation textures: the
+    /// largest photo ``open(_:)`` takes, and the largest ``display(controls:mode:maxPixels:)`` makes.
+    public static let maxSide = 16384
+
+    /// A photo larger than ``maxSide`` on a side: its texture can't be made.
+    public struct PhotoTooLargeError: LocalizedError {
+        public let width: Int
+        public let height: Int
+        public var errorDescription: String? {
+            "The photo is \(width.formatted()) × \(height.formatted()) px, and SpektraMac opens photos up to \(Engine.maxSide.formatted()) px on a side"
+        }
+    }
+
     /// Makes `image` (``RGBImage/decode(contentsOf:)``) the photo renders work on: Core Image
     /// renders it once into a texture, and its preview (at most ``previewMaxSize`` on the long side)
     /// from that on the GPU. Vision looks for the metering marks' regions in the preview, and each
-    /// image is metered once at every mark, in place.
+    /// image is metered once at every mark, in place. Throws ``PhotoTooLargeError`` for a photo over
+    /// ``maxSide`` on a side, keeping the open one.
     public func open(_ image: CIImage) throws -> OpenedPhoto {
         let extent = image.extent.integral
         let (width, height) = (Int(extent.width), Int(extent.height))
+        guard max(width, height) <= Self.maxSide else { throw PhotoTooLargeError(width: width, height: height) }
         // The previous photo goes, and the memory set aside for renders of all of it.
         photo = nil
         releaseFullSizeMemory()
@@ -394,10 +409,10 @@ public actor Engine {
     }
 
     /// ``render(controls:mode:)`` for the screen: 8-bit Display P3, no larger than `maxPixels` on its
-    /// long side. By default that's the most Core Animation can texture, 16384 px, so the canvas
+    /// long side. By default that's the most Core Animation can texture (``maxSide``), so the canvas
     /// zooms into the render's own pixels. Core Image scales larger ones down on the GPU, so only
     /// that comes back from it.
-    public func display(controls: Controls, mode: RenderMode, maxPixels: Int = 16384) throws -> CGImage {
+    public func display(controls: Controls, mode: RenderMode, maxPixels: Int = maxSide) throws -> CGImage {
         let output = try renderTexture(controls: controls, mode: mode).output
         // Core Image puts a texture's first row at the bottom.
         guard let image = CIImage(mtlTexture: output, options: [.colorSpace: Self.outputColorSpace]) else {

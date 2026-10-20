@@ -577,7 +577,8 @@ final class PhotoModel {
         guard let photo, let engine else { return }
         let longSide = reducedLongSide(of: photo)
         let scale = min(1, Double(longSide) / Double(max(photo.width, photo.height)))
-        let bytes = Int(Double(photo.width) * scale) * Int(Double(photo.height) * scale) * 4
+        // At least 1 px a side, as renders are: a canvas narrowed to a sliver fits a panorama 0 px tall.
+        let bytes = max(1, Int(Double(photo.width) * scale)) * max(1, Int(Double(photo.height) * scale)) * 4
         let keys = choices.prefix(finishedRenders.totalCostLimit / 2 / bytes)
             .map { RenderKey(controls: $0, longSide: longSide) }
         preloadTask = Task {

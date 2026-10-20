@@ -102,7 +102,7 @@ public struct RGBImage: Sendable {
     /// `image` scaled down (Lanczos) to at most `maxPixels` on the long side, for the preview and the
     /// screen. Python's `resize_for_preview` resizes bilinearly after an anti-aliasing blur;
     /// Lanczos does both in one. The edges are extended before scaling so the border pixels keep
-    /// full coverage.
+    /// full coverage. At least 1 px on a side: a texture can't be empty.
     static func scaledDown(_ image: CIImage, maxPixels: Int) -> CIImage {
         let (width, height) = (image.extent.width, image.extent.height)
         let scale = Double(maxPixels) / Double(max(width, height))
@@ -110,7 +110,7 @@ public struct RGBImage: Sendable {
         let filter = CIFilter.lanczosScaleTransform()
         filter.inputImage = image.clampedToExtent()
         filter.scale = Float(scale)
-        let size = CGSize(width: (Double(width) * scale).rounded(), height: (Double(height) * scale).rounded())
+        let size = CGSize(width: max(1, (Double(width) * scale).rounded()), height: max(1, (Double(height) * scale).rounded()))
         return filter.outputImage!.cropped(to: CGRect(origin: .zero, size: size))
     }
 

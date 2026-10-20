@@ -537,6 +537,21 @@ extension PhotoOpeningTests {
         render.cancel()
         await #expect(throws: CancellationError.self) { try await render.value }
     }
+
+    /// A photo over ``Engine/maxSide`` on a side is refused, saying why, and the open photo stays
+    /// open. A canvas narrowed to 2 px still gets a render at least 1 px on a side.
+    @Test func photoOverTheTextureLimitIsRefused() async throws {
+        let url = try writePNG([UInt8](repeating: 128, count: 64 * 4 * 3), width: 64, height: 4)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let engine = try Engine()
+        _ = try await engine.open(RGBImage.decode(contentsOf: url))
+        let panorama = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 20_000, height: 5_000))
+        let error = await #expect(throws: Engine.PhotoTooLargeError.self) { try await engine.open(panorama) }
+        #expect(error?.width == 20_000 && error?.height == 5_000)
+        #expect(error?.localizedDescription.contains("px on a side") == true)
+        let sliver = try await engine.display(controls: Controls(), mode: .reduced(longSide: 2))
+        #expect(sliver.width == 2 && sliver.height == 1)
+    }
 }
 
 /// A preset written and read back is the same controls; its JSON names them plainly.
