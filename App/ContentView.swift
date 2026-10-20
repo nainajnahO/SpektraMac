@@ -8,10 +8,18 @@ struct ContentView: View {
     @Environment(\.undoManager) private var undoManager
     @SceneStorage("showsSettings") private var showsSettings = true
     @SceneStorage("settingsCategory") private var category = SettingsCategory.film
+    @FocusState private var isCanvasFocused: Bool
 
     var body: some View {
         @Bindable var model = model
         ImageCanvas()
+            // Focused from the start, as nothing else in the window takes focus on a click, so
+            // Edit › Copy (⌘C) reaches it: the finished photo, as Share sends it.
+            .focusable()
+            .focusEffectDisabled()
+            .focused($isCanvasFocused)
+            .defaultFocus($isCanvasFocused, true)
+            .copyable([model.finishedPhoto].compactMap { $0 })
             .navigationTitle(model.photo?.name ?? "SpektraMac")
             .navigationSubtitle(status)
             .toolbar {
@@ -22,6 +30,7 @@ struct ContentView: View {
                     Button("Open…", systemImage: "folder") { model.isImporting = true }
                     Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
                         .disabled(!model.canSave)
+                    shareButton
                     Button("Log", systemImage: "list.bullet.rectangle") { openWindow(id: "log") }
                     Toggle("Adjust", systemImage: "slider.horizontal.3", isOn: $showsSettings)
                         .help("Show or hide the settings")
@@ -80,6 +89,17 @@ struct ContentView: View {
                presenting: model.failure) { _ in
         } message: { failure in
             Text(failure.message)
+        }
+    }
+
+    /// Share: the finished photo, or a greyed-out button in its place without a photo, so the
+    /// toolbar doesn't move as one opens.
+    @ViewBuilder private var shareButton: some View {
+        if let finished = model.finishedPhoto {
+            ShareLink(item: finished, preview: SharePreview(finished.name))
+        } else {
+            Button("Share", systemImage: "square.and.arrow.up") {}
+                .disabled(true)
         }
     }
 
@@ -223,6 +243,20 @@ private struct ImageCanvas: View {
                         .interpolation(.high)
                         .overlay { meteringOverlay }
                         .overlay { burnOverlay }
+                        .overlay {
+                            // Fitted, a drag takes the finished photo out, to Finder or another
+                            // app; zoomed in, it moves the photo (below).
+                            if zoom == 1, let finished = model.finishedPhoto {
+                                Color.clear
+                                    .contentShape(.rect)
+                                    .draggable(finished) {
+                                        Image(decorative: image, scale: 1)
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(width: 160, height: 160)
+                                    }
+                            }
+                        }
                         .frame(width: fitted.width * zoom, height: fitted.height * zoom)
                         .position(x: visibleCentre.x + offset.width, y: visibleCentre.y + offset.height)
                 }
@@ -234,7 +268,8 @@ private struct ImageCanvas: View {
                         offset = clamped(CGSize(width: start.width + drag.translation.width,
                                                 height: start.height + drag.translation.height))
                     }
-                    .onEnded { _ in dragStart = nil })
+                    .onEnded { _ in dragStart = nil },
+                    including: zoom > 1 ? .all : .subviews)
                 .simultaneousGesture(MagnifyGesture()
                     .onChanged { pinch in
                         zoom(by: pinch.magnification / pinched, at: pinch.startLocation)
