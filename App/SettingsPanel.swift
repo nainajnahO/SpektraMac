@@ -53,7 +53,8 @@ struct SettingsPanel: View {
                     AdjustmentGroup("Couplers", systemImage: "drop.halffull", adjustment: .couplers,
                                     isOn: $model.controls.couplers) {
                         ThumbnailStrip("Saturation", value: $model.controls.couplerSaturation,
-                                       in: model.range(of: .couplerSaturation), step: 0.05, frames: model.strips[.couplerSaturation])
+                                       in: model.range(of: .couplerSaturation), step: 0.05,
+                                       format: .number.precision(.fractionLength(2)), frames: model.strips[.couplerSaturation])
                             .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
                     } options: {
                         ValueSlider("Saturation", value: $model.controls.couplerSaturation,
@@ -104,7 +105,8 @@ struct SettingsPanel: View {
                         }
                         AdjustmentGroup("Enlarger", systemImage: "lightbulb", adjustment: .enlarger) {
                             ThumbnailStrip("Print exposure", value: $model.controls.printExposure,
-                                           in: model.range(of: .printExposure), step: 0.02, frames: model.strips[.printExposure])
+                                           in: model.range(of: .printExposure), step: 0.02,
+                                           format: .number.precision(.fractionLength(2)), frames: model.strips[.printExposure])
                         } options: {
                             ValueSlider("Print exposure", value: $model.controls.printExposure, in: model.range(of: .printExposure),
                                         step: 0.02, neutral: 1, format: .number.precision(.fractionLength(2)))
@@ -192,8 +194,13 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
                             .padding(.top, 7)
                             .padding(.bottom, 14)
                     } label: {
-                        Text("Options")
-                            .foregroundStyle(.secondary)
+                        Button("Options") {
+                            withAnimation(.snappy) { showsOptions.toggle() }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("\(title) options")
+                        .accessibilityValue(showsOptions ? "Expanded" : "Collapsed")
                     }
                     .disclosureGroupStyle(PhotosDisclosureStyle(contentIndent: 0))
                 }
@@ -202,13 +209,23 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
             .disabled(isOn?.wrappedValue == false)
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 14, height: 14)
-                Text(title)
-                    .font(.system(size: 14))
-                Spacer()
+                Button {
+                    withAnimation(.snappy) { isExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: systemImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 14, height: 14)
+                        Text(title)
+                            .font(.system(size: 14))
+                        Spacer()
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(title)
+                .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
                 Button("Reset \(title)", systemImage: "arrow.uturn.backward") { model.reset(adjustment) }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
@@ -235,32 +252,27 @@ extension AdjustmentGroup where Options == EmptyView {
     }
 }
 
-/// Photos' disclosure: a small grey chevron before the label that turns as it opens, the label
-/// also opening it, and the content under it, indented by `contentIndent`. A group (indented)
-/// closed has a line under it, from its symbol.
+/// Photos' disclosure: a small grey chevron before the label that turns as it opens, and the
+/// content under it, indented by `contentIndent`. The label is a button that opens it too, named
+/// with the disclosure and whether it's open, so VoiceOver and the keyboard have that and the
+/// chevron is for the pointer alone. A group (indented) closed has a line under it, from its symbol.
 private struct PhotosDisclosureStyle: DisclosureGroupStyle {
     let contentIndent: CGFloat
 
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
-                Button {
-                    withAnimation(.snappy) { configuration.isExpanded.toggle() }
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 15, height: 22, alignment: .leading)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(configuration.isExpanded ? "Close" : "Open")
-                configuration.label
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 15, height: 22, alignment: .leading)
                     .contentShape(.rect)
                     .onTapGesture {
                         withAnimation(.snappy) { configuration.isExpanded.toggle() }
                     }
+                    .accessibilityHidden(true)
+                configuration.label
             }
             .frame(minHeight: 22)
             if configuration.isExpanded {
@@ -478,13 +490,17 @@ struct ExposureStrip: View {
     var body: some View {
         @Bindable var model = model
         let readings = model.photo.map { photo in
-            MeteringMark.allCases.compactMap { mark in photo.metering.ev[mark.rawValue] }
+            MeteringMark.allCases.compactMap { mark in photo.metering.ev[mark.rawValue].map { (mark: mark, ev: $0) } }
         } ?? []
+        // One dot for marks that meter the same.
+        let marks = Dictionary(grouping: readings) { $0.ev }
+            .map { ev, readings in (name: readings.map(\.mark.name).formatted(.list(type: .and)), value: ev) }
+            .sorted { $0.value < $1.value }
         let here = model.marksAtExposure
         let range = model.exposureRange
         VStack(alignment: .leading, spacing: 6) {
-            ThumbnailStrip("Exposure", value: $model.exposureEV, in: range, step: 0.1, frames: model.strips[.exposure],
-                           marks: Set(readings).sorted()) {
+            ThumbnailStrip("Exposure", value: $model.exposureEV, in: range, step: 0.1, format: Self.stops, unit: "EV",
+                           frames: model.strips[.exposure], marks: marks) {
                 model.isAdjustingExposure = $0
             }
             .sensoryFeedback(.alignment, trigger: here) { _, new in model.isAdjustingExposure && !new.isEmpty }
@@ -617,8 +633,9 @@ extension Parameters.DiffusionFilter.Family {
 /// `neutral` (the lower bound unless given) to the value; under the pointer, a ruler along its top
 /// and the value's line in the accent colour. Dragging anywhere on it moves the value
 /// from where it was, the bar's width for the whole range; with Full Keyboard Access the arrow
-/// keys step it. SwiftUI's `Slider` can't be restyled (there's no slider style to conform to), so
-/// the bar is drawn here, with the system slider standing in for VoiceOver.
+/// keys step it. With Increase Contrast, the fill and the line are stronger. SwiftUI's `Slider`
+/// can't be restyled (there's no slider style to conform to), so the bar is drawn here, with the
+/// system slider standing in for VoiceOver, reading the value as the bar shows it.
 private struct ValueSlider: View {
     let title: String
     @Binding var value: Double
@@ -635,6 +652,7 @@ private struct ValueSlider: View {
     @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorSchemeContrast) private var contrast
 
     init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double, neutral: Double? = nil,
          format: FloatingPointFormatStyle<Double>, unit: String = "", onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
@@ -654,7 +672,7 @@ private struct ValueSlider: View {
         HStack {
             Text(title)
             Spacer(minLength: 8)
-            Text(unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)")
+            Text(valueText)
                 .monospacedDigit()
         }
         .font(.callout)
@@ -666,10 +684,10 @@ private struct ValueSlider: View {
             let isActive = isHovered || dragStart != nil
             ZStack(alignment: .leading) {
                 Rectangle().fill(.quinary)
-                Rectangle().fill(.primary.opacity(0.19))
+                Rectangle().fill(.primary.opacity(contrast == .increased ? 0.35 : 0.19))
                     .frame(width: abs(x - origin))
                     .offset(x: min(x, origin))
-                Rectangle().fill(isActive ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary.opacity(0.22)))
+                Rectangle().fill(isActive ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary.opacity(contrast == .increased ? 0.6 : 0.22)))
                     .frame(width: 3)
                     .offset(x: min(max(x - 1.5, 0), width - 3))
                 if isActive {
@@ -719,7 +737,12 @@ private struct ValueSlider: View {
         }
         .accessibilityRepresentation {
             Slider(value: $value, in: range, step: step) { Text(title) }
+                .accessibilityValue(valueText)
         }
+    }
+
+    private var valueText: String {
+        unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)"
     }
 
     private func endDrag() {
@@ -733,27 +756,33 @@ private struct ValueSlider: View {
 /// (``PhotoModel/Strip``), with a line at the value; `marks` are dots under it. As in Photos, the
 /// value itself shows on the control's bar under Options. Clicking or dragging along it sets the
 /// value there; with Full Keyboard Access the arrow keys step it, and the system slider stands in
-/// for VoiceOver. Drawn here, as Photos' strip isn't one of SwiftUI's or AppKit's controls.
+/// for VoiceOver, reading the value in `format` and `unit`, with an action to go to each mark.
+/// Drawn here, as Photos' strip isn't one of SwiftUI's or AppKit's controls.
 private struct ThumbnailStrip: View {
     let title: String
     @Binding var value: Double
     let range: ClosedRange<Double>
     let step: Double
+    let format: FloatingPointFormatStyle<Double>
+    let unit: String
     /// None until the model has made them.
     let frames: [CGImage]?
-    let marks: [Double]
+    let marks: [(name: String, value: Double)]
     let onEditingChanged: (Bool) -> Void
     @State private var width: CGFloat = 0
     @State private var isDragging = false
     @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
 
-    init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double, frames: [CGImage]?,
-         marks: [Double] = [], onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+    init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double,
+         format: FloatingPointFormatStyle<Double>, unit: String = "", frames: [CGImage]?,
+         marks: [(name: String, value: Double)] = [], onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
         self.title = title
         _value = value
         self.range = range
         self.step = step
+        self.format = format
+        self.unit = unit
         self.frames = frames
         self.marks = marks
         self.onEditingChanged = onEditingChanged
@@ -801,10 +830,10 @@ private struct ThumbnailStrip: View {
             }
             if !marks.isEmpty {
                 ZStack(alignment: .leading) {
-                    ForEach(marks, id: \.self) { mark in
+                    ForEach(marks, id: \.value) { mark in
                         Circle().fill(.secondary)
                             .frame(width: 4, height: 4)
-                            .offset(x: range.fraction(of: mark) * width - 2)
+                            .offset(x: range.fraction(of: mark.value) * width - 2)
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: 4, maxHeight: 4, alignment: .leading)
@@ -821,6 +850,12 @@ private struct ThumbnailStrip: View {
         }
         .accessibilityRepresentation {
             Slider(value: $value, in: range, step: step) { Text(title) }
+                .accessibilityValue(unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)")
+                .accessibilityActions {
+                    ForEach(marks, id: \.value) { mark in
+                        Button(mark.name) { value = mark.value }
+                    }
+                }
         }
     }
 
