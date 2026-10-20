@@ -27,7 +27,7 @@ glow come from how those materials behave rather than from a filter.
 
 A RAW file is developed linearly, as Spektrafilm does: no added contrast, curve or tone mapping, and the camera's
 white balance, so the film gets the light the sensor recorded. A new photo opens with the same settings as the last
-one, exposed the same way (see [Exposure](#exposure)).
+one, exposed the same way (see [Exposure](#exposure)), and SpektraMac starts with the settings it had when you quit.
 
 ## The window
 
@@ -265,7 +265,7 @@ picks the format:
 | PNG | 16 | |
 
 Saved photos are in Display P3, with its colour profile. While it saves, the window's subtitle shows the progress,
-and **Cancel** (⌘.) stops it.
+and **Cancel** (⌘.) stops it. Quitting while it saves asks first, as the photo isn't saved if you quit.
 
 Saving keeps the original's metadata: its EXIF, GPS and IPTC, and the camera's make, model, date, artist and
 copyright. It also records the edit:
