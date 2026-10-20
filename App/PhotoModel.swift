@@ -1,4 +1,5 @@
 import AppKit
+import CoreTransferable
 import Foundation
 import ImageIO
 import Observation
@@ -739,6 +740,28 @@ final class PhotoModel {
         saveTask?.cancel()
     }
 
+    /// The finished photo, for Share, Copy and dragging it out, while a photo is open.
+    var finishedPhoto: FinishedPhoto? {
+        photo.map { FinishedPhoto(model: self, name: ($0.name as NSString).deletingPathExtension) }
+    }
+
+    /// The finished photo as a JPEG named `name`, as Save writes one, in a folder of its own in the
+    /// temporary folder: what Share, Copy and a drag out send (``FinishedPhoto``).
+    func finishedFile(named name: String) async throws -> URL {
+        let engine = try await makingEngine.value
+        let (controls, metadata, record) = (controls, metadata, editRecord)
+        let start = ContinuousClock.now
+        let image = try await engine.export(controls: controls, as: .jpeg)
+        let url = URL.temporaryDirectory.appending(path: UUID().uuidString).appending(path: "\(name).jpg")
+        try await Task.detached(priority: .userInitiated) {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try image.write(to: url, as: .jpeg, metadata: metadata, record: record)
+        }.value
+        let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.seconds, .milliseconds]))
+        note("Rendered \(url.lastPathComponent) to share in \(elapsed)")
+        return url
+    }
+
     /// What a saved photo records of its edit: the film and paper (or the film, scanned), the
     /// exposure as the slider shows it and the adjustments switched on, by their sidebar names.
     private var editRecord: EditRecord {
@@ -1111,5 +1134,20 @@ final class PhotoModel {
         if alert {
             failure = Failure(title: "\(context).", message: error.localizedDescription)
         }
+    }
+}
+
+/// The finished photo as Share, Copy and a drag out send it: a JPEG at full resolution, as Save
+/// writes one, rendered only when what receives it asks (``PhotoModel/finishedFile(named:)``).
+nonisolated struct FinishedPhoto: Transferable {
+    let model: PhotoModel
+    /// The file's name, without its extension: the photo's.
+    let name: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .jpeg) { photo in
+            SentTransferredFile(try await photo.model.finishedFile(named: photo.name))
+        }
+        .suggestedFileName { "\($0.name).jpg" }
     }
 }
