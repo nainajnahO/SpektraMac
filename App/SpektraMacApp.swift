@@ -2,7 +2,8 @@ import SwiftUI
 
 @main
 struct SpektraMacApp: App {
-    @State private var model = PhotoModel()
+    @NSApplicationDelegateAdaptor private var delegate: AppDelegate
+    private var model: PhotoModel { delegate.model }
 
     var body: some Scene {
         Window("SpektraMac", id: "main") {
@@ -47,5 +48,25 @@ struct SpektraMacApp: App {
                 .environment(model)
         }
         .defaultSize(width: 420, height: 480)
+    }
+}
+
+/// Owns the model, so the app can ask before quitting during a save, and keep the settings for the
+/// next launch.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let model = PhotoModel()
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let phase = model.savePhase else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "Quit while saving?"
+        alert.informativeText = "\(phase) If you quit now, the photo isn't saved."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Quit")
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateCancel : .terminateNow
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        model.storeSettings()
     }
 }

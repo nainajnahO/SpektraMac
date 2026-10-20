@@ -235,12 +235,13 @@ final class PhotoModel {
                 note("⚠️ Metal is unavailable: \(error.localizedDescription)")
                 return
             }
-            // The starting film's saved defaults, as choosing it applies them: the reset buttons go
-            // back to them. Once the films are here, so the Print | Film switch knows a slide.
-            if let defaults = savedDefaults(for: controls.film) {
+            // The settings the app quit with, else the starting film's saved defaults, as choosing it
+            // applies them: the reset buttons go back to them. Once the films are here, to check them
+            // against, and so the Print | Film switch knows a slide.
+            if let start = lastSettings() ?? savedDefaults(for: controls.film) {
                 // Where the app starts, not an edit to undo.
                 undoManager?.disableUndoRegistration()
-                controls = defaults
+                controls = start
                 undoManager?.enableUndoRegistration()
             }
             // On the engine's queue, so the first photo opened doesn't wait for it.
@@ -808,8 +809,7 @@ final class PhotoModel {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let preset = try Controls(preset: Data(contentsOf: url))
-            guard films.contains(where: { $0.stock == preset.film }),
-                  papers.contains(where: { $0.stock == preset.paper }) else {
+            guard knowsStocks(of: preset) else {
                 throw CocoaError(.fileReadCorruptFile, userInfo: [
                     NSLocalizedDescriptionKey: "Unknown film or paper (\(preset.film), \(preset.paper))",
                 ])
@@ -820,6 +820,36 @@ final class PhotoModel {
             note("Opened preset \(url.lastPathComponent)")
         } catch {
             fail("Couldn't open the preset", error, alert: true)
+        }
+    }
+
+    /// Whether `controls`' film and paper are among those the app has.
+    private func knowsStocks(of controls: Controls) -> Bool {
+        films.contains { $0.stock == controls.film } && papers.contains { $0.stock == controls.paper }
+    }
+
+    private static let lastSettingsKey = "lastSettings"
+
+    /// Keeps the controls for the next launch, which starts with them (``lastSettings()``): the app
+    /// calls it as it quits.
+    func storeSettings() {
+        do {
+            try UserDefaults.standard.set(controls.preset(), forKey: Self.lastSettingsKey)
+        } catch {
+            logger.error("Could not keep the settings: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// The settings the app last quit with, checked as a preset is; none if their film or paper is
+    /// gone.
+    private func lastSettings() -> Controls? {
+        guard let preset = UserDefaults.standard.data(forKey: Self.lastSettingsKey) else { return nil }
+        do {
+            let settings = try Controls(preset: preset)
+            return knowsStocks(of: settings) ? checked(settings, from: "the last settings") : nil
+        } catch {
+            fail("Ignored the last settings", error)
+            return nil
         }
     }
 
