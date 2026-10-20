@@ -137,7 +137,7 @@ private struct SettingsPanel: View {
                         ValueSlider("Exposure", value: $model.exposureEV, in: model.exposureRange, step: 0.1, neutral: 0,
                                     format: ExposureStrip.stops, unit: "EV")
                             .disabled(model.photo == nil)
-                        ValueSlider("Highlight boost", value: $model.controls.highlightBoost, in: 0...10, step: 0.5,
+                        ValueSlider("Highlight boost", value: $model.controls.highlightBoost, in: Controls.range(\.highlightBoost), step: 0.5,
                                     format: .number.precision(.fractionLength(1)), unit: "EV")
                             .help("Raises the brightest highlights before they reach the film, rebuilding light the camera clipped, so bright lights glow more.")
                     }
@@ -149,22 +149,20 @@ private struct SettingsPanel: View {
                               controls: $model.controls, choosing: model.controls(choosing:))
                     AdjustmentGroup("Halation", systemImage: "sun.haze", adjustment: .halation,
                                     isOn: $model.controls.halation) {
-                        ValueSlider("Strength", value: $model.controls.halationAmount, in: 0...3, step: 0.05, neutral: 1,
+                        ValueSlider("Strength", value: $model.controls.halationAmount, in: Controls.range(\.halationAmount), step: 0.05, neutral: 1,
                                     format: .number.precision(.fractionLength(2)))
                             .help("The glow from light bouncing back off the film base, over the film's own.")
                     } options: {
-                        ValueSlider("Size", value: $model.controls.halationSize, in: 0...3, step: 0.05, neutral: 1,
+                        ValueSlider("Size", value: $model.controls.halationSize, in: Controls.range(\.halationSize), step: 0.05, neutral: 1,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How far the glow reaches, over the film's own.")
-                        ValueSlider("Scatter", value: $model.controls.scatterAmount, in: 0...1, step: 0.05,
+                        ValueSlider("Scatter", value: $model.controls.scatterAmount, in: Controls.range(\.scatterAmount), step: 0.05,
                                     format: .number.precision(.fractionLength(2)))
                             .help("Light spreading inside the emulsion, which softens fine detail.")
-                        ValueSlider("Scatter size", value: $model.controls.scatterSize, in: 0...3, step: 0.05, neutral: 1,
+                        ValueSlider("Scatter size", value: $model.controls.scatterSize, in: Controls.range(\.scatterSize), step: 0.05, neutral: 1,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How far light spreads inside the emulsion, over the film's own.")
                     }
-                    // At most 1.5: much stronger inhibition (both at 2, say) breaks Spektrafilm's
-                    // curves corrected for it, greys and all, in Python as here.
                     AdjustmentGroup("Couplers", systemImage: "drop.halffull", adjustment: .couplers,
                                     isOn: $model.controls.couplers) {
                         ThumbnailStrip("Saturation", value: $model.controls.couplerSaturation,
@@ -175,17 +173,16 @@ private struct SettingsPanel: View {
                                     in: model.range(of: .couplerSaturation), step: 0.05, neutral: 1,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
-                        ValueSlider("Edge contrast", value: $model.controls.couplerEdgeContrast, in: 0...1.5, step: 0.05, neutral: 1,
+                        ValueSlider("Edge contrast", value: $model.controls.couplerEdgeContrast, in: Controls.range(\.couplerEdgeContrast), step: 0.05, neutral: 1,
                                     format: .number.precision(.fractionLength(2)))
                             .help("How strongly each layer holds back its own development nearby: more gives crisper edges in fine detail. The overall contrast stays the film's.")
                     }
                     AdjustmentGroup("Grain", systemImage: "aqi.medium", adjustment: .grain, isOn: $model.controls.grain) {
-                        // Not down to 0: the particle count per pixel divides by the area.
-                        ValueSlider("Size", value: $model.controls.grainSize, in: 0.05...2, step: 0.05,
+                        ValueSlider("Size", value: $model.controls.grainSize, in: Controls.range(\.grainSize), step: 0.05,
                                     format: .number.precision(.fractionLength(2)), unit: "µm²")
                             .help("The area of one silver halide particle: about 0.1 µm² for ISO 100, 0.4 µm² for ISO 400.")
                     } options: {
-                        ValueSlider("Softness", value: $model.controls.grainSoftness, in: 0...2, step: 0.05,
+                        ValueSlider("Softness", value: $model.controls.grainSoftness, in: Controls.range(\.grainSoftness), step: 0.05,
                                     format: .number.precision(.fractionLength(2)), unit: "px")
                             .help("The blur over the grain, in pixels of the render.")
                     }
@@ -206,15 +203,15 @@ private struct SettingsPanel: View {
                         AdjustmentGroup("Contrast", systemImage: "circle.lefthalf.filled", adjustment: .contrast) {
                             ToneGraphView()
                         } options: {
-                            ValueSlider("Contrast", value: $model.controls.printContrast, in: ToneGraphView.contrastRange,
+                            ValueSlider("Contrast", value: $model.controls.printContrast, in: Controls.range(\.printContrast),
                                         step: 0.05, neutral: 1, format: .number.precision(.fractionLength(2)))
                                 .help("The paper's contrast around mid-grey: lower brings a bright sky and dark faces closer together.")
                             ValueSlider("Highlight contrast", value: $model.controls.printHighlightContrast,
-                                        in: ToneGraphView.contrastRange, step: 0.05, neutral: 1,
+                                        in: Controls.range(\.printHighlightContrast), step: 0.05, neutral: 1,
                                         format: .number.precision(.fractionLength(2)))
                                 .help("The paper's contrast in the light tones alone: lower keeps more detail in a bright sky.")
                             ValueSlider("Shadow contrast", value: $model.controls.printShadowContrast,
-                                        in: ToneGraphView.contrastRange, step: 0.05, neutral: 1,
+                                        in: Controls.range(\.printShadowContrast), step: 0.05, neutral: 1,
                                         format: .number.precision(.fractionLength(2)))
                                 .help("The paper's contrast in the dark tones alone: lower opens up faces in shadow.")
                         }
@@ -224,23 +221,23 @@ private struct SettingsPanel: View {
                         } options: {
                             ValueSlider("Print exposure", value: $model.controls.printExposure, in: model.range(of: .printExposure),
                                         step: 0.02, neutral: 1, format: .number.precision(.fractionLength(2)))
-                            ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: -100...100, step: 1, neutral: 0,
+                            ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: Controls.range(\.yFilterShift), step: 1, neutral: 0,
                                         format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
                                         unit: "CC")
-                            ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: -100...100, step: 1, neutral: 0,
+                            ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: Controls.range(\.mFilterShift), step: 1, neutral: 0,
                                         format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
                                         unit: "CC")
-                            ValueSlider("Preflash", value: $model.controls.preflash, in: 0...0.05, step: 0.001,
+                            ValueSlider("Preflash", value: $model.controls.preflash, in: Controls.range(\.preflash), step: 0.001,
                                         format: .number.precision(.fractionLength(3)))
                                 .help("A flash of plain light on the paper before the print, so light tones such as a bright sky gain some tone. It darkens the whole print: lower the print exposure to bring the mid-tones back.")
                         }
                         AdjustmentGroup("Burn", systemImage: "sun.horizon", adjustment: .burn, isOn: $model.controls.burn) {
-                            ValueSlider("Strength", value: $model.controls.burnStops, in: ToneGraphView.burnStopsRange, step: 0.1,
+                            ValueSlider("Strength", value: $model.controls.burnStops, in: Controls.range(\.burnStops), step: 0.1,
                                         format: .number.precision(.fractionLength(1)), unit: "EV") {
                                 model.isAdjustingBurn = $0
                             }
                             .help("Extra enlarger exposure where the photo is bright, as a darkroom printer burns in a sky: a pale sky darkens and gets its colour back, and the rest of the print stays as it is.")
-                            ValueSlider("Threshold", value: $model.controls.burnThreshold, in: ToneGraphView.burnThresholdRange,
+                            ValueSlider("Threshold", value: $model.controls.burnThreshold, in: Controls.range(\.burnThreshold),
                                         step: 0.1, format: ExposureStrip.stops, unit: "EV") {
                                 model.isAdjustingBurn = $0
                             }
@@ -251,14 +248,14 @@ private struct SettingsPanel: View {
                                        strength: \.enlargerDiffusionStrength, size: \.enlargerDiffusionSize,
                                        warmth: \.enlargerDiffusionWarmth)
                         AdjustmentGroup("Glare", systemImage: "sun.max", adjustment: .glare, isOn: $model.controls.glare) {
-                            ValueSlider("Amount", value: $model.controls.glareAmount, in: 0...1, step: 0.01,
+                            ValueSlider("Amount", value: $model.controls.glareAmount, in: Controls.range(\.glareAmount), step: 0.01,
                                         format: .number.precision(.fractionLength(2)), unit: "%")
                                 .help("Stray light over the print as it's viewed, in percent of the light: it lifts the blacks.")
                         } options: {
-                            ValueSlider("Roughness", value: $model.controls.glareRoughness, in: 0...1, step: 0.05,
+                            ValueSlider("Roughness", value: $model.controls.glareRoughness, in: Controls.range(\.glareRoughness), step: 0.05,
                                         format: .number.precision(.fractionLength(2)))
                                 .help("How unevenly the stray light falls.")
-                            ValueSlider("Softness", value: $model.controls.glareSoftness, in: 0...3, step: 0.1,
+                            ValueSlider("Softness", value: $model.controls.glareSoftness, in: Controls.range(\.glareSoftness), step: 0.1,
                                         format: .number.precision(.fractionLength(1)), unit: "px")
                                 .help("The blur over the stray light, in pixels of the render.")
                         }
@@ -686,9 +683,9 @@ private struct DiffusionGroup: View {
     let adjustment: PhotoModel.Adjustment
     let isOn: WritableKeyPath<Controls, Bool>
     let family: WritableKeyPath<Controls, Parameters.DiffusionFilter.Family>
-    let strength: WritableKeyPath<Controls, Double>
-    let size: WritableKeyPath<Controls, Double>
-    let warmth: WritableKeyPath<Controls, Double>
+    let strength: WritableKeyPath<Controls, Double> & Sendable
+    let size: WritableKeyPath<Controls, Double> & Sendable
+    let warmth: WritableKeyPath<Controls, Double> & Sendable
 
     var body: some View {
         @Bindable var model = model
@@ -703,14 +700,14 @@ private struct DiffusionGroup: View {
                 return choosing
             }
             .help("Glimmerglass keeps detail and glows faintly; Black Pro-Mist gives a tight, punchy halo; Pro-Mist a broader pastel haze; CineBloom a wide glow that lifts the whole frame.")
-            ValueSlider("Strength", value: controls[dynamicMember: strength], in: 0.125...2, step: 0.125,
+            ValueSlider("Strength", value: controls[dynamicMember: strength], in: Controls.range(strength), step: 0.125,
                         format: .number.precision(.fractionLength(0...3)))
                 .help("The filter's grade, as filters are sold: 1/8, 1/4, 1/2, 1 and 2. Stronger spreads more of the light into the glow.")
         } options: {
-            ValueSlider("Size", value: controls[dynamicMember: size], in: 0...3, step: 0.05, neutral: 1,
+            ValueSlider("Size", value: controls[dynamicMember: size], in: Controls.range(size), step: 0.05, neutral: 1,
                         format: .number.precision(.fractionLength(2)))
                 .help("How far the glow reaches, over the filter's own.")
-            ValueSlider("Warmth", value: controls[dynamicMember: warmth], in: -1.5...1.5, step: 0.05, neutral: 0,
+            ValueSlider("Warmth", value: controls[dynamicMember: warmth], in: Controls.range(warmth), step: 0.05, neutral: 0,
                         format: .number.precision(.fractionLength(2)).sign(strategy: .always(includingZero: false)))
                 .help("Warmer light at the glow's outer rim and cooler at its centre, over the filter's own; below 0, the reverse.")
         }
@@ -981,14 +978,6 @@ private struct ToneGraphView: View {
     @Environment(\.isEnabled) private var isEnabled
     @SceneStorage("toneGraph.channel") private var channel = ToneChannel.neutral
 
-    /// The contrasts' range, their sliders' too: the side points' whole way. By 3 they're at the
-    /// paper's black or white (past 4 the middle drifts); below 0.1 they barely move closer to its
-    /// mid-grey (measured on Portra Endura, 2383 and Crystal Archive).
-    static let contrastRange = 0.1...3.0
-    /// The burn's strength (EV) and threshold (stops over mid-grey), their sliders' too: its line's
-    /// whole way. The threshold stays within ``tones``.
-    static let burnStopsRange = 0.0...3.0
-    static let burnThresholdRange = 0.0...6.0
     /// The tones the graph shows: the print is black or white past them.
     static let tones: ClosedRange<Float> = -6...6
 
@@ -1310,7 +1299,7 @@ private struct ToneCurveLayer: View {
             // The middle point is where the paper's exposure is 0, and the print exposure adds its
             // log₁₀ to it: this puts 0 at the pointer's tone.
             let paper = curve.value(of: curve.paper, at: drag.tone + drag.moved.x)
-            set(\.printExposure, to: rendered.printExposure * pow(10, -Double(paper)), in: model.range(of: .printExposure))
+            set(\.printExposure, to: rendered.printExposure * pow(10, -Double(paper)))
         case .shadows:
             scale(\.printShadowContrast, of: curve, rendered: rendered, at: drag.tone, to: drag.print + drag.moved.y)
         case .highlights:
@@ -1320,28 +1309,27 @@ private struct ToneCurveLayer: View {
         case .burn:
             // The line follows the pointer sideways; down burns more, the graph's height for the
             // strength's whole range.
-            let strengths = ToneGraphView.burnStopsRange
-            set(\.burnThreshold, to: drag.controls.burnThreshold + Double(drag.moved.x),
-                in: ToneGraphView.burnThresholdRange)
-            set(\.burnStops, to: drag.controls.burnStops - Double(drag.moved.y) * (strengths.upperBound - strengths.lowerBound),
-                in: strengths)
+            let strengths = Controls.range(\.burnStops)
+            set(\.burnThreshold, to: drag.controls.burnThreshold + Double(drag.moved.x))
+            set(\.burnStops, to: drag.controls.burnStops - Double(drag.moved.y) * (strengths.upperBound - strengths.lowerBound))
         }
     }
 
     /// The contrasts scale the paper's response about its exposure 0 (``ToneGraph/Point/paper``): a
     /// factor f gives exposure E the response `curve` has at f·E. So for brightness `print` at
     /// `tone`, f is the paper's exposure where `curve` has that brightness, over the one at `tone`.
-    private func scale(_ contrast: WritableKeyPath<Controls, Double>, of curve: ToneCurve, rendered: Controls,
+    private func scale(_ contrast: WritableKeyPath<Controls, Double> & Sendable, of curve: ToneCurve, rendered: Controls,
                        at tone: Float, to print: Float) {
         let reached = curve.tone(where: curve.print, is: print, near: tone)
         let factor = curve.value(of: curve.paper, at: reached) / curve.value(of: curve.paper, at: tone)
         guard factor.isFinite else { return }
-        set(contrast, to: rendered[keyPath: contrast] * Double(max(factor, 0)), in: ToneGraphView.contrastRange)
+        set(contrast, to: rendered[keyPath: contrast] * Double(max(factor, 0)))
     }
 
-    /// Sets `control` to `value` within `range`, to a ten-thousandth: finer than shows, so the drag
-    /// is smooth, and a new curve that agrees changes nothing.
-    private func set(_ control: WritableKeyPath<Controls, Double>, to value: Double, in range: ClosedRange<Double>) {
+    /// Sets `control` to `value` within its range, to a ten-thousandth: finer than shows, so the
+    /// drag is smooth, and a new curve that agrees changes nothing.
+    private func set(_ control: WritableKeyPath<Controls, Double> & Sendable, to value: Double) {
+        let range = Controls.range(control)
         let value = min(max((value * 10_000).rounded() / 10_000, range.lowerBound), range.upperBound)
         // Setting the controls renders, even to what they are.
         if model.controls[keyPath: control] != value {
