@@ -20,7 +20,6 @@
 </p>
 
 <p align="center">
-  <a href="https://nainajnaho.github.io/SpektraMac/">Website</a> ·
   <a href="docs/guide.md">User guide</a> ·
   <a href="https://github.com/nainajnahO/SpektraMac/releases">Releases</a> ·
   <a href="#build-from-source">Build from source</a>
@@ -31,7 +30,7 @@
 ## Film looks
 
 Each render is the whole simulation: the film's exposure and development, a print on paper (or, for a slide, the
-film itself) and its scan. Compare them with the originals on the [website](https://nainajnaho.github.io/SpektraMac/#looks).
+film itself) and its scan.
 
 <table>
   <tr>
@@ -122,7 +121,7 @@ There's no download yet. You need macOS 26.5 or newer and [Xcode 27](https://dev
 | `App/` | SwiftUI app |
 | `Engine/` | `SpektraEngine` Swift package (Metal shaders, host code, tests) and the `spektra-cli` tool |
 | `Engine/Sources/SpektraEngine/Resources/` | Film and paper profiles and spectral tables exported from Spektrafilm |
-| `docs/` | User guide and the website, served by GitHub Pages |
+| `docs/` | User guide |
 
 To run the tests or send a change, see [CONTRIBUTING.md](CONTRIBUTING.md). See the
 [releases](https://github.com/nainajnahO/SpektraMac/releases) for what's changed, [PLAN.md](PLAN.md) for the porting
