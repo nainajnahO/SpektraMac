@@ -81,9 +81,8 @@ how much in the pull request. Anything meant to render differently from Spektraf
 ## Pull requests
 
 - One issue per branch, cut from the latest `main`.
-- The description starts with `Closes #` and the issue's number, then says what changed and why, and:
-  - **Tests:** what you ran: the engine's tests, whether the parity tests ran, and the Release build.
-  - **Not yet tried on the Mac:** what still needs someone to look at or try in the app, and how.
+- Fill in the description's template: the issue it closes, what changed and why, the tests you ran, and what's not
+  yet tried on the Mac.
 - Pull requests are squash-merged, so the title becomes the commit on `main`.
 
 ## Licence
