@@ -817,11 +817,13 @@ private struct ValueSlider: View {
                 guard width > 0 else { return }
                 set(start + drag.translation.width / width * (range.upperBound - range.lowerBound))
             }
-            .onEnded { _ in
-                dragStart = nil
-                model.isAdjusting = false
-                onEditingChanged(false)
-            })
+            .onEnded { _ in endDrag() })
+        // A drag cut off as the slider goes (its window closed, say) never ends otherwise.
+        .onDisappear {
+            if dragStart != nil {
+                endDrag()
+            }
+        }
         .focusable(interactions: .activate)
         .onMoveCommand { direction in
             switch direction {
@@ -843,6 +845,12 @@ private struct ValueSlider: View {
     private func set(_ newValue: Double) {
         let stepped = range.lowerBound + ((newValue - range.lowerBound) / step).rounded() * step
         value = min(max(stepped, range.lowerBound), range.upperBound)
+    }
+
+    private func endDrag() {
+        dragStart = nil
+        model.isAdjusting = false
+        onEditingChanged(false)
     }
 }
 
@@ -909,11 +917,13 @@ private struct ThumbnailStrip: View {
                     guard width > 0 else { return }
                     set(range.lowerBound + drag.location.x / width * (range.upperBound - range.lowerBound))
                 }
-                .onEnded { _ in
-                    isDragging = false
-                    model.isAdjusting = false
-                    onEditingChanged(false)
-                })
+                .onEnded { _ in endDrag() })
+            // A drag cut off as the strip goes (its window closed, say) never ends otherwise.
+            .onDisappear {
+                if isDragging {
+                    endDrag()
+                }
+            }
             if !marks.isEmpty {
                 ZStack(alignment: .leading) {
                     ForEach(marks, id: \.self) { mark in
@@ -947,6 +957,12 @@ private struct ThumbnailStrip: View {
     private func set(_ newValue: Double) {
         let stepped = range.lowerBound + ((newValue - range.lowerBound) / step).rounded() * step
         value = min(max(stepped, range.lowerBound), range.upperBound)
+    }
+
+    private func endDrag() {
+        isDragging = false
+        model.isAdjusting = false
+        onEditingChanged(false)
     }
 }
 
@@ -1178,16 +1194,7 @@ private struct ToneCurveLayer: View {
                         self.drag = drag
                         move(drag)
                     }
-                    .onEnded { _ in
-                        if let drag {
-                            model.isAdjusting = false
-                            if drag.handle == .burn {
-                                model.isAdjustingBurn = false
-                            }
-                        }
-                        isPressed = false
-                        drag = nil
-                    })
+                    .onEnded { _ in endDrag() })
                 .onContinuousHover { phase in
                     switch phase {
                     case .active(let location) where isEnabled:
@@ -1212,6 +1219,23 @@ private struct ToneCurveLayer: View {
                 move(drag)
             }
         }
+        // A drag cut off as the graph goes (its window closed, say) never ends otherwise.
+        .onDisappear {
+            if isPressed {
+                endDrag()
+            }
+        }
+    }
+
+    private func endDrag() {
+        if let drag {
+            model.isAdjusting = false
+            if drag.handle == .burn {
+                model.isAdjustingBurn = false
+            }
+        }
+        isPressed = false
+        drag = nil
     }
 
     /// `position` (tone, brightness) in the view, if the chart has scales.

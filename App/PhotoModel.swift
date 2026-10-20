@@ -144,10 +144,12 @@ final class PhotoModel {
     /// The render `displayImage` comes from.
     private(set) var shownMode: RenderMode?
     /// The photo's long side fitted on the canvas, in screen pixels: what renders are reduced to
-    /// until the canvas may show more. A new size renders a reduced render on screen again.
+    /// until the canvas may show more. A new size renders a reduced render on screen again, or one
+    /// still rendering at the old size.
     var canvasLongSide = 0 {
         didSet {
-            if canvasLongSide != oldValue && awaitsFullResolution {
+            let rendersReduced = isRendering && !isRenderingFullResolution
+            if canvasLongSide != oldValue && (awaitsFullResolution || rendersReduced) {
                 render(from: .resized)
             }
         }
@@ -248,14 +250,10 @@ final class PhotoModel {
                 }.value
                 guard generation == opensStarted else { return }
                 // The engine opens the photo once it's done rendering the last one: stop that.
-                renderTask?.cancel()
+                stopRendering()
                 stripTask?.cancel()
                 stripTask = nil
                 stopPreloading()
-                isRendering = false
-                isRenderingFullResolution = false
-                awaitsFullResolution = false
-                isPreviewing = false
                 let opened: Engine.OpenedPhoto
                 do {
                     opened = try await engine.open(image)
@@ -348,18 +346,13 @@ final class PhotoModel {
         // A preview in flight shows, then renders the newest controls: cancelling it at each step
         // of a slider would leave none on screen until the slider pauses.
         guard start != .preview || !isPreviewing else { return }
-        renderTask?.cancel()
+        stopRendering()
         if start == .preview {
             stripTask?.cancel()
             stripTask = nil
         }
-        isPreviewing = false
-        isRenderingFullResolution = false
-        awaitsFullResolution = false
-        awaitsRelease = false
         guard let photo, let engine else {
             displayImage = nil
-            isRendering = false
             return
         }
         isRendering = start == .reduced || start == .full
@@ -412,6 +405,17 @@ final class PhotoModel {
             isRendering = false
             isRenderingFullResolution = false
         }
+    }
+
+    /// Stops the render under way, and what waits on one: a slider's release, or zooming in for the
+    /// whole photo.
+    private func stopRendering() {
+        renderTask?.cancel()
+        isPreviewing = false
+        isRendering = false
+        isRenderingFullResolution = false
+        awaitsFullResolution = false
+        awaitsRelease = false
     }
 
     /// The long side renders are reduced to: the canvas's (the preview's before it has a size).
