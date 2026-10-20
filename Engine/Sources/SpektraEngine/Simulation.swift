@@ -53,9 +53,9 @@ public struct Simulation {
     /// The pixel format of the filming steps' intermediates (see ``init(parameters:film:print:gpu:tables:cache:intermediateFormat:)``).
     let intermediateFormat: MTLPixelFormat
 
-    public struct UnknownColourSpace: Error, CustomStringConvertible {
+    public struct UnknownColourSpace: LocalizedError {
         public let name: String
-        public var description: String { "Unknown colour space \(name)" }
+        public var errorDescription: String? { "Unknown colour space \(name)" }
     }
 
     /// `cache` keeps the costliest tables for the next simulation built with it.

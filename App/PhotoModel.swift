@@ -177,6 +177,15 @@ final class PhotoModel {
     /// What saving is doing, while it runs.
     private(set) var savePhase: String?
     private(set) var errorMessage: String?
+    /// Something the user asked for that failed (opening, saving, exporting, presets), for the
+    /// window's alert, until it's dismissed.
+    struct Failure {
+        let title: String
+        let message: String
+    }
+    var failure: Failure?
+    /// Why there's no engine: Metal is unavailable. The empty canvas says so.
+    private(set) var engineFailure: String?
     private(set) var log: [LogEntry] = []
     /// Drives the Open panel (`fileImporter`); ⌘O and the toolbar set it.
     var isImporting = false
@@ -187,6 +196,9 @@ final class PhotoModel {
     /// 0.5 s on the first launch after a build, as Metal compiles the shaders. The Film and Paper
     /// menus fill, and photos open, once it's here.
     private var engine: Engine?
+    /// The engine being made, which opening a photo waits for: one dropped as the app starts opens
+    /// once it's here.
+    private let makingEngine: Task<Engine, any Error>
     private let logger = Logger(subsystem: "nainajnahO.SpektraMac", category: "model")
     private var renderTask: Task<Void, Never>?
     /// Finished renders at the canvas's size for the open photo, by the controls they show: going
@@ -204,11 +216,13 @@ final class PhotoModel {
 
     init() {
         let making = Task.detached(priority: .userInitiated) { try Engine() }
+        makingEngine = making
         Task {
             do {
                 engine = try await making.value
             } catch {
-                errorMessage = "Metal is unavailable: \(error.localizedDescription)"
+                engineFailure = error.localizedDescription
+                note("⚠️ Metal is unavailable: \(error.localizedDescription)")
                 return
             }
             // The starting film's saved defaults, as choosing it applies them: the reset buttons go
@@ -235,7 +249,6 @@ final class PhotoModel {
     /// a moment), and one the engine is already opening shows until the later one replaces it.
     /// "Opening…" stays until the newest is done.
     func open(_ url: URL) {
-        guard let engine else { return }
         // Files from the Open panel are security-scoped; dropped files are already accessible.
         let scoped = url.startAccessingSecurityScopedResource()
         opensStarted += 1
@@ -250,6 +263,7 @@ final class PhotoModel {
                 }
             }
             do {
+                let engine = try await makingEngine.value
                 let (image, metadata) = try await Task.detached(priority: .userInitiated) {
                     (try RGBImage.decode(contentsOf: url), PhotoMetadata(contentsOf: url))
                 }.value
@@ -276,7 +290,7 @@ final class PhotoModel {
             } catch {
                 // A photo chosen since says how it went instead.
                 guard generation == opensStarted else { return }
-                fail("Could not open \(url.lastPathComponent)", error)
+                fail("Couldn't open “\(url.lastPathComponent)”", error, alert: true)
             }
         }
     }
@@ -318,7 +332,7 @@ final class PhotoModel {
     }
 
     func importFailed(_ error: Error) {
-        fail("Could not open the file", error)
+        fail("Couldn't open the file", error, alert: true)
     }
 
     // MARK: Rendering
@@ -673,7 +687,7 @@ final class PhotoModel {
             } catch is CancellationError {
                 note("Cancelled saving \(url.lastPathComponent)")
             } catch {
-                fail("Could not save \(url.lastPathComponent)", error)
+                fail("Couldn't save “\(url.lastPathComponent)”", error, alert: true)
             }
         }
     }
@@ -751,7 +765,7 @@ final class PhotoModel {
                     .write(to: url, options: .atomic)
                 note("Exported LUT \(url.lastPathComponent) at \(stops) EV")
             } catch {
-                fail("Could not export the LUT", error)
+                fail("Couldn't export the LUT", error, alert: true)
             }
         }
     }
@@ -770,7 +784,7 @@ final class PhotoModel {
             try controls.preset().write(to: url, options: .atomic)
             note("Saved preset \(url.lastPathComponent)")
         } catch {
-            fail("Could not save the preset", error)
+            fail("Couldn't save the preset", error, alert: true)
         }
     }
 
@@ -789,7 +803,7 @@ final class PhotoModel {
             controls = checked(preset, from: url.lastPathComponent)
             note("Opened preset \(url.lastPathComponent)")
         } catch {
-            fail("Could not open the preset", error)
+            fail("Couldn't open the preset", error, alert: true)
         }
     }
 
@@ -799,7 +813,7 @@ final class PhotoModel {
             try UserDefaults.standard.set(controls.preset(), forKey: Self.defaultsKey(controls.film))
             note("Made these settings the default for \(filmName)")
         } catch {
-            fail("Could not save the default for \(filmName)", error)
+            fail("Couldn't make these settings the default for \(filmName)", error, alert: true)
         }
     }
 
@@ -944,8 +958,13 @@ final class PhotoModel {
         logger.notice("\(message, privacy: .public)")
     }
 
-    private func fail(_ context: String, _ error: Error) {
+    /// Shows `error` under the window's title and logs it; for something the user asked for, also
+    /// in an alert (`alert`), titled with `context`.
+    private func fail(_ context: String, _ error: Error, alert: Bool = false) {
         errorMessage = "\(context): \(error.localizedDescription)"
         note("⚠️ \(errorMessage ?? context)")
+        if alert {
+            failure = Failure(title: "\(context).", message: error.localizedDescription)
+        }
     }
 }
