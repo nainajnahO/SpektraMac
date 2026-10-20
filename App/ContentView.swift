@@ -244,20 +244,6 @@ private struct ImageCanvas: View {
                         .interpolation(.high)
                         .overlay { meteringOverlay }
                         .overlay { burnOverlay }
-                        .overlay {
-                            // Fitted, a drag takes the finished photo out, to Finder or another
-                            // app; zoomed in, it moves the photo (below).
-                            if zoom == 1, let finished = model.finishedPhoto {
-                                Color.clear
-                                    .contentShape(.rect)
-                                    .draggable(finished) {
-                                        Image(decorative: image, scale: 1)
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 160, height: 160)
-                                    }
-                            }
-                        }
                         .frame(width: fitted.width * zoom, height: fitted.height * zoom)
                         .position(x: visibleCentre.x + offset.width, y: visibleCentre.y + offset.height)
                 }
@@ -269,8 +255,7 @@ private struct ImageCanvas: View {
                         offset = clamped(CGSize(width: start.width + drag.translation.width,
                                                 height: start.height + drag.translation.height))
                     }
-                    .onEnded { _ in dragStart = nil },
-                    including: zoom > 1 ? .all : .subviews)
+                    .onEnded { _ in dragStart = nil })
                 .simultaneousGesture(MagnifyGesture()
                     .onChanged { pinch in
                         zoom(by: pinch.magnification / pinched, at: pinch.startLocation)
