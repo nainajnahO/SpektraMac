@@ -148,12 +148,15 @@ private struct ShowPicker: View {
     var body: some View {
         Picker("Show", selection: Binding { model.showsFilm } set: { model.controls.scanFilm = $0 }) {
             Text("Print").tag(false)
-                .selectionDisabled(model.isSlideFilm)
             Text("Film").tag(true)
         }
         .pickerStyle(.segmented)
-        .disabled(model.showsOriginal)
-        .help("Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
+        // A slide has no print, so the switch is greyed out on Film: a segment of its own greyed
+        // out (`selectionDisabled`) looks no different in macOS 26's toolbar.
+        .disabled(model.showsOriginal || model.isSlideFilm)
+        .help(model.isSlideFilm
+              ? "A slide is viewed directly, so it has no print. Choose a negative film to see one printed."
+              : "Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
     }
 }
 

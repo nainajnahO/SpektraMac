@@ -52,7 +52,8 @@ Or **View › Print** (⌘1) and **View › Film** (⌘2).
 
 - **Print** shows the negative printed on the paper: the finished photo.
 - **Film** shows the developed film itself, as a scanner sees it: the orange negative, or a slide. A slide can only
-  be shown as film, because the papers are made for negatives.
+  be shown as film, because the papers are made for negatives, so with a slide film chosen the switch is greyed out
+  on Film.
 
 **The settings** are on the right. Show or hide them with the **Adjust** button or **View › Hide Inspector** (⌃⌘I).
 They're in three tabs that follow the light: **Camera**, **Film** and **Print** (**View › Camera Settings** ⌥⌘1,
