@@ -225,6 +225,8 @@ public actor Engine {
     public nonisolated let papers: [ProfileInfo]
 
     private let gpu: GPU
+    /// The GPU time of the engine's own command buffers so far, readable while it renders.
+    public nonisolated let gpuTime: GPUTime
     private let tables: Tables
     private let profiles: [String: Profile]
     private let neutralPrintFilters: [String: [String: [String: SIMD3<Double>]]]
@@ -269,6 +271,7 @@ public actor Engine {
 
     public init() throws {
         gpu = try GPU()
+        gpuTime = gpu.time
         context = RGBImage.makeContext(commandQueue: gpu.queue)
         tables = try Tables.load()
         neutralPrintFilters = try Tables.loadNeutralPrintFilters()

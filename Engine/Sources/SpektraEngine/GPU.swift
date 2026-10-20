@@ -3,6 +3,7 @@ import CoreGraphics
 import Foundation
 import Metal
 import MetalPerformanceShaders
+import Synchronization
 
 /// The Metal device, queue and compiled kernels every stage runs on.
 ///
@@ -20,6 +21,8 @@ public final class GPU {
     /// The diffusion filter's convolutions (``encodeDiffusionFilter(on:input:filter:pixelSizeUm:)``),
     /// one per FFT size, the most recently used last (``fftConvolution(width:height:)``).
     var fftConvolutions: [(size: SIMD2<Int>, convolution: FFTConvolution)] = []
+    /// The GPU time of the command buffers run so far (``Encoder``).
+    public let time = GPUTime()
 
     public enum SetupError: LocalizedError {
         case noDevice
@@ -304,10 +307,26 @@ public final class Encoder {
         compute.endEncoding()
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
-        for completed in committedByShaders + [commandBuffer] where error == nil {
-            error = completed.error
+        let completed = committedByShaders + [commandBuffer]
+        gpu.time.add(completed.map { $0.gpuEndTime - $0.gpuStartTime }.reduce(0, +))
+        for buffer in completed where error == nil {
+            error = buffer.error
         }
         committedByShaders = []
+    }
+}
+
+/// GPU time added up as command buffers complete, on the engine's queue, and readable from any
+/// thread meanwhile: the app's Log graphs it while a render runs (``Engine/gpuTime``). Core
+/// Image's own command buffers, which draw a render to the screen or a file, aren't counted.
+public final class GPUTime: Sendable {
+    private let total = Mutex<Double>(0)
+
+    /// The GPU time so far, in seconds.
+    public var seconds: Double { total.withLock { $0 } }
+
+    func add(_ seconds: Double) {
+        total.withLock { $0 += seconds }
     }
 }
 
