@@ -124,10 +124,11 @@ There's no download yet. You need macOS 26.5 or newer and [Xcode 27](https://dev
 | `Engine/Sources/SpektraEngine/Resources/` | Film and paper profiles and spectral tables exported from Spektrafilm |
 | `docs/` | User guide and the website, served by GitHub Pages |
 
-Run the engine's tests with `swift test --package-path Engine`. Every pull request is built and tested on GitHub
-Actions. See the [releases](https://github.com/nainajnahO/SpektraMac/releases) for what's changed,
-[PLAN.md](PLAN.md) for the porting plan and the [issues](https://github.com/nainajnahO/SpektraMac/issues) for what's
-next.
+Run the engine's tests with `swift test -c release -Xswiftc -enable-testing --package-path Engine`. Optimized, they
+take about a minute on an M1 Pro instead of six; `-enable-testing` keeps the `@testable import` they rely on. Every
+pull request is built and tested on GitHub Actions. See the [releases](https://github.com/nainajnahO/SpektraMac/releases)
+for what's changed, [PLAN.md](PLAN.md) for the porting plan and the
+[issues](https://github.com/nainajnahO/SpektraMac/issues) for what's next.
 
 ### Reference data
 
