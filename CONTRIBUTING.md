@@ -27,7 +27,8 @@ the interface alike.
 - **Port the model, not the code.** The engine follows Spektrafilm's physics, not its Python line by line (an
   idiomatic port rather than a literal one). A framework that does a step a little differently is still the better
   choice when the difference is measured and stays small, and when it's faster or more accurate in its own right.
-  Matching the original exactly isn't the goal in itself.
+  Matching the original exactly isn't the goal in itself. [docs/porting.md](docs/porting.md) shows each place the
+  engine does this, measured.
 - **Look and behave like a Mac app.** Follow Apple's
   [Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/), and use the system's
   own controls, materials, windows, menus and shortcuts, so the app looks current on each macOS without work of its
@@ -80,7 +81,9 @@ moved", listing the new commits and flagging those that touch the profiles, the 
 
 The engine ports Spektrafilm at commit `3bb2c2d` stage by stage, and the parity tests hold it to that. A change to a
 ported stage should still match, or differ only by what the tests measure and allow (see [Native first](#native-first)):
-say by how much in the pull request. Anything meant to render differently from Spektrafilm starts with an issue.
+say by how much in the pull request. If it changes a step's speed or result, regenerate
+[docs/porting.md](docs/porting.md)'s table and images with `tools/port_report.py`, and say why in its text if the step
+now works differently. Anything meant to render differently from Spektrafilm starts with an issue.
 
 ## Code
 

@@ -100,7 +100,8 @@ The results match the Python reference stage by stage. The reference is Spektraf
 [`3bb2c2d`](https://github.com/andreavolpato/spektrafilm/commit/3bb2c2d2801ff68b92019cf1dbcbb133d60832bc) (June
 2026), which has no release of its own. The tests compare every step of the pipeline with dumps from the Python code:
 negatives, slides and motion picture film, on a test chart and on a photo. Where the Mac takes a faster route, such as
-Apple's blurs, the difference is measured and kept small.
+Apple's blurs, the difference is measured and kept small. [How SpektraMac ports Spektrafilm](docs/porting.md) lists every
+ported step with its speed and accuracy against Python, and shows each place it does something differently.
 
 To install the same Spektrafilm:
 
@@ -130,7 +131,7 @@ There's no download yet. You need macOS 26.5 or newer and [Xcode 27](https://dev
 | `Engine/` | `SpektraEngine` Swift package (Metal shaders, host code, tests) and the `spektra-cli` tool |
 | `Engine/Sources/SpektraEngine/Resources/` | Film and paper profiles and spectral tables exported from Spektrafilm |
 | `tools/` | Python scripts that export that data and make the parity tests' reference data from Spektrafilm |
-| `docs/` | User guide |
+| `docs/` | User guide, and how the port compares with Spektrafilm |
 
 To run the tests or send a change, see [CONTRIBUTING.md](CONTRIBUTING.md). See the
 [releases](https://github.com/nainajnahO/SpektraMac/releases) for what's changed and the
