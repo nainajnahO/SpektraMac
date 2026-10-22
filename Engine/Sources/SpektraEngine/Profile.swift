@@ -66,11 +66,15 @@ public struct ProfileData: Decodable, Sendable {
     public let densityCurvesModel: DensityCurvesModel
 
     public struct DensityCurvesModel: Decodable, Sendable {
-        public let modelType: String
+        /// Only `cdfs` (each layer a normal CDF) is ported, so a profile fitted with another model
+        /// fails to load rather than being read as one.
+        public let modelType: ModelType
         /// Channels × layers.
         public let centers: [[Double]]
         public let amplitudes: [[Double]]
         public let sigmas: [[Double]]
+
+        public enum ModelType: String, Decodable, Sendable { case cdfs }
 
         enum CodingKeys: String, CodingKey {
             case centers, amplitudes, sigmas
