@@ -72,6 +72,10 @@ the bundled data and the reference data from that commit in a temporary folder, 
 `Resources/` (`parameters.json` lists every parameter and its default), runs the tests against that reference data
 and prints the largest difference per stage.
 
+Every Monday, a workflow ([`upstream.yml`](.github/workflows/upstream.yml), `tools/upstream-moved.sh`) checks whether
+Spektrafilm's `main` has moved past that commit, and if it has, opens or updates one issue, "Upstream Spektrafilm has
+moved", listing the new commits and flagging those that touch the profiles, the parameter schema or the model.
+
 ## Changing the simulation
 
 The engine ports Spektrafilm at commit `3bb2c2d` stage by stage, and the parity tests hold it to that. A change to a
