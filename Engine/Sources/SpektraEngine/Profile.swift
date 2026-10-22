@@ -126,6 +126,5 @@ public struct ProfileData: Decodable, Sendable {
     }
 }
 
-/// The engine's bundled data directory (`Resources/`, written by `tools/export_tables.py`, which stays
-/// on the development Mac rather than in the repository: #139).
+/// The engine's bundled data directory (`Resources/`, written by `tools/export_tables.py`).
 let resources = Bundle.module.resourceURL!.appending(component: "Resources")

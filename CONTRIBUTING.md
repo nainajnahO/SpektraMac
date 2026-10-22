@@ -52,12 +52,19 @@ rely on. The app has no tests of its own, so a pull request says what you tried 
 
 The parity tests compare every stage against dumps from the original Python Spektrafilm, at commit `3bb2c2d`, in
 `golden/<case>/`: one float32 `.npy` per pipeline tap, the film's spectral lookup table and the parameters used.
-Neither the dumps (about 230 MB) nor the Python scripts that make them and that exported the bundled data are in the
-repository; without `golden/`, those tests are skipped. `golden/manifest.json` (committed) names the commit
-and holds a checksum of every file, so `git diff` shows whether a regeneration changed anything.
+The dumps (about 230 MB) aren't in the repository; make them with that Spektrafilm, installed as the README's
+[Faithful to Spektrafilm](README.md#faithful-to-spektrafilm) says:
 
-So unless you have `golden/`, the parity tests won't run for you. Say so in the pull request, and the maintainer runs
-them.
+```sh
+~/.local/share/uv/tools/spektrafilm/bin/python tools/golden.py
+```
+
+Without `golden/`, those tests are skipped. `golden/manifest.json` (committed) names the commit and holds a checksum of
+every file, so `git diff` shows whether a regeneration changed anything. `tools/export_tables.py` exported the engine's
+bundled data in `Engine/Sources/SpektraEngine/Resources/` the same way. The top of each script says what it writes.
+
+So unless you've made `golden/`, the parity tests won't run for you. Say so in the pull request, and the maintainer
+runs them.
 
 ## Changing the simulation
 

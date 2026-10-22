@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import SpektraEngine
 
-/// `golden/` at the repository root, written by `tools/golden.py`, which stays on the development Mac
-/// rather than in the repository (#139): without it, the parity tests don't run.
+/// `golden/` at the repository root, written by `tools/golden.py` and not in the repository (about
+/// 230 MB): without it, the parity tests don't run.
 let goldenDirectory = URL(filePath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     .appending(component: "golden")
@@ -13,7 +13,7 @@ let goldenDirectory = URL(filePath: #filePath)
 func goldenFile(_ components: String...) throws -> URL {
     let url = components.reduce(goldenDirectory) { $0.appending(component: $1) }
     guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
-        try Test.cancel("\(url.path(percentEncoded: false)) not found: the parity tests need the reference data (see CONTRIBUTING.md)")
+        try Test.cancel("\(url.path(percentEncoded: false)) not found: run tools/golden.py to make the reference data (see CONTRIBUTING.md)")
     }
     return url
 }
