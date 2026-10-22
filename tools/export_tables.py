@@ -12,10 +12,14 @@ Writes Engine/Sources/SpektraEngine/Resources/ (committed, it ships with the eng
   heat filter and lens transmission (Akima-resampled), the analytic dichroic CMY filters, RGB
   colour spaces (RGB<->XYZ matrices, whitepoint, transfer function), chromatic-adaptation matrices,
   and the closed spectral-locus polygon the input gamut compression uses.
+- parameters.json: every field of init_params() and its default, nested ones by dotted name
+  (`camera.diffusion_filter.strength`), so a new, renamed or re-defaulted upstream parameter shows
+  in a diff even where the engine's `Parameters` doesn't have it.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import shutil
 from importlib.metadata import distribution, version
@@ -24,6 +28,7 @@ from pathlib import Path
 
 import colour
 
+from spektrafilm import init_params
 from spektrafilm.config import SPECTRAL_SHAPE, STANDARD_OBSERVER_CMFS
 from spektrafilm.model.color_filters import (
     custom_dichroic_filters,
@@ -60,6 +65,16 @@ def installed_commit() -> str | None:
     if direct_url is None:
         return None
     return json.loads(direct_url).get("vcs_info", {}).get("commit_id")
+
+
+def flattened(value, name: str) -> dict:
+    """A parameter and its default, or every field of a parameter group under `name.`."""
+    if not dataclasses.is_dataclass(value):
+        return {name: value}
+    flat = {}
+    for field in dataclasses.fields(value):
+        flat |= flattened(getattr(value, field.name), f"{name}.{field.name}")
+    return flat
 
 
 def main():
@@ -102,6 +117,16 @@ def main():
         },
     }
     (OUT / "tables.json").write_text(json.dumps(tables, indent=1) + "\n")
+
+    # The film and print profiles are exported above.
+    params = init_params()
+    defaults = {}
+    for field in dataclasses.fields(params):
+        if field.name not in ("film", "print"):
+            defaults |= flattened(getattr(params, field.name), field.name)
+    # One line per parameter, so a diff shows each change on its own.
+    lines = [f"{json.dumps(name)}: {json.dumps(value)}" for name, value in sorted(defaults.items())]
+    (OUT / "parameters.json").write_text("{\n " + ",\n ".join(lines) + "\n}\n")
     print(f"Wrote {OUT}")
 
 

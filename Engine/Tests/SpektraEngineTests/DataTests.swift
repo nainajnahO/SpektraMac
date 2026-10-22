@@ -22,6 +22,14 @@ import Testing
     }
 }
 
+@Test func unknownCurveModelFailsToLoad() throws {
+    // Upstream renamed `cdfs` to `norm_cdfs` after 3bb2c2d (4f3b186).
+    let url = resources.appending(components: "profiles", "kodak_portra_400.json")
+    let json = try String(contentsOf: url, encoding: .utf8)
+        .replacing(#""model_type": "cdfs""#, with: #""model_type": "norm_cdfs""#)
+    #expect(throws: DecodingError.self) { try JSONDecoder().decode(Profile.self, from: Data(json.utf8)) }
+}
+
 @Test func portra400MatchesPython() throws {
     let data = try Profile.load("kodak_portra_400").data
     #expect(data.logSensitivity[40] == SIMD3(-0.9824191972671685, -1.0024959892315966, -4.379553426017711))
