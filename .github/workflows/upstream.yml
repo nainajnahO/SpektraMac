@@ -1,0 +1,22 @@
+# Weekly: whether Spektrafilm's main has moved past the commit SpektraMac ports, and if it has, one
+# issue listing the new commits (tools/upstream-moved.sh).
+name: Upstream Spektrafilm
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: tools/upstream-moved.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
