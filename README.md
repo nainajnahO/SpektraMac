@@ -129,6 +129,7 @@ There's no download yet. You need macOS 26.5 or newer and [Xcode 27](https://dev
 | `App/` | SwiftUI app |
 | `Engine/` | `SpektraEngine` Swift package (Metal shaders, host code, tests) and the `spektra-cli` tool |
 | `Engine/Sources/SpektraEngine/Resources/` | Film and paper profiles and spectral tables exported from Spektrafilm |
+| `tools/` | Python scripts that export that data and make the parity tests' reference data from Spektrafilm |
 | `docs/` | User guide |
 
 To run the tests or send a change, see [CONTRIBUTING.md](CONTRIBUTING.md). See the
