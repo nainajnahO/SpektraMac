@@ -133,6 +133,30 @@ func diffusionFilterMatchesPython(family: String, strength: Double, spatialScale
     #expect(difference.maxRelative < 1e-5)  // f32 against Python's f64 FFT
 }
 
+/// The same cases convolved at half the scale, as images over ``GPU/maxFFTSamples`` are: how far
+/// the reduced glow is from Python's.
+@Test(arguments: [("glimmerglass", 0.05, 1.0, 0.0, 60.0), ("black_pro_mist", 0.75, 1.0, 0.3, 5.0),
+                  ("pro_mist", 1.0, 1.5, 0.0, 20.0), ("cinebloom", 2.0, 1.0, -0.6, 40.0)])
+func reducedDiffusionFilterStaysClose(family: String, strength: Double, spatialScale: Double, haloWarmth: Double,
+                                      pixelSizeUm: Double) throws {
+    let filter = Parameters.DiffusionFilter(active: true, filterFamily: .init(rawValue: family)!, strength: strength,
+                                            spatialScale: spatialScale, haloWarmth: haloWarmth)
+    let gpu = try GPU()
+    let x = try golden("primitives", "diffusion_x")
+    let input = gpu.upload(rgb: x.values, width: x.shape[1], height: x.shape[0])
+    // 192 × 256 padded fills about 160 000 samples, the image at half the scale under 45 000.
+    let output = try gpu.run {
+        gpu.encodeDiffusionFilter(on: $0, input: input, filter: filter, pixelSizeUm: pixelSizeUm, maxSamples: 60_000)
+    }
+    let reference = try golden("primitives", "diffusion_\(family)_out").values
+    let difference = Difference(gpu.download(output), reference, floor: 1)
+    let glow = Difference(x.values, reference, floor: 1)
+    print("diffusion filter at half scale, \(family): \(difference); the glow itself: \(glow)")
+    // Mean abs 0.0005–0.038; the most (0.04–3.4) at the dots of 40, where Glimmerglass's and
+    // CineBloom's cores are under a pixel at these scales and halving it spreads them.
+    #expect(difference.meanAbsolute < 0.05)
+}
+
 @Test(arguments: goldenCases.filter { $0.hasPrefix("photo") })
 func halationPresetMatchesDigest(caseName: String) throws {
     let golden = try GoldenCase(caseName)

@@ -241,7 +241,8 @@ public actor Engine {
     /// GPU memory set aside for renders' intermediates (``GPU/reservedMemory(width:height:keeping:)``),
     /// which each render makes them from. For renders the size of the preview, the thumbnail or the
     /// screen: kept for every photo, the largest so far (0.5 GB at 1600 px), as new memory for each
-    /// photo cost the first render after opening 150 ms more.
+    /// photo cost the first render after opening 150 ms more; until memory runs low
+    /// (``releaseReservedMemory()``).
     private var screenMemory: (any MTLHeap)?
     /// For renders of the whole photo, where that's larger than its preview: set aside by the first
     /// (its pages become resident as that starts: 2 GB at 12 MP) and kept for the next zoom or save,
@@ -283,7 +284,7 @@ public actor Engine {
         let memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: queue)
         self.memoryPressure = memoryPressure
         memoryPressure.setEventHandler { [weak self] in
-            Task { await self?.releaseFullSizeMemory() }
+            Task { await self?.releaseReservedMemory() }
         }
         memoryPressure.activate()
     }
@@ -297,6 +298,22 @@ public actor Engine {
         fullSizeMemory = nil
         photo?.full.exposure = nil
         photo?.full.film = nil
+    }
+
+    /// When memory runs low: lets all the memory set aside for renders go, the screen's too, with
+    /// the steps kept from each image's last render. The next render sets its memory aside again.
+    private func releaseReservedMemory() {
+        releaseFullSizeMemory()
+        if gpu.heap === screenMemory {
+            gpu.heap = nil
+        }
+        screenMemory = nil
+        photo?.preview.exposure = nil
+        photo?.preview.film = nil
+        photo?.thumbnail?.exposure = nil
+        photo?.thumbnail?.film = nil
+        photo?.reduced.exposure = nil
+        photo?.reduced.film = nil
     }
 
     /// The open photo on the GPU, at full size, as its preview and as its thumbnail.

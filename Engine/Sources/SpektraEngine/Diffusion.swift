@@ -15,25 +15,34 @@ extension GPU {
     /// by three Gaussians (off by 0.05–0.24 EV around bright edges at the 99th percentile, and
     /// 27 blurs a filter). One channel at a time: MPSGraph's FFT needs about 15× its signal's
     /// memory while it runs (3.8 GB for a 24 MP channel padded, 11.5 GB for all three at once).
-    public func encodeDiffusionFilter(on encoder: Encoder, input: any MTLTexture,
-                                      filter: Parameters.DiffusionFilter, pixelSizeUm: Double) -> any MTLTexture {
+    ///
+    /// Past `maxSamples` (``maxFFTSamples``), the image is reduced by the smallest whole `scale`
+    /// whose FFT fits, the PSF taken at that scale's pixel size, and the glow read back bilinearly.
+    public func encodeDiffusionFilter(on encoder: Encoder, input: any MTLTexture, filter: Parameters.DiffusionFilter,
+                                      pixelSizeUm: Double, maxSamples: Int = GPU.maxFFTSamples) -> any MTLTexture {
         var amount = Float(filter.scatterFraction)
         guard filter.active, filter.spatialScale > 0, amount > 0 else { return input }
         let shape = filter.filterFamily.shape
-        // Python's kernel radius: 8 of the widest bloom's decay lengths, which hold 99.95 % of its
-        // light, and under half the image, which it's padded by on each side (mirrored).
-        let bloomMaxPx = shape.bloom.lambdaUm * shape.bloom.spread * filter.spatialScale / pixelSizeUm
-        var radius = Int32(min(Int(max(8 * bloomMaxPx, 5).rounded(.up)), max(min(input.width, input.height) / 2 - 1, 1)))
-        // The padded image fits as is: the pixels kept read no further than `radius` away, so the
-        // FFT's wrap-around never reaches them.
-        var size = SIMD2<UInt32>(UInt32(Self.fftSize(atLeast: input.width + 2 * Int(radius))),
-                                 UInt32(Self.fftSize(atLeast: input.height + 2 * Int(radius))))
+        let bloomMaxUm = shape.bloom.lambdaUm * shape.bloom.spread * filter.spatialScale
+        var (scale, radius, size) = (Int32(0), Int32(0), SIMD2<UInt32>.zero)
+        repeat {
+            scale += 1
+            let (width, height) = (Self.reduced(input.width, by: scale), Self.reduced(input.height, by: scale))
+            // Python's kernel radius: 8 of the widest bloom's decay lengths, which hold 99.95 % of
+            // its light, and under half the image, which it's padded by on each side (mirrored).
+            let bloomMaxPx = bloomMaxUm / (pixelSizeUm * Double(scale))
+            radius = Int32(min(Int(max(8 * bloomMaxPx, 5).rounded(.up)), max(min(width, height) / 2 - 1, 1)))
+            // The padded image fits as is: the pixels kept read no further than `radius` away, so
+            // the FFT's wrap-around never reaches them.
+            size = SIMD2(UInt32(Self.fftSize(atLeast: width + 2 * Int(radius))),
+                         UInt32(Self.fftSize(atLeast: height + 2 * Int(radius))))
+        } while Int(size.x) * Int(size.y) > maxSamples
         let grid = MTLSize(width: Int(size.x), height: Int(size.y), depth: 1)
         let length = Int(size.x) * Int(size.y) * MemoryLayout<Float>.stride
         let (signal, psf, blurred) = (device.makeBuffer(length: length, options: .storageModePrivate)!,
                                       device.makeBuffer(length: length, options: .storageModePrivate)!,
                                       device.makeBuffer(length: length, options: .storageModePrivate)!)
-        let components = filter.components(pixelSizeUm: pixelSizeUm)
+        let components = filter.components(pixelSizeUm: pixelSizeUm * Double(scale))
         for channel in 0..<3 {
             // (1/λ, weight / (2πλ²)) per exponential.
             let terms = components.map { SIMD2<Float>(Float(1 / $0.lambda), Float($0.weight[channel] / (2 * .pi * $0.lambda * $0.lambda))) }
@@ -50,6 +59,7 @@ extension GPU {
                 $0.setBytes(&size, length: MemoryLayout<SIMD2<UInt32>>.size, index: 1)
                 $0.setBytes(&radius, length: 4, index: 2)
                 $0.setBytes(&channel, length: 4, index: 3)
+                $0.setBytes(&scale, length: 4, index: 4)
             }
             let convolution = fftConvolution(width: Int(size.x), height: Int(size.y))
             encoder.encodeCommands {
@@ -61,9 +71,22 @@ extension GPU {
                 $0.setBytes(&radius, length: 4, index: 2)
                 $0.setBytes(&channel, length: 4, index: 3)
                 $0.setBytes(&amount, length: 4, index: 4)
+                $0.setBytes(&scale, length: 4, index: 5)
             }
         }
         return input
+    }
+
+    /// The most samples the diffusion filter's FFT buffers hold (400 MB each): the widest filter at
+    /// any strength fits at 24 MP, so up to there it's convolved at the image's own scale, as
+    /// Python does. Past it, at the image's scale an FFT can need over 10 GB (at 100 MP; the save
+    /// swapped for a minute on 16 GB, #195), and the glow is smooth enough to be convolved at a
+    /// reduced one: what softens is the PSF's core, by about a reduced pixel.
+    public static let maxFFTSamples = 96 << 20
+
+    /// `n` pixels reduced by `scale`, a last partial block counting as one.
+    static func reduced(_ n: Int, by scale: Int32) -> Int {
+        (n + Int(scale) - 1) / Int(scale)
     }
 
     /// The convolution for FFTs of `width × height`. An MPSGraph keeps memory for each size it has
