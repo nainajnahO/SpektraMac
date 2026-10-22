@@ -9,7 +9,7 @@ let goldenDirectory = URL(filePath: #filePath)
     .appending(component: "golden")
 
 /// A file in `golden/`. The data isn't in the repository (see CONTRIBUTING.md), so a test that needs a file
-/// that isn't there is skipped, as on CI.
+/// that isn't there is skipped.
 func goldenFile(_ components: String...) throws -> URL {
     let url = components.reduce(goldenDirectory) { $0.appending(component: $1) }
     guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
