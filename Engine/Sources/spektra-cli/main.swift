@@ -14,7 +14,7 @@ case "benchmark":
         try benchmark(width: width, height: height)
     }
 default:
-    print("spektra-cli — Spektrafilm \(SpektraEngine.referenceVersion) port")
+    print("spektra-cli — port of Spektrafilm at \(SpektraEngine.referenceCommit.prefix(7))")
     print("GPU: \(try GPU().device.name)")
     print("Usage: spektra-cli benchmark [width height | photo]")
 }

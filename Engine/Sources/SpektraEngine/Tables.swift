@@ -4,7 +4,7 @@ import Foundation
 /// 380–780 nm / 5 nm grid (`Resources/tables.json`, written by `tools/export_tables.py`, which stays
 /// on the development Mac rather than in the repository: #139).
 public struct Tables: Decodable, Sendable {
-    public let spektrafilmVersion: String
+    public let spektrafilmCommit: String
     public let wavelengths: [Double]
     /// CIE 1931 2° colour matching functions x̄ ȳ z̄.
     public let cmfs: [SIMD3<Double>]

@@ -38,7 +38,7 @@ import Testing
 
 @Test func tablesMatchPython() throws {
     let tables = try Tables.load()
-    #expect(tables.spektrafilmVersion == SpektraEngine.referenceVersion)
+    #expect(tables.spektrafilmCommit == SpektraEngine.referenceCommit)
     #expect(tables.wavelengths.count == 81 && tables.wavelengths.first == 380 && tables.wavelengths.last == 780)
     #expect(tables.cmfs[35] == SIMD3(0.5120500999999994, 1.0000000000000004, 0.005749999000000004))
     #expect(tables.illuminants["TH-KG3"]?[40] == 1.4771790396751106)

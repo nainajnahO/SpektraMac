@@ -50,11 +50,11 @@ rely on. The app has no tests of its own, so a pull request says what you tried 
 
 ### Reference data
 
-The parity tests compare every stage against dumps from the original Python Spektrafilm 0.3.4 in `golden/<case>/`:
-one float32 `.npy` per pipeline tap, the film's spectral lookup table and the parameters used. Neither the dumps
-(about 230 MB) nor the Python scripts that make them and that exported the bundled data are in the repository;
-without `golden/`, those tests are skipped, as on CI. `golden/manifest.json` (committed) holds a checksum of every
-file, so `git diff` shows whether a regeneration changed anything.
+The parity tests compare every stage against dumps from the original Python Spektrafilm, at commit `3bb2c2d`, in
+`golden/<case>/`: one float32 `.npy` per pipeline tap, the film's spectral lookup table and the parameters used.
+Neither the dumps (about 230 MB) nor the Python scripts that make them and that exported the bundled data are in the
+repository; without `golden/`, those tests are skipped, as on CI. `golden/manifest.json` (committed) names the commit
+and holds a checksum of every file, so `git diff` shows whether a regeneration changed anything.
 
 So unless you have `golden/`, the parity tests won't run for you. Say so in the pull request, and the maintainer runs
 them.
@@ -67,9 +67,9 @@ crashes the runner's virtual GPU; it runs with the rest on a Mac.
 
 ## Changing the simulation
 
-The engine ports Spektrafilm 0.3.4 stage by stage, and the parity tests hold it to that. A change to a ported stage
-should still match, or differ only by what the tests measure and allow (see [Native first](#native-first)): say by
-how much in the pull request. Anything meant to render differently from Spektrafilm starts with an issue.
+The engine ports Spektrafilm at commit `3bb2c2d` stage by stage, and the parity tests hold it to that. A change to a
+ported stage should still match, or differ only by what the tests measure and allow (see [Native first](#native-first)):
+say by how much in the pull request. Anything meant to render differently from Spektrafilm starts with an issue.
 
 ## Code
 

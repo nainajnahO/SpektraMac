@@ -219,11 +219,11 @@
   "qa-kodak_vision3_500t-kodak_2383/samples.npy": "75bb164926f45e2dd9b88b1750d69fecb5d9668758683e03753a17ac6252ee65",
   "raw/patches.dng": "d626426ad1b7821c9a652ce4f4f2548568978a3d61efe90ce71aa92dc579a144"
  },
+ "spektrafilmCommit": "3bb2c2d2801ff68b92019cf1dbcbb133d60832bc",
  "versions": {
   "colour-science": "0.4.7",
   "numpy": "2.5.4",
   "scikit-image": "0.26.0",
-  "scipy": "1.18.1",
-  "spektrafilm": "0.3.4"
+  "scipy": "1.18.1"
  }
 }
