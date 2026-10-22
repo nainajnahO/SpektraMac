@@ -53,17 +53,11 @@ rely on. The app has no tests of its own, so a pull request says what you tried 
 The parity tests compare every stage against dumps from the original Python Spektrafilm, at commit `3bb2c2d`, in
 `golden/<case>/`: one float32 `.npy` per pipeline tap, the film's spectral lookup table and the parameters used.
 Neither the dumps (about 230 MB) nor the Python scripts that make them and that exported the bundled data are in the
-repository; without `golden/`, those tests are skipped, as on CI. `golden/manifest.json` (committed) names the commit
+repository; without `golden/`, those tests are skipped. `golden/manifest.json` (committed) names the commit
 and holds a checksum of every file, so `git diff` shows whether a regeneration changed anything.
 
 So unless you have `golden/`, the parity tests won't run for you. Say so in the pull request, and the maintainer runs
 them.
-
-### CI
-
-Every pull request is built and tested on GitHub Actions (`.github/workflows/build.yml`): a Release build of the app,
-unsigned, and the engine's tests without `golden/`. `PhotoOpeningTests` is skipped there, as reading its renders back
-crashes the runner's virtual GPU; it runs with the rest on a Mac.
 
 ## Changing the simulation
 
