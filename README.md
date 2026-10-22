@@ -79,9 +79,9 @@ The [user guide](docs/guide.md) explains every film, paper and control.
 ## Speed
 
 The whole simulation, grain and halation included, runs on the GPU. On a MacBook Pro with an M1 Pro and 16 GB of
-memory, against the Python Spektrafilm 0.3.4 it ports, on the same photo:
+memory, against the Python Spektrafilm it ports, on the same photo:
 
-| | Python Spektrafilm 0.3.4 | SpektraMac | |
+| | Python Spektrafilm | SpektraMac | |
 |---|---|---|---|
 | Full render, 2400 × 1600 | 18.5 s | 70 ms | about 260× faster |
 | Preview, 1600 × 1067 | 4.1 s | 20 ms | about 200× faster |
@@ -97,9 +97,17 @@ swift run -c release --package-path Engine spektra-cli benchmark photo.jpg
 
 ## Faithful to Spektrafilm
 
-The results match the Python reference, pinned to Spektrafilm 0.3.4, stage by stage. The tests compare every step of
-the pipeline with dumps from the Python code: negatives, slides and motion picture film, on a test chart and on a
-photo. Where the Mac takes a faster route, such as Apple's blurs, the difference is measured and kept small.
+The results match the Python reference stage by stage. The reference is Spektrafilm's `main` at commit
+[`3bb2c2d`](https://github.com/andreavolpato/spektrafilm/commit/3bb2c2d2801ff68b92019cf1dbcbb133d60832bc) (June
+2026), which has no release of its own. The tests compare every step of the pipeline with dumps from the Python code:
+negatives, slides and motion picture film, on a test chart and on a photo. Where the Mac takes a faster route, such as
+Apple's blurs, the difference is measured and kept small.
+
+To install the same Spektrafilm:
+
+```sh
+uv tool install "spektrafilm @ git+https://github.com/andreavolpato/spektrafilm@3bb2c2d2801ff68b92019cf1dbcbb133d60832bc"
+```
 
 ## Build from source
 
