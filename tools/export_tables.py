@@ -3,7 +3,8 @@
     uv tool install "spektrafilm @ git+https://github.com/andreavolpato/spektrafilm@3bb2c2d2801ff68b92019cf1dbcbb133d60832bc"
     ~/.local/share/uv/tools/spektrafilm/bin/python tools/export_tables.py
 
-Writes Engine/Sources/SpektraEngine/Resources/ (committed, it ships with the engine):
+Writes Engine/Sources/SpektraEngine/Resources/ (committed, it ships with the engine); with
+`--out <folder>`, there instead, from any Spektrafilm commit (tools/check-upstream.sh):
 - profiles/*.json, neutral_print_filters.json: copied unchanged from the package (CC BY-SA 4.0).
 - irradiance_xy_tc.npy: hanatos2025 spectra LUT (192x192x81 float16), copied unchanged.
 - tables.json: values that live inside colour-science or are resampled at import time, evaluated
@@ -19,6 +20,7 @@ Writes Engine/Sources/SpektraEngine/Resources/ (committed, it ships with the eng
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import json
 import shutil
@@ -78,18 +80,22 @@ def flattened(value, name: str) -> dict:
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out", type=Path, help="write here instead, from any Spektrafilm commit (tools/check-upstream.sh)")
+    args = parser.parse_args()
+    out = args.out or OUT
     installed = installed_commit()
-    if installed != REFERENCE_COMMIT:
+    if args.out is None and installed != REFERENCE_COMMIT:
         raise SystemExit(f"Need spektrafilm at commit {REFERENCE_COMMIT}, found {installed or 'an install not from git'}")
 
     package = files("spektrafilm.data")
-    profiles_out = OUT / "profiles"
+    profiles_out = out / "profiles"
     profiles_out.mkdir(parents=True, exist_ok=True)
     for entry in (package / "profiles").iterdir():
         if entry.name.endswith(".json"):
             (profiles_out / entry.name).write_bytes(entry.read_bytes())
-    shutil.copyfile(package / "filters/neutral_print_filters.json", OUT / "neutral_print_filters.json")
-    shutil.copyfile(package / "luts/spectral_upsampling/irradiance_xy_tc.npy", OUT / "irradiance_xy_tc.npy")
+    shutil.copyfile(package / "filters/neutral_print_filters.json", out / "neutral_print_filters.json")
+    shutil.copyfile(package / "luts/spectral_upsampling/irradiance_xy_tc.npy", out / "irradiance_xy_tc.npy")
 
     colour_spaces = {}
     for name, transfer in COLOUR_SPACES.items():
@@ -116,7 +122,7 @@ def main():
             name: colour.adaptation.CHROMATIC_ADAPTATION_TRANSFORMS[name].tolist() for name in CATS
         },
     }
-    (OUT / "tables.json").write_text(json.dumps(tables, indent=1) + "\n")
+    (out / "tables.json").write_text(json.dumps(tables, indent=1) + "\n")
 
     # The film and print profiles are exported above.
     params = init_params()
@@ -126,8 +132,8 @@ def main():
             defaults |= flattened(getattr(params, field.name), field.name)
     # One line per parameter, so a diff shows each change on its own.
     lines = [f"{json.dumps(name)}: {json.dumps(value)}" for name, value in sorted(defaults.items())]
-    (OUT / "parameters.json").write_text("{\n " + ",\n ".join(lines) + "\n}\n")
-    print(f"Wrote {OUT}")
+    (out / "parameters.json").write_text("{\n " + ",\n ".join(lines) + "\n}\n")
+    print(f"Wrote {out}")
 
 
 if __name__ == "__main__":

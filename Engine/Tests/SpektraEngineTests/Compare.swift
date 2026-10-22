@@ -3,10 +3,12 @@ import Testing
 @testable import SpektraEngine
 
 /// `golden/` at the repository root, written by `tools/golden.py` and not in the repository (about
-/// 230 MB): without it, the parity tests don't run.
-let goldenDirectory = URL(filePath: #filePath)
-    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    .appending(component: "golden")
+/// 230 MB): without it, the parity tests don't run. `SPEKTRA_GOLDEN` names another folder, such as
+/// the reference data `tools/check-upstream.sh` makes from another Spektrafilm commit.
+let goldenDirectory = ProcessInfo.processInfo.environment["SPEKTRA_GOLDEN"].map { URL(filePath: $0) }
+    ?? URL(filePath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appending(component: "golden")
 
 /// A file in `golden/`. The data isn't in the repository (see CONTRIBUTING.md), so a test that needs a file
 /// that isn't there is skipped.
