@@ -6,7 +6,8 @@ Run with the interpreter of the pinned Spektrafilm install:
     ~/.local/share/uv/tools/spektrafilm/bin/python tools/golden.py
 
 Writes golden/<case>/ (gitignored) and golden/manifest.json (committed; sha256 of every file, so a
-regeneration that changes anything shows up in `git diff`).
+regeneration that changes anything shows up in `git diff`). With `--out <folder>` it writes there
+instead and runs on any Spektrafilm commit (tools/check-upstream.sh).
 
 Inputs
 - chart: 256x384 linear ProPhoto RGB (the default input space, no CCTF decoding). Rows 0-63 a grey
@@ -98,6 +99,7 @@ white 65535, baseline exposure 0, with four grey patches at raw 0.05, 0.1, 0.2 a
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import copy
 import dataclasses
@@ -506,8 +508,12 @@ def installed_commit() -> str | None:
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out", type=Path, help="write here instead, from any Spektrafilm commit (tools/check-upstream.sh)")
+    args = parser.parse_args()
+    out = args.out or OUT
     installed = installed_commit()
-    if installed != REFERENCE_COMMIT:
+    if args.out is None and installed != REFERENCE_COMMIT:
         raise SystemExit(f"Need spektrafilm at commit {REFERENCE_COMMIT}, found {installed or 'an install not from git'}")
 
     inputs = {"chart": make_chart(), "photo": make_photo(), "preview": make_photo(), "diffusion": make_photo()}
@@ -536,7 +542,7 @@ def main():
                     method=params.camera.auto_exposure_method,
                 )
 
-            case_dir = OUT / case
+            case_dir = out / case
             case_dir.mkdir(parents=True, exist_ok=True)
             curves = params.film.data.density_curves
             no_couplers = develop_simple(taps["log_e_film"], params.film.data.log_exposure,
@@ -596,7 +602,7 @@ def main():
         assert np.array_equal(rerun.reshape(-1, 3), oracle.pipeline_out_linear)
 
         case = f"qa-{film}-{paper}"
-        case_dir = OUT / case
+        case_dir = out / case
         case_dir.mkdir(parents=True, exist_ok=True)
         np.save(case_dir / "samples.npy", oracle.rng_samples_linear.reshape(200, 250, 3))
         np.save(case_dir / "reference_xyz.npy",
@@ -608,7 +614,7 @@ def main():
             manifest["files"][f"{case}/{path.name}"] = hashlib.sha256(path.read_bytes()).hexdigest()
         print(f"{case}: {len(oracle.rng_samples_linear)} samples")
 
-    primitives_dir = OUT / "primitives"
+    primitives_dir = out / "primitives"
     primitives_dir.mkdir(parents=True, exist_ok=True)
     for name, array in primitives().items():
         path = primitives_dir / f"{name}.npy"
@@ -616,12 +622,12 @@ def main():
         manifest["files"][f"primitives/{path.name}"] = hashlib.sha256(path.read_bytes()).hexdigest()
     print(f"primitives: {len(list(primitives_dir.iterdir()))} arrays")
 
-    raw_path = OUT / "raw" / "patches.dng"
+    raw_path = out / "raw" / "patches.dng"
     write_raw_patches(raw_path)
     manifest["files"]["raw/patches.dng"] = hashlib.sha256(raw_path.read_bytes()).hexdigest()
     print("raw: patches.dng")
 
-    (OUT / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":

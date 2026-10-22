@@ -66,6 +66,12 @@ bundled data in `Engine/Sources/SpektraEngine/Resources/` the same way. The top 
 So unless you've made `golden/`, the parity tests won't run for you. Say so in the pull request, and the maintainer
 runs them.
 
+To see how far SpektraMac is from another Spektrafilm commit, a branch such as `dev` or a newer `main`, run
+`tools/check-upstream.sh <ref>`. It needs [uv](https://docs.astral.sh/uv/) and leaves your own install alone: it makes
+the bundled data and the reference data from that commit in a temporary folder, diffs the data against
+`Resources/` (`parameters.json` lists every parameter and its default), runs the tests against that reference data
+and prints the largest difference per stage.
+
 ## Changing the simulation
 
 The engine ports Spektrafilm at commit `3bb2c2d` stage by stage, and the parity tests hold it to that. A change to a
