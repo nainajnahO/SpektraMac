@@ -84,10 +84,12 @@ func quadToTri(_ tc: SIMD2<Double>) -> SIMD2<Double> {
 /// RGB cube holds at that lightness and hue, C_max(J', h'), a table built once per space. The
 /// per-pixel part runs on the GPU (``GPU/encodeOutputCompression(_:maxChroma:on:rgb:)``).
 struct OutputGamutCompression {
+    // The grids' closures have their types written out: inferred, they took the type checker about 3 s
+    // on every build (#292).
     /// The table's J' grid, `np.linspace(1, 110, 64)`: J' ≈ 100 at white, a little headroom above.
-    static let lightnessGrid = (0..<64).map { $0 == 63 ? 110 : Double($0) * (109.0 / 63) + 1 }
+    static let lightnessGrid = (0..<64).map { (index: Int) -> Double in index == 63 ? 110 : Double(index) * (109.0 / 63) + 1 }
     /// The table's h' grid in radians, `np.linspace(-π, π, 720, endpoint=False)`.
-    static let hueGrid = (0..<720).map { Double($0) * (2 * .pi / 720) - .pi }
+    static let hueGrid = (0..<720).map { (index: Int) -> Double in Double(index) * (2 * .pi / 720) - .pi }
 
     let spec: Parameters.OutputGamutCompressSpec
     let model: CAM16UCS
