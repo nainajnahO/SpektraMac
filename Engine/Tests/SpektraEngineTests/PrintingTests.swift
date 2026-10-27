@@ -22,8 +22,7 @@ func enlargerLightMatchesPython(caseName: String) throws {
     func check(_ light: [Double], _ name: String) throws {
         let difference = Difference(light, try SpektraEngineTests.golden("primitives", "\(name)_\(golden.film)").values,
                                     floor: 1e-3)
-        print("\(name) \(golden.film): \(difference)")
-        #expect(difference.maxRelative < 1e-6)
+        expectParity(difference.maxRelative, below: 1e-6, "\(name) light max rel", case: caseName)
     }
     try check(enlargerLight(lamp, filters: enlarger.printFilters, dichroics: tables.dichroicFilters), "enlarger")
     enlarger.mFilterShift = 12
@@ -44,8 +43,7 @@ func printExposeMatchesLogEPrint(caseName: String) throws {
     let input = gpu.upload(rgb: cmyFilm.values, width: cmyFilm.shape[1], height: cmyFilm.shape[0])
     let output = try gpu.run { simulation.encodePrintExpose(input, on: $0) }
     let difference = Difference(gpu.download(output), try SpektraEngineTests.golden(caseName, "log_e_print").values, floor: 1)
-    print("\(caseName) log_e_print: \(difference)")
-    #expect(difference.maxAbsolute < 1e-4)
+    expectParity(difference.maxAbsolute, below: 1e-4, "log_e_print max abs", case: caseName)
 }
 
 /// Print exposure 1.3, +0.7 EV balanced at the enlarger (compensated mid-grey), 0.3 preflash.
@@ -64,8 +62,7 @@ func printExposeMatchesLogEPrint(caseName: String) throws {
     let input = gpu.upload(rgb: cmyFilm.values, width: cmyFilm.shape[1], height: cmyFilm.shape[0])
     let output = try gpu.run { simulation.encodePrintExpose(input, on: $0) }
     let difference = Difference(gpu.download(output), try golden("primitives", "print_variant_log_e_print").values, floor: 1)
-    print("print variant log_e_print: \(difference)")
-    #expect(difference.maxAbsolute < 1e-4)
+    expectParity(difference.maxAbsolute, below: 1e-4, "log_e_print max abs", case: "print variant")
 }
 
 /// The burn gives what's over its threshold its stops of extra print exposure and leaves the rest
@@ -108,8 +105,7 @@ func printCurvesMatchPython(paper: String) throws {
                                  positive: profile.info.type == .positive)
         let difference = Difference(curves.flatMap { [$0.x, $0.y, $0.z] },
                                     try golden("primitives", "\(name)_\(paper)").values, floor: 1e-3)
-        print("\(name) \(paper): \(difference)")
-        #expect(difference.maxRelative < 1e-6)
+        expectParity(difference.maxRelative, below: 1e-6, "\(name) max rel", case: paper)
     }
     try check("print_curves")
     morph = Parameters.PrintCurvesMorph(active: true, gammaFactor: 1.2, gammaFactorFast: 0.9, gammaFactorSlow: 1.1,
@@ -128,6 +124,5 @@ func printDevelopMatchesCMYPrint(caseName: String) throws {
     let input = gpu.upload(rgb: logEPrint.values, width: logEPrint.shape[1], height: logEPrint.shape[0])
     let output = try gpu.run { simulation.encodePrintDevelop(input, on: $0) }
     let difference = Difference(gpu.download(output), try SpektraEngineTests.golden(caseName, "cmy_print").values, floor: 1)
-    print("\(caseName) cmy_print: \(difference)")
-    #expect(difference.maxAbsolute < 1e-4)
+    expectParity(difference.maxAbsolute, below: 1e-4, "cmy_print max abs", case: caseName)
 }

@@ -14,8 +14,7 @@ func scanMatchesPythonBeforeGamutCompression(caseName: String) throws {
     let output = try gpu.run { simulation.encodeDensityToRGB(input, on: $0) }
     let difference = Difference(gpu.download(output), try SpektraEngineTests.golden(caseName, "rgb_uncompressed").values,
                                 floor: 1)
-    print("\(caseName) scanned RGB: \(difference)")
-    #expect(difference.maxAbsolute < 1e-5)
+    expectParity(difference.maxAbsolute, below: 1e-5, "scanned RGB max abs", case: caseName)
 }
 
 /// The Portra chart's `cmy_print` scanned into each other output space Spektrafilm offers: its
@@ -36,8 +35,7 @@ func scanMatchesPythonInOutputSpace(space: String) throws {
     let reference = try SpektraEngineTests.golden(caseName, "rgb_out_\(fileName)").values
     #expect(result.map(\.isNaN) == reference.map(\.isNaN))
     let difference = Difference(result, reference, floor: 1)
-    print("\(space) rgb_out from cmy_print: \(difference)")
-    #expect(difference.maxAbsolute < 2e-5)
+    expectParity(difference.maxAbsolute, below: 2e-5, "rgb_out max abs", case: space)
 }
 
 /// The whole deterministic chain, `rgb_in → rgb_out`, also as 8-bit values.
@@ -55,16 +53,13 @@ func chainMatchesPython(caseName: String) throws {
     func eightBit(_ v: Float) -> Int { Int((min(max(v, 0), 1) * 255).rounded()) }
     let steps = zip(result, reference).map { abs(eightBit($0) - eightBit($1)) }
     let identical = Double(steps.filter { $0 == 0 }.count) / Double(steps.count)
-    print("\(caseName) rgb_out: \(difference); 8-bit: max \(steps.max()!) steps, \(identical * 100)% identical")
     // The photo's halation and inhibitor diffusion are Apple's blur, which Python's recursive
     // filter approximates: they part by a few levels, mostly along the borders of this small image.
-    if hasPhotoEffects(caseName) {
-        #expect(difference.maxAbsolute < 2e-2)
-        #expect(steps.max()! <= 3 && identical >= 0.98)
-    } else {
-        #expect(difference.maxAbsolute < 2e-5)
-        #expect(steps.max()! <= 2 && identical >= 0.999)
-    }
+    let photo = hasPhotoEffects(caseName)
+    expectParity(difference.maxAbsolute, below: photo ? 2e-2 : 2e-5, "rgb_out max abs", case: caseName)
+    expectParity(Double(steps.max()!), atMost: photo ? 3 : 2, "8-bit steps, max", case: caseName)
+    // At least 98 % (99.9 %) of the 8-bit values identical.
+    expectParity(1 - identical, atMost: photo ? 0.02 : 0.001, "8-bit values not identical", case: caseName)
 }
 
 /// The filming steps' half-float intermediates (the app's) against full floats (which the parity
@@ -109,8 +104,8 @@ func qaOracleDeltaE(pair: String) throws {
         return deltaE2000(lab(fromXYZ: toXYZ * rgb, white: sRGB.whitepoint), lab(fromXYZ: xyz, white: sRGB.whitepoint))
     }
     let sorted = deltaEs.sorted()
-    print("QA oracle \(pair), \(deltaEs.count) samples: ΔE2000 max \(sorted.last!), p99 \(sorted[sorted.count * 99 / 100]), mean \(deltaEs.reduce(0, +) / Double(deltaEs.count))")
-    #expect(sorted.last! <= 0.5)
+    expectParity(sorted.last!, atMost: 0.5, "ΔE2000 max of \(deltaEs.count) samples", case: pair,
+                 also: ["p99": sorted[sorted.count * 99 / 100], "mean": deltaEs.reduce(0, +) / Double(deltaEs.count)])
 }
 
 /// Print glare's random field against Python's: both are random, so their statistics compare,
@@ -130,9 +125,8 @@ func qaOracleDeltaE(pair: String) throws {
         let ours = stride(from: 0, to: field.count, by: 3).map { Double(field[$0]) }
         let (mean, deviation) = meanAndDeviation(ours)
         let python = meanAndDeviation(try golden("primitives", name).values.map(Double.init))
-        print("\(name): mean \(mean) vs Python \(python.mean), std \(deviation) vs \(python.deviation)")
-        #expect(abs(mean / python.mean - 1) < 0.05)
-        #expect(abs(deviation / python.deviation - 1) < 0.05)
+        expectParity(abs(mean / python.mean - 1), below: 0.05, "mean rel", case: name)
+        expectParity(abs(deviation / python.deviation - 1), below: 0.05, "std rel", case: name)
         if blur == 0 {
             var covariance = 0.0
             for y in 0..<512 {
@@ -142,8 +136,7 @@ func qaOracleDeltaE(pair: String) throws {
                 }
             }
             let correlation = covariance / Double(512 * 511) / (deviation * deviation)
-            print("neighbour correlation before the blur: \(correlation)")
-            #expect(abs(correlation) < 0.01)
+            expectParity(abs(correlation), below: 0.01, "neighbour correlation before the blur", case: name)
         }
     }
 }

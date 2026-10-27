@@ -17,24 +17,22 @@ private func blurDifference(_ name: String, exponential: Bool = false) throws ->
             gpu.encodeGaussianBlur(on: encoder, input: input, output: output, sigma: sigma)
         }
     }
-    let difference = Difference(gpu.download(output), reference.values, floor: 1)
-    print("\(name) σ=\(s): \(difference)")
-    return difference
+    return Difference(gpu.download(output), reference.values, floor: 1)
 }
 
 // Inputs are uniform random pixels in [0, 1], so absolute errors are relative to the signal range.
 @Test(arguments: ["blur_fir", "blur_iir", "blur_mixed", "blur_tiny"])
 func gaussianBlurMatchesPython(name: String) throws {
-    #expect(try blurDifference(name).maxAbsolute < 1e-6)
+    expectParity(try blurDifference(name).maxAbsolute, below: 1e-6, "max abs", case: name)
 }
 
 /// One σ ≥ 3 for every channel is Apple's blur, against an exact Gaussian (Python's recursive filter
 /// is up to 0.2 off it at the borders): at σ 3 and at σ 100, wider than the image.
 @Test(arguments: ["blur_equal", "blur_wide"])
 func equalSigmasBlurAsAnExactGaussian(name: String) throws {
-    #expect(try blurDifference(name).maxAbsolute < 2e-3)
+    expectParity(try blurDifference(name).maxAbsolute, below: 2e-3, "max abs", case: name)
 }
 
 @Test func exponentialBlurMatchesPython() throws {
-    #expect(try blurDifference("blur_exponential", exponential: true).maxAbsolute < 1e-6)
+    expectParity(try blurDifference("blur_exponential", exponential: true).maxAbsolute, below: 1e-6, "max abs")
 }

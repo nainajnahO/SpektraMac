@@ -17,8 +17,7 @@ func locusDistanceMatchesPython(illuminant: String) throws {
     }
     let reference = try golden("primitives", "locus_dnorm_\(illuminant)")
     let difference = Difference(distances, reference.values, floor: 1e-3)
-    print("locus distance around \(illuminant): \(difference)")
-    #expect(difference.maxRelative < 1e-6)
+    expectParity(difference.maxRelative, below: 1e-6, "locus distance max rel", case: illuminant)
 }
 
 @Test func insideLocusMatchesMatplotlib() throws {
@@ -45,8 +44,8 @@ func outputCompressionMatchesPython(space: String) throws {
     let table = try golden("primitives", "cmax_cam16ucs_\(suffix)").values
     let differing = zip(compression.maxChroma, table).filter { Float($0) != $1 }.count
     let tableDifference = Difference(compression.maxChroma, table, floor: 1)
-    print("C_max table for \(space) (built in \(elapsed)): \(differing) of \(table.count) cells differ, \(tableDifference)")
-    #expect(tableDifference.maxAbsolute < 1e-4)
+    print("C_max table for \(space) (built in \(elapsed)): \(differing) of \(table.count) cells differ")
+    expectParity(tableDifference.maxAbsolute, below: 1e-4, "C_max table max abs", case: space)
 
     let x = try golden("primitives", "output_compress_x_\(suffix)").values.map(Double.init)
     let pixels = stride(from: 0, to: x.count, by: 3).map { SIMD3(x[$0], x[$0 + 1], x[$0 + 2]) }
@@ -57,8 +56,7 @@ func outputCompressionMatchesPython(space: String) throws {
         let reference = try golden("primitives", "output_compress_\(name)_\(suffix)").values
         #expect(result.map(\.isNaN) == reference.map(\.isNaN))
         let difference = Difference(result, reference, floor: 1e-3)
-        print("output compression \(name) in \(space): \(difference)")
-        #expect(difference.maxRelative < 1e-6)
+        expectParity(difference.maxRelative, below: 1e-6, "\(name) max rel", case: space)
     }
 }
 
@@ -74,8 +72,7 @@ func outputCompressionMatchesPythonOnScans(caseName: String) throws {
     let result = stride(from: 0, to: x.count, by: 3)
         .flatMap { compression.compress(SIMD3(x[$0], x[$0 + 1], x[$0 + 2])).scalars }
     let difference = Difference(result, try SpektraEngineTests.golden(caseName, "rgb_compressed").values, floor: 1e-3)
-    print("\(caseName) output compression: \(difference)")
-    #expect(difference.maxRelative < 1e-6)
+    expectParity(difference.maxRelative, below: 1e-6, "output compression max rel", case: caseName)
 }
 
 /// The `compress_cam16ucs` kernel on the golden samples, against Python and the f64 reference, on
@@ -107,8 +104,8 @@ func outputCompressionKernelMatchesPython(space: String) throws {
         #expect(result.map(\.isNaN) == reference.map(\.isNaN))
         let python = Difference(result, reference, floor: 1)
         let f64 = Difference(result, cpu, floor: 1)
-        print("compress_cam16ucs \(name) in \(space), \(result.count / 3) samples with XYZ ≥ 0: vs Python \(python); vs f64 reference \(f64)")
-        #expect(python.maxAbsolute < 2e-5)
+        print("compress_cam16ucs \(name) in \(space), \(result.count / 3) samples with XYZ ≥ 0, against the f64 reference: \(f64)")
+        expectParity(python.maxAbsolute, below: 2e-5, "compress_cam16ucs \(name) max abs", case: space)
     }
 }
 
@@ -123,8 +120,7 @@ func outputCompressionKernelMatchesPythonOnScans(caseName: String) throws {
     let result = try compressOnGPU(try SpektraEngineTests.golden(caseName, "rgb_uncompressed"), with: compression,
                                    gpu: try GPU())
     let difference = Difference(result, try SpektraEngineTests.golden(caseName, "rgb_compressed").values, floor: 1)
-    print("\(caseName) compress_cam16ucs: \(difference)")
-    #expect(difference.maxAbsolute < 1e-5)
+    expectParity(difference.maxAbsolute, below: 1e-5, "compress_cam16ucs max abs", case: caseName)
 }
 
 private func compressOnGPU(_ array: NPYArray, with compression: OutputGamutCompression, gpu: GPU) throws -> [Float] {
