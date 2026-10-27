@@ -212,8 +212,15 @@ final class PhotoModel {
     }()
     private var renderScheduled = false
     private var saveTask: Task<Void, Never>?
+    /// Where the settings the app quit with and each film's saved defaults are kept: the app's own
+    /// defaults, or a suite of the tests' own.
+    private let defaults: UserDefaults
+    /// Whether an opened photo goes to ``recentPhotos``: the tests' photos don't.
+    private let addsToRecentPhotos: Bool
 
-    init() {
+    init(defaults: UserDefaults = .standard, addsToRecentPhotos: Bool = true) {
+        self.defaults = defaults
+        self.addsToRecentPhotos = addsToRecentPhotos
         let making = Task.detached(priority: .userInitiated) { try Engine() }
         makingEngine = making
         Task {
@@ -300,8 +307,10 @@ final class PhotoModel {
                               previewWidth: opened.previewWidth, previewHeight: opened.previewHeight,
                               metering: opened.metering, meteringOverlays: opened.meteringOverlays)
                 note("Opened \(url.lastPathComponent) (\(opened.width) × \(opened.height))")
-                NSDocumentController.shared.noteNewRecentDocumentURL(url)
-                recentPhotos = NSDocumentController.shared.recentDocumentURLs
+                if addsToRecentPhotos {
+                    NSDocumentController.shared.noteNewRecentDocumentURL(url)
+                    recentPhotos = NSDocumentController.shared.recentDocumentURLs
+                }
                 loadOriginal(of: url)
             } catch {
                 // A photo chosen since says how it went instead.
@@ -725,7 +734,7 @@ final class PhotoModel {
 
     /// What a saved photo records of its edit: the film and paper (or the film, scanned), the
     /// exposure as the slider shows it and the adjustments switched on, by their sidebar names.
-    private var editRecord: EditRecord {
+    var editRecord: EditRecord {
         func diffusion(_ filter: Parameters.DiffusionFilter.Family, _ strength: Double, on lens: String) -> String {
             "\(filter.name) \(strength.formatted(.number.precision(.fractionLength(0...3)))) on the \(lens)"
         }
@@ -848,7 +857,7 @@ final class PhotoModel {
     /// calls it as it quits.
     func storeSettings() {
         do {
-            try UserDefaults.standard.set(controls.preset(), forKey: Self.lastSettingsKey)
+            try defaults.set(controls.preset(), forKey: Self.lastSettingsKey)
         } catch {
             logger.error("Could not keep the settings: \(error.localizedDescription, privacy: .public)")
         }
@@ -857,7 +866,7 @@ final class PhotoModel {
     /// The settings the app last quit with, checked as a preset is; none if their film or paper is
     /// gone.
     private func lastSettings() -> Controls? {
-        guard let preset = UserDefaults.standard.data(forKey: Self.lastSettingsKey) else { return nil }
+        guard let preset = defaults.data(forKey: Self.lastSettingsKey) else { return nil }
         do {
             let settings = try Controls(preset: preset)
             return knowsStocks(of: settings) ? checked(settings, from: "the last settings") : nil
@@ -870,7 +879,7 @@ final class PhotoModel {
     /// Makes the current controls what choosing this film applies from now on.
     func makeDefaultForFilm() {
         do {
-            try UserDefaults.standard.set(controls.preset(), forKey: Self.defaultsKey(controls.film))
+            try defaults.set(controls.preset(), forKey: Self.defaultsKey(controls.film))
             note("Made these settings the default for \(filmName)")
         } catch {
             fail("Couldn't make these settings the default for \(filmName)", error, alert: true)
@@ -892,8 +901,8 @@ final class PhotoModel {
     /// Stores `preset` as `film`'s saved defaults, or forgets them for nil; Undo puts back what was.
     private func setSavedDefaults(_ preset: Data?, for film: String) {
         let key = Self.defaultsKey(film)
-        let previous = UserDefaults.standard.data(forKey: key)
-        UserDefaults.standard.set(preset, forKey: key)
+        let previous = defaults.data(forKey: key)
+        defaults.set(preset, forKey: key)
         undoManager?.registerUndo(withTarget: self) { model in
             model.setSavedDefaults(previous, for: film)
         }
@@ -902,7 +911,7 @@ final class PhotoModel {
     private static func defaultsKey(_ film: String) -> String { "filmDefaults.\(film)" }
 
     private func savedDefaults(for film: String) -> Controls? {
-        guard let preset = UserDefaults.standard.data(forKey: Self.defaultsKey(film)) else { return nil }
+        guard let preset = defaults.data(forKey: Self.defaultsKey(film)) else { return nil }
         do {
             return checked(try Controls(preset: preset), from: "the saved defaults for \(film)")
         } catch {
@@ -977,7 +986,7 @@ final class PhotoModel {
     /// Saved defaults that can't be read were reported when the film was chosen, so here they're
     /// the app's own.
     private func resetDefaults(for film: String) -> Controls {
-        UserDefaults.standard.data(forKey: Self.defaultsKey(film))
+        defaults.data(forKey: Self.defaultsKey(film))
             .flatMap { try? Controls(preset: $0) }.map { checked($0) } ?? Controls()
     }
 
