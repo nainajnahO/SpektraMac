@@ -224,8 +224,11 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
                 .accessibilityLabel(title)
                 .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+                // Borderless draws it grey and greys it further when disabled; a foreground style
+                // over it, inherited or set, would hold it at one shade.
                 Button("Reset \(title)", systemImage: "arrow.uturn.backward") { model.reset(adjustment) }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
@@ -238,7 +241,6 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
                         .help(isOn.wrappedValue ? "Turn off" : "Turn on")
                 }
             }
-            .foregroundStyle(.secondary)
         }
         .disclosureGroupStyle(PhotosDisclosureStyle(contentIndent: 14))
     }
