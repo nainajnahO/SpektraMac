@@ -49,6 +49,26 @@ swift test -c release -Xswiftc -enable-testing --package-path Engine
 Optimized, they take about a minute on an M1 Pro instead of six; `-enable-testing` keeps the `@testable import` they
 rely on. The app has no tests of its own, so a pull request says what you tried in it.
 
+### Runtime checks
+
+The tests check what the engine computes, not how it reaches memory: a read past the end of a value, a data race
+between threads or a shader reading outside a buffer can work on one Mac and fail on another. Before a release, and
+after changing a kernel's arguments (what a `setBytes` passes, or a struct a kernel reads), run the tests under
+Xcode's three runtime checks. Each should pass with no reports:
+
+```sh
+# Metal API and shader validation: about a minute
+MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER=1 swift test -c release -Xswiftc -enable-testing --package-path Engine
+# Address Sanitizer: about 20 minutes
+swift test --sanitize=address -Xswiftc -enable-testing --package-path Engine
+# Thread Sanitizer: about 20 minutes
+swift test --sanitize=thread -Xswiftc -enable-testing --package-path Engine
+```
+
+The sanitizers build unoptimized, hence the time. Under validation, Core Image prints `Error creating PSO for the uber
+shader: ci_ubershader_r4` about 140 times: that's Core Image's own shader, not the engine's, and expected. These cover
+the engine only; the app's own code has no tests to run them on.
+
 ### Reference data
 
 The parity tests compare every stage against dumps from the original Python Spektrafilm, at commit `3bb2c2d`, in
