@@ -13,8 +13,7 @@ func preprocessMatchesRGBPre(caseName: String) throws {
     if golden.params.camera.autoExposure {
         let ev = autoExposureEV(of: rgbIn, colourSpace: tables.colourSpaces[golden.params.io.inputColorSpace]!,
                                 cctfDecoding: golden.params.io.inputCctfDecoding)
-        print("\(caseName) auto-exposure: \(ev) EV, Python \(golden.autoexposureEv) EV")
-        #expect(abs(ev - golden.autoexposureEv) < 1e-6)
+        expectParity(abs(ev - golden.autoexposureEv), below: 1e-6, "auto-exposure EV", case: caseName)
     }
 
     let gpu = try GPU()
@@ -22,8 +21,7 @@ func preprocessMatchesRGBPre(caseName: String) throws {
                                     intermediateFormat: .rgba32Float)
     let output = try gpu.run { simulation.encodePreprocess(rgbIn, on: $0) }
     let difference = Difference(gpu.download(output), reference.values, floor: 1e-3)
-    print("\(caseName) rgb_pre: \(difference)")
-    #expect(difference.maxRelative < 1e-4)
+    expectParity(difference.maxRelative, below: 1e-4, "rgb_pre max rel", case: caseName)
 }
 
 @Test func transferFunctionsMatchColourScience() throws {
@@ -42,7 +40,8 @@ func preprocessMatchesRGBPre(caseName: String) throws {
     ]
     for (name, encoded, linear) in cases {
         let space = try #require(tables.colourSpaces[name])
-        #expect(Difference(encoded.map(space.decode), linear, floor: 1e-6).maxRelative < 1e-12, "\(name)")
+        expectParity(Difference(encoded.map(space.decode), linear, floor: 1e-6).maxRelative, below: 1e-12, "decoding max rel",
+                     case: name)
     }
 }
 
@@ -54,8 +53,7 @@ func rawLUTMatchesPython(film: String) throws {
                            spectra: try Tables.loadSpectraLUT())
     let reference = try golden("primitives", "tc_lut_raw_\(film)")
     let difference = Difference(lut.flatMap { [$0.x, $0.y, $0.z] }, reference.values, floor: 1e-3)
-    print("\(film) raw tc LUT: \(difference)")
-    #expect(difference.maxRelative < 1e-6)
+    expectParity(difference.maxRelative, below: 1e-6, "raw tc LUT max rel", case: film)
 }
 
 /// The LUT each golden run actually used: gamut compression baked in.
@@ -66,8 +64,7 @@ func filmingLUTMatchesPython(caseName: String) throws {
                            spectra: try Tables.loadSpectraLUT())
     let reference = try SpektraEngineTests.golden(caseName, "tc_lut")
     let difference = Difference(lut.flatMap { [$0.x, $0.y, $0.z] }, reference.values, floor: 1e-3)
-    print("\(golden.film) compressed tc LUT: \(difference)")
-    #expect(difference.maxRelative < 1e-6)
+    expectParity(difference.maxRelative, below: 1e-6, "compressed tc LUT max rel", case: caseName)
 }
 
 /// Chart: per-pixel (lut_mode). Photo: sRGB decoding, auto-exposed input, scatter and halation.
@@ -83,11 +80,11 @@ func exposeMatchesLogEFilm(caseName: String) throws {
     let reference = try SpektraEngineTests.golden(caseName, "log_e_film")
     // log10 exposure: absolute error is relative error of the exposure / ln 10.
     let difference = Difference(gpu.download(output), reference.values, floor: 1)
-    print("\(caseName) log_e_film: \(difference)")
     // The camera's diffusion filter convolves in f32, Python in f64: the round-off, about a
     // millionth of the brightest light, reaches the darkest pixels' logs (up to 0.003 below −2.5,
     // as Python's own filter in f32 gives; 2e-5 elsewhere).
-    #expect(difference.maxAbsolute < (caseName.hasPrefix("diffusion") ? 5e-3 : 1e-4))
+    expectParity(difference.maxAbsolute, below: caseName.hasPrefix("diffusion") ? 5e-3 : 1e-4, "log_e_film max abs",
+                 case: caseName)
 }
 
 @Test func boostHighlightsMatchesPython() throws {
@@ -98,8 +95,7 @@ func exposeMatchesLogEFilm(caseName: String) throws {
         gpu.encodeBoostHighlights(on: $0, input: input, boostEv: 2, boostRange: 0.3, protectEv: 1)
     }
     let difference = Difference(gpu.download(output), try golden("primitives", "boost_out").values, floor: 1)
-    print("boost: \(difference)")
-    #expect(difference.maxRelative < 2e-6)  // fast maths functions
+    expectParity(difference.maxRelative, below: 2e-6, "max rel")  // fast maths functions
 }
 
 @Test func halationMatchesPythonAtFullResolutionScale() throws {
@@ -110,10 +106,9 @@ func exposeMatchesLogEFilm(caseName: String) throws {
     let input = gpu.upload(rgb: x.values, width: x.shape[1], height: x.shape[0])
     let output = try gpu.run { gpu.encodeHalation(on: $0, input: input, halation: halation, pixelSizeUm: 5) }
     let difference = Difference(gpu.download(output), try golden("primitives", "halation_out").values, floor: 1)
-    print("halation at 5 µm: \(difference)")
     // Its bounces are Apple's blur, which Python's recursive filter approximates: they part at the
     // borders, most of this small image.
-    #expect(difference.maxAbsolute < 2e-3)
+    expectParity(difference.maxAbsolute, below: 2e-3, "max abs", case: "5 µm")
 }
 
 /// Each family on bright dots and a bar (`tools/golden.py`): under the radius cap with a core under a
@@ -129,8 +124,7 @@ func diffusionFilterMatchesPython(family: String, strength: Double, spatialScale
     let input = gpu.upload(rgb: x.values, width: x.shape[1], height: x.shape[0])
     let output = try gpu.run { gpu.encodeDiffusionFilter(on: $0, input: input, filter: filter, pixelSizeUm: pixelSizeUm) }
     let difference = Difference(gpu.download(output), try golden("primitives", "diffusion_\(family)_out").values, floor: 1)
-    print("diffusion filter, \(family): \(difference)")
-    #expect(difference.maxRelative < 1e-5)  // f32 against Python's f64 FFT
+    expectParity(difference.maxRelative, below: 1e-5, "max rel", case: family)  // f32 against Python's f64 FFT
 }
 
 /// The same cases convolved at half the scale, as images over ``GPU/maxFFTSamples`` are: how far
@@ -151,10 +145,10 @@ func reducedDiffusionFilterStaysClose(family: String, strength: Double, spatialS
     let reference = try golden("primitives", "diffusion_\(family)_out").values
     let difference = Difference(gpu.download(output), reference, floor: 1)
     let glow = Difference(x.values, reference, floor: 1)
-    print("diffusion filter at half scale, \(family): \(difference); the glow itself: \(glow)")
+    print("diffusion filter at half scale, \(family), the glow itself: \(glow)")
     // Mean abs 0.0005–0.038; the most (0.04–3.4) at the dots of 40, where Glimmerglass's and
     // CineBloom's cores are under a pixel at these scales and halving it spreads them.
-    #expect(difference.meanAbsolute < 0.05)
+    expectParity(difference.meanAbsolute, below: 0.05, "mean abs", case: family)
 }
 
 @Test(arguments: goldenCases.filter { $0.hasPrefix("photo") })
@@ -179,8 +173,7 @@ func developMatchesPythonWithoutCouplers(caseName: String) throws {
     let output = try gpu.run { simulation.encodeDevelop(input, on: $0) }
     let reference = try SpektraEngineTests.golden(caseName, "cmy_film_no_couplers")
     let difference = Difference(gpu.download(output), reference.values, floor: 1)
-    print("\(caseName) density without couplers: \(difference)")
-    #expect(difference.maxAbsolute < 1e-5)
+    expectParity(difference.maxAbsolute, below: 1e-5, "density max abs", case: caseName)
 }
 
 /// Chart: couplers without diffusion (lut_mode). Photo: with the inhibitor diffusion blur.
@@ -195,9 +188,8 @@ func developMatchesCMYFilm(caseName: String) throws {
     let output = try gpu.run { simulation.encodeDevelop(input, on: $0) }
     let reference = try SpektraEngineTests.golden(caseName, "cmy_film")
     let difference = Difference(gpu.download(output), reference.values, floor: 1)
-    print("\(caseName) cmy_film: \(difference)")
     // The photo's inhibitor diffusion is Apple's blur, which Python's recursive filter approximates.
-    #expect(difference.maxAbsolute < (hasPhotoEffects(caseName) ? 5e-2 : 1e-4))
+    expectParity(difference.maxAbsolute, below: hasPhotoEffects(caseName) ? 5e-2 : 1e-4, "cmy_film max abs", case: caseName)
 }
 
 @Test(arguments: goldenCases.filter { $0.hasPrefix("photo") })
@@ -225,9 +217,8 @@ func filmingChainMatchesCMYFilm(caseName: String) throws {
                                  on: encoder)
     }
     let difference = Difference(gpu.download(output), try SpektraEngineTests.golden(caseName, "cmy_film").values, floor: 1)
-    print("\(caseName) chain to cmy_film: \(difference)")
     // The photo's halation and inhibitor diffusion are Apple's blur (see developMatchesCMYFilm).
-    #expect(difference.maxAbsolute < (hasPhotoEffects(caseName) ? 5e-2 : 1e-4))
+    expectParity(difference.maxAbsolute, below: hasPhotoEffects(caseName) ? 5e-2 : 1e-4, "cmy_film max abs", case: caseName)
 }
 
 /// Grain's particle model against Python's on uniform density patches (both random, so per patch
@@ -265,8 +256,8 @@ func grainParticlesMatchPythonStatistics(film: String) throws {
             }
         }
     }
-    print("\(film) grain particles, worst over 24 patches: mean \(worst.mean * 100) %, std \(worst.deviation * 100) %")
-    #expect(worst.mean < 0.05 && worst.deviation < 0.05)
+    expectParity(worst.mean, below: 0.05, "mean rel, worst of 24 patches", case: film)
+    expectParity(worst.deviation, below: 0.05, "std rel, worst of 24 patches", case: film)
 }
 
 /// Grain complete (default parameters) on a golden field `grain_<name>_x_<film>`: ours and Python's.
@@ -307,8 +298,8 @@ func grainMatchesPythonStatistics(film: String) throws {
                          film, patch, channel, a.mean, b.mean, a.deviation, b.deviation))
         }
     }
-    print("\(film) grain, worst over 12 patches: mean \(worst.mean * 100) %, RMS granularity \(worst.deviation * 100) %")
-    #expect(worst.mean < 0.05 && worst.deviation < 0.05)
+    expectParity(worst.mean, below: 0.05, "mean rel, worst of 12 patches", case: film)
+    expectParity(worst.deviation, below: 0.05, "RMS granularity rel, worst of 12 patches", case: film)
 }
 
 /// Grain's power spectrum against Python's on a 512 × 512 uniform field (Portra, 50 %, 5 µm): the
@@ -339,8 +330,7 @@ func grainMatchesPythonStatistics(film: String) throws {
         worst = max(worst, ratios.map { abs($0 - 1) }.max()!)
         print("grain power spectrum channel \(channel), ours / Python per band: \(ratios.map { String(format: "%.3f", $0) })")
     }
-    print("grain power spectrum, worst band: \(worst * 100) %")
-    #expect(worst < 0.05)
+    expectParity(worst, below: 0.05, "power rel, worst band")
 }
 
 /// Grain with the micro-structure on (0.4 µm pixels: clumping σ 0.075, blurred 0.5 px) against
@@ -350,8 +340,7 @@ func grainMatchesPythonStatistics(film: String) throws {
     for channel in 0..<3 {
         let a = statistics(ours, width: width, columns: 0..<width, channel: channel)
         let b = statistics(python, width: width, columns: 0..<width, channel: channel)
-        print(String(format: "micro-structure channel %d: mean %.5f vs %.5f, RMS granularity %.5f vs %.5f",
-                     channel, a.mean, b.mean, a.deviation, b.deviation))
-        #expect(abs(a.mean / b.mean - 1) < 0.05 && abs(a.deviation / b.deviation - 1) < 0.05)
+        expectParity(abs(a.mean / b.mean - 1), below: 0.05, "mean rel", case: "channel \(channel)")
+        expectParity(abs(a.deviation / b.deviation - 1), below: 0.05, "RMS granularity rel", case: "channel \(channel)")
     }
 }
