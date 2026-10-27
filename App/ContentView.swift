@@ -77,8 +77,8 @@ struct ContentView: View {
         }
     }
 
-    // The toolbar and the alert's binding are properties of their own because inside `body`, the
-    // type checker took 0.4 s and 0.3 s over each, on every build (#292).
+    // The toolbar and the alert's binding are properties of their own: inside `body`, they took the
+    // type checker 0.4 s and 0.3 s on every build (#292).
 
     /// The window's toolbar: what the canvas shows, centred, then the buttons.
     @ToolbarContentBuilder private var windowToolbar: some ToolbarContent {
