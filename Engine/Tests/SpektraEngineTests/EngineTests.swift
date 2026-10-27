@@ -750,7 +750,9 @@ extension PhotoOpeningTests {
         for channel in 0..<3 {
             let bin = Int((film[channel] - ToneGraph.stops.lowerBound) / 16 * 256)
             let full = graph.histogram.firstIndex { $0[channel] > 0 }
-            #expect(graph.histogram.map { $0[channel] }.reduce(0, +) == 1)
+            // Summed outside `#expect`: inside, it took the type checker 0.3 s (#292).
+            let total = graph.histogram.map { $0[channel] }.reduce(0, +)
+            #expect(total == 1)
             #expect(full.map { abs($0 - bin) <= 1 } == true, "channel \(channel): bin \(String(describing: full)), expected \(bin)")
         }
 

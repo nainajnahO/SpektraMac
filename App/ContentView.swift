@@ -23,20 +23,7 @@ struct ContentView: View {
             .copyable([model.finishedPhoto].compactMap { $0 })
             .navigationTitle(model.photo?.name ?? "SpektraMac")
             .navigationSubtitle(status)
-            .toolbar {
-                ToolbarItemGroup(placement: .principal) {
-                    ShowPicker()
-                }
-                ToolbarItemGroup {
-                    Button("Open…", systemImage: "folder") { model.isImporting = true }
-                    Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
-                        .disabled(!model.canSave)
-                    shareButton
-                    Button("Log", systemImage: "list.bullet.rectangle") { openWindow(id: "log") }
-                    Toggle("Adjust", systemImage: "slider.horizontal.3", isOn: $showsSettings)
-                        .help("Show or hide the settings")
-                }
-            }
+            .toolbar { windowToolbar }
             // No toolbar background, so the inspector's glass is even to the top: macOS draws one for
             // each column, over the inspector a dark fade behind the tabs. The zoomed photo shows
             // under the toolbar's glass instead (``ImageCanvas``).
@@ -68,9 +55,7 @@ struct ContentView: View {
             .focusedSceneValue(\.settingsCategory, $category)
             .focusedSceneValue(\.showsSettings, $showsSettings)
             .dropDestination(for: URL.self) { urls, _ in
-                guard let url = urls.first else { return false }
-                model.open(url)
-                return true
+                if let url = urls.first { model.open(url) }
             }
             // Photos sent by Finder's Open With and the Dock icon (the app's document types).
             .onOpenURL { url in model.open(url) }
@@ -86,11 +71,34 @@ struct ContentView: View {
             case .failure(let error): model.importFailed(error)
             }
         }
-        .alert(model.failure?.title ?? "", isPresented: Binding { model.failure != nil } set: { if !$0 { model.failure = nil } },
-               presenting: model.failure) { _ in
+        .alert(model.failure?.title ?? "", isPresented: showsFailure, presenting: model.failure) { _ in
         } message: { failure in
             Text(failure.message)
         }
+    }
+
+    // The toolbar and the alert's binding are properties of their own because inside `body`, the
+    // type checker took 0.4 s and 0.3 s over each, on every build (#292).
+
+    /// The window's toolbar: what the canvas shows, centred, then the buttons.
+    @ToolbarContentBuilder private var windowToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .principal) {
+            ShowPicker()
+        }
+        ToolbarItemGroup {
+            Button("Open…", systemImage: "folder") { model.isImporting = true }
+            Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
+                .disabled(!model.canSave)
+            shareButton
+            Button("Log", systemImage: "list.bullet.rectangle") { openWindow(id: "log") }
+            Toggle("Adjust", systemImage: "slider.horizontal.3", isOn: $showsSettings)
+                .help("Show or hide the settings")
+        }
+    }
+
+    /// Whether the alert shows: while there's a failure, which dismissing it clears.
+    private var showsFailure: Binding<Bool> {
+        Binding { model.failure != nil } set: { shows in if !shows { model.failure = nil } }
     }
 
     /// Share: the finished photo, or a greyed-out button in its place without a photo, so the
