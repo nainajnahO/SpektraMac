@@ -125,8 +125,9 @@ func qaOracleDeltaE(pair: String) throws {
         let ours = stride(from: 0, to: field.count, by: 3).map { Double(field[$0]) }
         let (mean, deviation) = meanAndDeviation(ours)
         let python = meanAndDeviation(try golden("primitives", name).values.map(Double.init))
-        expectParity(abs(mean / python.mean - 1), below: 0.05, "mean rel", case: name)
-        expectParity(abs(deviation / python.deviation - 1), below: 0.05, "std rel", case: name)
+        // The same seed each run, so the same field: 3× the most measured, 0.061 % and 0.70 %, unblurred.
+        expectParity(abs(mean / python.mean - 1), below: 0.002, "mean rel", case: name)
+        expectParity(abs(deviation / python.deviation - 1), below: 0.03, "std rel", case: name)
         if blur == 0 {
             var covariance = 0.0
             for y in 0..<512 {
