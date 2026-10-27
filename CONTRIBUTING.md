@@ -53,7 +53,7 @@ rely on. The app has no tests of its own, so a pull request says what you tried 
 
 The parity tests compare every stage against dumps from the original Python Spektrafilm, at commit `3bb2c2d`, in
 `golden/<case>/`: one float32 `.npy` per pipeline tap, the film's spectral lookup table and the parameters used.
-The dumps (about 230 MB) aren't in the repository; make them with that Spektrafilm, installed as the README's
+The dumps (about 550 MB) aren't in the repository; make them with that Spektrafilm, installed as the README's
 [Faithful to Spektrafilm](README.md#faithful-to-spektrafilm) says:
 
 ```sh
