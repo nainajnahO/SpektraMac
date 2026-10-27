@@ -173,9 +173,9 @@ private struct ImageCanvas: View {
     /// zoomed photo is moved from the centre, in points.
     @State private var zoom: CGFloat = 1
     @State private var offset: CGSize = .zero
-    @State private var canvasSize: CGSize = .zero
-    /// How much of the canvas the toolbar (top) and the settings panel (trailing) cover.
-    @State private var insets = EdgeInsets()
+    /// The canvas below the toolbar and beside the settings panel, in the canvas's coordinates: the
+    /// photo is fitted and centred there.
+    @State private var visibleArea = CGRect.zero
     /// Where the pointer is over the canvas below the toolbar and beside the panel: scrolling moves
     /// the photo under it, or zooms around it.
     @State private var pointer: CGPoint?
@@ -186,11 +186,17 @@ private struct ImageCanvas: View {
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        // Takes the canvas below the toolbar and beside the panel, whose geometry gives their sizes
-        // (the safe area's insets); the canvas itself reaches under them.
+        // Takes the canvas below the toolbar and beside the panel, whose geometry gives where that
+        // is, read as one value: its size and where it starts (the safe area's insets). The canvas
+        // itself reaches under them. As the window opens and takes its saved size, macOS 26 lays the
+        // toolbar out at 52, 42 and then 52 pt within one frame. Read alone, the insets repeat 52,
+        // which SwiftUI takes for a loop: it stops calling the action, and the photo was fitted below
+        // a 42-pt toolbar. The size changes with them, so the area doesn't repeat (#293).
         Color.clear
-            .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets in
-                self.insets = insets
+            .onGeometryChange(for: CGRect.self) { geometry in
+                CGRect(origin: CGPoint(x: geometry.safeAreaInsets.leading, y: geometry.safeAreaInsets.top), size: geometry.size)
+            } action: { area in
+                visibleArea = area
                 offset = clamped(offset)
             }
             .overlay { canvas.ignoresSafeArea(.container, edges: [.top, .trailing]) }
@@ -284,7 +290,7 @@ private struct ImageCanvas: View {
                     switch phase {
                     // Not under the toolbar or the panel: they lie over the canvas, yet it's still
                     // told where the pointer is.
-                    case .active(let location) where location.x < visibleSize.width && location.y >= insets.top:
+                    case .active(let location) where visibleArea.contains(location):
                         pointer = location
                     case .active, .ended: pointer = nil
                     }
@@ -313,10 +319,6 @@ private struct ImageCanvas: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .background(.black.opacity(0.05))
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-            canvasSize = size
-            offset = clamped(offset)
-        }
         .onChange(of: model.photo?.id) {
             zoom = 1
             offset = .zero
@@ -334,12 +336,10 @@ private struct ImageCanvas: View {
     }
 
     /// The canvas below the toolbar and beside the panel.
-    private var visibleSize: CGSize {
-        CGSize(width: max(0, canvasSize.width - insets.trailing), height: max(0, canvasSize.height - insets.top))
-    }
+    private var visibleSize: CGSize { visibleArea.size }
 
     private var visibleCentre: CGPoint {
-        CGPoint(x: visibleSize.width / 2, y: insets.top + visibleSize.height / 2)
+        CGPoint(x: visibleArea.midX, y: visibleArea.midY)
     }
 
     /// While the Exposure slider is held on a mark: the region that mark meters, tinted.
