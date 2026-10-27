@@ -82,8 +82,9 @@ func exposeMatchesLogEFilm(caseName: String) throws {
     let difference = Difference(gpu.download(output), reference.values, floor: 1)
     // The camera's diffusion filter convolves in f32, Python in f64: the round-off, about a
     // millionth of the brightest light, reaches the darkest pixels' logs (up to 0.003 below −2.5,
-    // as Python's own filter in f32 gives; 2e-5 elsewhere).
-    expectParity(difference.maxAbsolute, below: caseName.hasPrefix("diffusion") ? 5e-3 : 1e-4, "log_e_film max abs",
+    // as Python's own filter in f32 gives; 2e-5 elsewhere). The rest: 3× the most measured, 4.9e-6
+    // on the Vision3 500T chart.
+    expectParity(difference.maxAbsolute, below: caseName.hasPrefix("diffusion") ? 5e-3 : 2e-5, "log_e_film max abs",
                  case: caseName)
 }
 
@@ -173,7 +174,8 @@ func developMatchesPythonWithoutCouplers(caseName: String) throws {
     let output = try gpu.run { simulation.encodeDevelop(input, on: $0) }
     let reference = try SpektraEngineTests.golden(caseName, "cmy_film_no_couplers")
     let difference = Difference(gpu.download(output), reference.values, floor: 1)
-    expectParity(difference.maxAbsolute, below: 1e-5, "density max abs", case: caseName)
+    // 3× the most measured: 4.8e-7, on the Velvia chart and photo.
+    expectParity(difference.maxAbsolute, below: 2e-6, "density max abs", case: caseName)
 }
 
 /// Chart: couplers without diffusion (lut_mode). Photo: with the inhibitor diffusion blur.
@@ -189,7 +191,8 @@ func developMatchesCMYFilm(caseName: String) throws {
     let reference = try SpektraEngineTests.golden(caseName, "cmy_film")
     let difference = Difference(gpu.download(output), reference.values, floor: 1)
     // The photo's inhibitor diffusion is Apple's blur, which Python's recursive filter approximates.
-    expectParity(difference.maxAbsolute, below: hasPhotoEffects(caseName) ? 5e-2 : 1e-4, "cmy_film max abs", case: caseName)
+    // The rest: 3× the most measured, 1.2e-6 on the Velvia chart.
+    expectParity(difference.maxAbsolute, below: hasPhotoEffects(caseName) ? 5e-2 : 4e-6, "cmy_film max abs", case: caseName)
 }
 
 @Test(arguments: goldenCases.filter { $0.hasPrefix("photo") })
