@@ -165,14 +165,14 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
     @Environment(PhotoModel.self) private var model
     let title: String
     let systemImage: String
-    let adjustment: PhotoModel.Adjustment
+    let adjustment: Controls.Adjustment
     let isOn: Binding<Bool>?
     let main: Main
     let options: Options
     @SceneStorage private var isExpanded: Bool
     @SceneStorage private var showsOptions: Bool
 
-    init(_ title: String, systemImage: String, adjustment: PhotoModel.Adjustment, isOn: Binding<Bool>? = nil,
+    init(_ title: String, systemImage: String, adjustment: Controls.Adjustment, isOn: Binding<Bool>? = nil,
          @ViewBuilder main: () -> Main, @ViewBuilder options: () -> Options) {
         self.title = title
         self.systemImage = systemImage
@@ -246,7 +246,7 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
 
 extension AdjustmentGroup where Options == EmptyView {
     /// A group whose controls all show at once, with no Options.
-    init(_ title: String, systemImage: String, adjustment: PhotoModel.Adjustment, isOn: Binding<Bool>? = nil,
+    init(_ title: String, systemImage: String, adjustment: Controls.Adjustment, isOn: Binding<Bool>? = nil,
          @ViewBuilder main: () -> Main) {
         self.init(title, systemImage: systemImage, adjustment: adjustment, isOn: isOn, main: main) { EmptyView() }
     }
@@ -584,7 +584,7 @@ private extension MeteringMark {
 private struct DiffusionGroup: View {
     @Environment(PhotoModel.self) private var model
     let title: String
-    let adjustment: PhotoModel.Adjustment
+    let adjustment: Controls.Adjustment
     let filter: WritableKeyPath<Controls, Parameters.DiffusionFilter>
 
     var body: some View {
@@ -753,7 +753,7 @@ private struct ValueSlider: View {
 }
 
 /// A control as Photos shows its main adjustments: frames of the photo across its range
-/// (``PhotoModel/Strip``), with a line at the value; `marks` are dots under it. As in Photos, the
+/// (``Controls/Strip``), with a line at the value; `marks` are dots under it. As in Photos, the
 /// value itself shows on the control's bar under Options. Clicking or dragging along it sets the
 /// value there; with Full Keyboard Access the arrow keys step it, and the system slider stands in
 /// for VoiceOver, reading the value in `format` and `unit`, with an action to go to each mark.
