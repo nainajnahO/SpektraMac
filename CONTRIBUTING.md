@@ -85,6 +85,13 @@ say by how much in the pull request. If it changes a step's speed or result, reg
 [docs/porting.md](docs/porting.md)'s table and images with `tools/port_report.py`, and say why in its text if the step
 now works differently. Anything meant to render differently from Spektrafilm starts with an issue.
 
+Before a pull request that touches the engine's speed or memory, run `tools/benchmark.sh` on an idle Mac (about five
+minutes). It times the README's renders and the saves of a 50 and a 100 MP photo, with and without a diffusion filter,
+and fails, naming the row, when a time is more than 15 % slower or a peak more than 10 % higher than
+`tools/benchmark-baseline.tsv`. Put its table in the pull request. The committed baseline is the maintainer's MacBook
+Pro (M1 Pro, 16 GB): on another Mac, record your own on `main` first with `tools/benchmark.sh --update`, and don't
+commit it. A change that makes renders faster or leaner on purpose records the new baseline in the same pull request.
+
 ## Code
 
 - Keep a change to what its issue asks: no abstractions, files or options for later.
