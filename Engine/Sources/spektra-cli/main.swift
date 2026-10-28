@@ -1,6 +1,7 @@
 import CoreImage
 import Foundation
 import SpektraEngine
+import UniformTypeIdentifiers
 
 let arguments = CommandLine.arguments.dropFirst()
 switch arguments.first {
@@ -11,11 +12,18 @@ case "photo":
     guard numbers.count == 2, let path = arguments.dropFirst(3).first else { usage() }
     try writeTestPhoto(width: numbers[0], height: numbers[1], to: URL(filePath: path))
 case "save":
-    // spektra-cli save <photo> <file.jpg> [lens | enlarger]: saves the photo as the app does, timed.
-    let paths = Array(arguments.dropFirst())
+    // spektra-cli save <photo> <file.jpg|png|tiff> [lens | enlarger] [--film <stock>]: saves the photo
+    // as the app does, timed.
+    var paths = Array(arguments.dropFirst())
+    var film: String?
+    if let option = paths.firstIndex(of: "--film") {
+        guard option + 1 < paths.count else { usage() }
+        film = paths[option + 1]
+        paths.removeSubrange(option...option + 1)
+    }
     let diffusion = paths.count == 3 ? paths[2] : nil
     guard paths.count == 2 || ["lens", "enlarger"].contains(diffusion) else { usage() }
-    try await save(URL(filePath: paths[0]), to: URL(filePath: paths[1]), diffusion: diffusion)
+    try await save(URL(filePath: paths[0]), to: URL(filePath: paths[1]), film: film, diffusion: diffusion)
 case "benchmark":
     if let path = arguments.dropFirst().first, Int(path) == nil {
         // spektra-cli benchmark <photo>: times the app's renders of a photo (the README's figures).
@@ -35,27 +43,37 @@ default:
 func usage() -> Never {
     print("""
         Usage: spektra-cli benchmark [width height | photo]
-               spektra-cli save <photo> <file.jpg> [lens | enlarger]
+               spektra-cli save <photo> <file.jpg|png|tiff> [lens | enlarger] [--film <stock>]
                spektra-cli photo <width> <height> <file.jpg>
         """)
     exit(1)
 }
 
-/// Saves the photo at `url` as a JPEG at `destination` the way the app does, in a process of its
-/// own: opens it, renders the preview, then times ``Engine/export(controls:as:)`` and the write, as
-/// the app's Save reports them. The default settings (Portra 400 printed on Portra Endura), with the
-/// default diffusion filter (Black Pro-Mist 1/2) on the `lens` or the `enlarger` if asked.
-/// tools/benchmark.sh reads the process's peak memory footprint.
-func save(_ url: URL, to destination: URL, diffusion: String?) async throws {
+/// Saves the photo at `url` at `destination` the way the app does, as a JPEG, PNG or TIFF by its
+/// extension, in a process of its own: opens it, renders the preview, then times
+/// ``Engine/export(controls:as:)`` and the write, as the app's Save reports them. The default
+/// settings (Portra 400 printed on Portra Endura), or what choosing `film` sets
+/// (tools/looks.sh), with the default diffusion filter (Black Pro-Mist 1/2) on the `lens` or the
+/// `enlarger` if asked. tools/benchmark.sh reads the process's peak memory footprint.
+func save(_ url: URL, to destination: URL, film: String?, diffusion: String?) async throws {
+    guard let type = UTType(filenameExtension: destination.pathExtension),
+          [UTType.jpeg, .png, .tiff].contains(where: { type.conforms(to: $0) }) else { usage() }
     let engine = try Engine()
     _ = try await engine.open(RGBImage.decode(contentsOf: url))
     var controls = Controls()
+    if let film {
+        guard engine.films.contains(where: { $0.stock == film }) else {
+            print("No film \(film). Films: \(engine.films.map(\.stock).joined(separator: ", "))")
+            exit(1)
+        }
+        controls = controls.choosing(film: film, from: engine.films)
+    }
     controls.cameraDiffusion.active = diffusion == "lens"
     controls.enlargerDiffusion.active = diffusion == "enlarger"
     _ = try await engine.render(controls: controls, mode: .preview)
     let start = ContinuousClock.now
-    let image = try await engine.export(controls: controls, as: .jpeg)
-    try image.write(to: destination, as: .jpeg, metadata: nil,
+    let image = try await engine.export(controls: controls, as: type)
+    try image.write(to: destination, as: type, metadata: nil,
                     record: EditRecord(software: "spektra-cli", summary: "", keywords: [], controls: controls))
     // Plain milliseconds, for the script to read in any locale.
     print("save: \(Int(((ContinuousClock.now - start) / .milliseconds(1)).rounded())) ms")
