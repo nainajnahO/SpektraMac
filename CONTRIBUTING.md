@@ -105,6 +105,10 @@ say by how much in the pull request. If it changes a step's speed or result, reg
 [docs/porting.md](docs/porting.md)'s table and images with `tools/port_report.py`, and say why in its text if the step
 now works differently. Anything meant to render differently from Spektrafilm starts with an issue.
 
+When a change shows in renders, run `tools/looks.sh` (under a minute; it needs `cwebp`: `brew install webp`). It
+makes the film looks the README and the user guide show from NASA's Artemis II photo, saved as the app saves them with
+each film's defaults. Commit the images it changes, and the pull request shows old and new side by side.
+
 Before a pull request that touches the engine's speed or memory, run `tools/benchmark.sh` on an idle Mac (about five
 minutes). It times the README's renders and the saves of a 50 and a 100 MP photo, with and without a diffusion filter,
 and fails, naming the row, when a time is more than 15 % slower or a peak more than 10 % higher than
