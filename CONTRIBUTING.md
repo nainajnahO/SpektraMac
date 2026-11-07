@@ -82,7 +82,8 @@ automationmodetool enable-automationmode-without-authentication
 
 They launch the app as it's installed for you, with your settings: each test opens a photo of its own (as Finder's
 Open With does, so it goes to File › Open Recent) and undoes its changes before the app quits, so the settings it keeps
-for the next launch are the ones it started with.
+for the next launch are the ones it started with. Each starts with the main window alone, not the windows the app had
+open, and what's kept per window, such as which settings tab shows, may change.
 
 ### Runtime checks
 
