@@ -257,8 +257,9 @@ final class PhotoModelTests {
     }
 
     /// A photo opened while the engine is opening it, and another chosen straight after: the first
-    /// one's preview waits while the engine opens the second, and the Log gives the wait apart from
-    /// the preview's own time (#298).
+    /// one's preview waits while the engine opens the second. Stopped once the second shows (#320),
+    /// it still runs on the engine, as asked, and the second one's preview waits behind it: the Log
+    /// gives that wait apart from the preview's own time (#298).
     @Test func previewAskedForDuringAnOpenSaysItWaited() async throws {
         let model = try await makeModel()
         let first = try photo(named: "First.jpg", width: 6000, height: 4000)
@@ -272,6 +273,34 @@ final class PhotoModelTests {
         let messages = model.log.map(\.message)
         let preview = try #require(messages.first { $0.hasPrefix("Rendered preview") })
         #expect(preview.contains(", after waiting "), "\(messages)")
+    }
+
+    /// Two photos opened quickly, as above: the first one's render, waiting behind the second
+    /// one's open, stops once the second shows, and the second renders as itself, its whole photo
+    /// at its own size and its strips those it gets opened alone (#320).
+    @Test func secondOfTwoQuickOpensRendersAsItself() async throws {
+        let model = try await makeModel()
+        model.canvasLongSide = 400
+        model.wantsFullResolution = true
+        let first = try photo(named: "First.jpg", width: 6000, height: 4000)
+        // Lighter, so its readings, and so its Exposure strip, differ from the first's.
+        let second = try photo(named: "Second.jpg", width: 1200, height: 800,
+                               colours: [CGColor(srgbRed: 0.6, green: 0.6, blue: 0.6, alpha: 1), CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)])
+        model.open(second)
+        try await until { model.log.contains { $0.message.contains("thumbnails in") } }
+        let alone = model.strips
+
+        let start = model.log.count
+        model.open(first)
+        try await Task.sleep(for: .milliseconds(50))
+        model.open(second)
+        try await until { !model.isLoading && messages(of: model, since: start).contains { $0.contains("thumbnails in") } }
+        let opened = messages(of: model, since: start)
+        let full = opened.filter { $0.hasPrefix("Rendered full resolution") }
+        #expect(!full.isEmpty && full.allSatisfy { $0.hasPrefix("Rendered full resolution (1200 × 800)") }, "\(opened)")
+        for strip in Controls.Strip.allCases {
+            #expect(model.strips[strip]?.map(pixels) == alone[strip]?.map(pixels), "\(strip)")
+        }
     }
 
     // MARK: Timing the engine's work
@@ -314,12 +343,14 @@ final class PhotoModelTests {
     }
 
     /// A photo of `width` × `height` as a JPEG in the tests' folder, written as Save writes one: a
-    /// gradient from dark blue to light orange, with every tone between.
-    private func photo(named name: String, width: Int, height: Int) throws -> URL {
+    /// gradient between `colours`, from dark blue to light orange unless they're given, with every
+    /// tone between.
+    private func photo(named name: String, width: Int, height: Int,
+                       colours: [CGColor] = [CGColor(srgbRed: 0.05, green: 0.1, blue: 0.4, alpha: 1),
+                                             CGColor(srgbRed: 0.95, green: 0.7, blue: 0.2, alpha: 1)]) throws -> URL {
         let context = try #require(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                              bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
-        let colours = [CGColor(srgbRed: 0.05, green: 0.1, blue: 0.4, alpha: 1), CGColor(srgbRed: 0.95, green: 0.7, blue: 0.2, alpha: 1)]
         let gradient = try #require(CGGradient(colorsSpace: nil, colors: colours as CFArray, locations: nil))
         context.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: width, y: height), options: [])
         let url = folder.appending(path: name)
@@ -338,6 +369,11 @@ final class PhotoModelTests {
     /// The Log's messages from entry `start` on.
     private func messages(of model: PhotoModel, since start: Int) -> [String] {
         model.log.dropFirst(start).map(\.message)
+    }
+
+    /// `image`'s pixels, to compare renders by.
+    private func pixels(_ image: CGImage) -> Data? {
+        image.dataProvider?.data as Data?
     }
 
     /// What a held slider may render: the preview, or a kept render shown in its place.
