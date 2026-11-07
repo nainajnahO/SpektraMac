@@ -502,6 +502,8 @@ struct LogView: View {
         }
         .frame(height: 80)
         .accessibilityElement(children: .ignore)
+        // A role, which the accessibility audit wants: one item, read as a picture of the lines.
+        .accessibilityAddTraits(.isImage)
         .accessibilityLabel("CPU and GPU use over the last minute")
         .accessibilityValue(usage.last.map { "CPU \($0.cpu.formatted(percent)), GPU \($0.gpu.formatted(percent))" } ?? "")
     }

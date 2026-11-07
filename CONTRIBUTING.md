@@ -60,6 +60,30 @@ what's set and what Undo is called. Each test keeps its settings in its own temp
 of File › Open Recent, so a run leaves yours as they were. The app's window opens while they run. What they can't see,
 such as what's on screen or how a drag feels, a pull request still says you tried in the app.
 
+### UI tests
+
+The same command also runs the UI tests, in `UITests/`. They drive the app as a person does, through its
+accessibility tree: whether a control is greyed out, what a menu item says, how a Reset arrow looks enabled and
+disabled, and Xcode's accessibility audit (`performAccessibilityAudit()`) of the main window with each settings tab
+showing and of the Log window. An audit finding that has an issue of its own is listed in the test with its number,
+and passes until it's fixed; any other fails the test. To run only them:
+
+```sh
+xcodebuild test -project SpektraMac.xcodeproj -scheme SpektraMac -destination 'platform=macOS' -only-testing:SpektraMacUITests
+```
+
+They take over the screen for about four minutes, so run them when you can leave the Mac alone. macOS lets a test drive
+an app only in Automation Mode, and by default turning it on asks for an administrator's password each time. Once, in
+Terminal, run this and enter your password, and after that the tests run unattended:
+
+```sh
+automationmodetool enable-automationmode-without-authentication
+```
+
+They launch the app as it's installed for you, with your settings: each test opens a photo of its own (as Finder's
+Open With does, so it goes to File › Open Recent) and undoes its changes before the app quits, so the settings it keeps
+for the next launch are the ones it started with.
+
 ### Runtime checks
 
 The tests check what the engine computes, not how it reaches memory: a read past the end of a value, a data race
