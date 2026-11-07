@@ -56,8 +56,9 @@ final class PhotoModelTests {
         }
     }
 
-    /// Zoomed in, a slider held and dragged back over a value already shown shows its kept render,
-    /// and should stop there until it's let go (#289): today it carries on to the full-size render.
+    /// Zoomed in, a slider held and dragged back over a value already shown shows its kept render
+    /// and stops there; once it's let go, the whole photo renders, but not the screen size again
+    /// (#289).
     @Test func heldSliderBackOverAKeptRenderZoomedIn() async throws {
         let model = try await openedModel()
         model.wantsFullResolution = true
@@ -73,10 +74,38 @@ final class PhotoModelTests {
         try await until { messages(of: model, since: back).contains { $0.hasPrefix("Showed the kept screen size") } }
         try await Task.sleep(for: .seconds(1))
         let held = messages(of: model, since: start)
-        withKnownIssue("#289: a kept render carries on to the full-size render while the slider is held", isIntermittent: true) {
-            #expect(held.allSatisfy(isPreview), "\(held)")
-        }
+        #expect(held.allSatisfy(isPreview), "\(held)")
+
+        let released = model.log.count
         model.isAdjusting = false
+        try await until { messages(of: model, since: released).contains { $0.hasPrefix("Rendered full resolution") } }
+        let after = messages(of: model, since: released)
+        #expect(!after.contains { $0.hasPrefix("Rendered screen size") }, "\(after)")
+    }
+
+    /// Zoomed out, the same: the kept render stops there while the slider is held, and once it's
+    /// let go, the strips follow without the screen size again (#289).
+    @Test func heldSliderBackOverAKeptRenderZoomedOut() async throws {
+        let model = try await openedModel()
+        let kept = model.controls
+        // Other controls, with their own strips: those of the kept render are no longer shown.
+        let changed = model.log.count
+        model.controls.printExposure = 1.2
+        try await until { messages(of: model, since: changed).contains { $0.contains("thumbnails in") } }
+
+        let start = model.log.count
+        model.isAdjusting = true
+        model.controls = kept
+        try await until { messages(of: model, since: start).contains { $0.hasPrefix("Showed the kept screen size") } }
+        try await Task.sleep(for: .seconds(1))
+        let held = messages(of: model, since: start)
+        #expect(held.allSatisfy(isPreview), "\(held)")
+
+        let released = model.log.count
+        model.isAdjusting = false
+        try await until { messages(of: model, since: released).contains { $0.contains("thumbnails in") } }
+        let after = messages(of: model, since: released)
+        #expect(!after.contains { $0.hasPrefix("Rendered screen size") || $0.hasPrefix("Rendered full resolution") }, "\(after)")
     }
 
     // MARK: Reset
