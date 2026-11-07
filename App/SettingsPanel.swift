@@ -202,47 +202,46 @@ private struct AdjustmentGroup<Main: View, Options: View>: View {
                         .accessibilityLabel("\(title) options")
                         .accessibilityValue(showsOptions ? "Expanded" : "Collapsed")
                     }
-                    .disclosureGroupStyle(PhotosDisclosureStyle(contentIndent: 0))
+                    .disclosureGroupStyle(PhotosDisclosureStyle(contentIndent: 0) {})
                 }
             }
             .padding(.top, 6)
             .disabled(isOn?.wrappedValue == false)
         } label: {
-            HStack(spacing: 8) {
-                Button {
-                    withAnimation(.snappy) { isExpanded.toggle() }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: systemImage)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 14, height: 14)
-                        Text(title)
-                            .font(.system(size: 14))
-                        Spacer()
-                    }
-                    .contentShape(.rect)
+            Button {
+                withAnimation(.snappy) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: systemImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 14, height: 14)
+                    Text(title)
+                        .font(.system(size: 14))
+                    Spacer()
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel(title)
-                .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-                // Borderless draws it grey and greys it further when disabled; a foreground style
-                // over it, inherited or set, would hold it at one shade.
-                Button("Reset \(title)", systemImage: "arrow.uturn.backward") { model.reset(adjustment) }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .font(.callout)
-                    .disabled(model.isAtDefaults(adjustment))
-                    .help("Back to the film's defaults")
-                if let isOn {
-                    Toggle(title, isOn: isOn)
-                        .toggleStyle(CircleToggleStyle())
-                        .help(isOn.wrappedValue ? "Turn off" : "Turn on")
-                }
+                .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel(title)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
         }
-        .disclosureGroupStyle(PhotosDisclosureStyle(contentIndent: 14))
+        .disclosureGroupStyle(PhotosDisclosureStyle(contentIndent: 14) {
+            // Borderless draws it grey and greys it further when disabled; a foreground style
+            // over it, inherited or set, would hold it at one shade.
+            Button("Reset \(title)", systemImage: "arrow.uturn.backward") { model.reset(adjustment) }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .font(.callout)
+                .disabled(model.isAtDefaults(adjustment))
+                .help("Back to the film's defaults")
+            if let isOn {
+                Toggle(title, isOn: isOn)
+                    .toggleStyle(CircleToggleStyle())
+                    .help(isOn.wrappedValue ? "Turn off" : "Turn on")
+            }
+        })
     }
 }
 
@@ -257,9 +256,13 @@ extension AdjustmentGroup where Options == EmptyView {
 /// Photos' disclosure: a small grey chevron before the label that turns as it opens, and the
 /// content under it, indented by `contentIndent`. The label is a button that opens it too, named
 /// with the disclosure and whether it's open, so VoiceOver and the keyboard have that and the
-/// chevron is for the pointer alone. A group (indented) closed has a line under it, from its symbol.
-private struct PhotosDisclosureStyle: DisclosureGroupStyle {
+/// chevron is for the pointer alone. `accessories` follow the label in its row, apart from it:
+/// macOS gives everything in a disclosure group's label the disclosure triangle's role, so a
+/// button there would read as one (#316). A group (indented) closed has a line under it, from its
+/// symbol.
+private struct PhotosDisclosureStyle<Accessories: View>: DisclosureGroupStyle {
     let contentIndent: CGFloat
+    @ViewBuilder let accessories: Accessories
 
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -274,7 +277,10 @@ private struct PhotosDisclosureStyle: DisclosureGroupStyle {
                         withAnimation(.snappy) { configuration.isExpanded.toggle() }
                     }
                     .accessibilityHidden(true)
-                configuration.label
+                HStack(spacing: 8) {
+                    configuration.label
+                    accessories
+                }
             }
             .frame(minHeight: 22)
             if configuration.isExpanded {
@@ -288,7 +294,9 @@ private struct PhotosDisclosureStyle: DisclosureGroupStyle {
     }
 }
 
-/// Photos' on/off circle for an adjustment: a ring when it's off, a check when it's on.
+/// Photos' on/off circle for an adjustment: a ring when it's off, a check when it's on. A switch
+/// stands in for it with VoiceOver, its label hidden, so the label names the switch instead of
+/// being an element of its own, never drawn.
 private struct CircleToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button {
@@ -302,6 +310,8 @@ private struct CircleToggleStyle: ToggleStyle {
         .buttonStyle(.borderless)
         .accessibilityRepresentation {
             Toggle(isOn: configuration.$isOn) { configuration.label }
+                .toggleStyle(.switch)
+                .labelsHidden()
         }
     }
 }

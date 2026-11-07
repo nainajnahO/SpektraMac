@@ -23,8 +23,8 @@ Accessibility). Assistive technology from other makers hasn't been tried.
 
 From the release after 1.3:
 
-- VoiceOver reads each group of settings by its name and whether it's open, and each slider's and strip's value with
-  its unit, such as "+1.3 EV".
+- VoiceOver reads each group of settings by its name and whether it's open, its Reset arrow as a button and its on/off
+  circle as a switch, and each slider's and strip's value with its unit, such as "+1.3 EV".
 - It describes the photo by its file name, film and paper, and the tone graph as one item that says how its points
   print.
 - On the Exposure strip, VoiceOver's actions (VO-Command-Space) go to each metering mark.
