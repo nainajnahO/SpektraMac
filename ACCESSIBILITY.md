@@ -25,6 +25,7 @@ From the release after 1.3:
 
 - VoiceOver reads each group of settings by its name and whether it's open, its Reset arrow as a button and its on/off
   circle as a switch, and each slider's and strip's value with its unit, such as "+1.3 EV".
+- It names the window's areas as it moves into them: the photo and the settings.
 - It describes the photo by its file name, film and paper, and the tone graph as one item that says how its points
   print.
 - On the Exposure strip, VoiceOver's actions (VO-Command-Space) go to each metering mark.

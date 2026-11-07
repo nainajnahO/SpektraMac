@@ -114,7 +114,7 @@ final class SpektraMacUITests: XCTestCase {
         let log = app.windows["Log"]
         switch issue.auditType {
         case .sufficientElementDescription where issue.element?.label.isEmpty == true:
-            return log.exists && log.frame.contains(frame) ? 311 : 310
+            return log.exists && log.frame.contains(frame) ? 311 : nil
         case .contrast where main.scrollViews.firstMatch.frame.contains(frame):
             return 312
         case .contrast where frame.minY < main.frame.minY + 60:
