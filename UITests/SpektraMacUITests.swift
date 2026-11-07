@@ -218,25 +218,26 @@ final class SpektraMacUITests: XCTestCase {
         app.menuItems[film].click()
     }
 
-    /// The settings panel's controls of every kind. The header of a settings group is a disclosure
-    /// group's label, and macOS gives everything in it, the Reset arrow and the on/off switch
-    /// included, the disclosure triangle's role.
-    @MainActor private var panelControls: XCUIElementQuery {
-        app.windows["main"].scrollViews.firstMatch.descendants(matching: .any)
+    /// The settings panel.
+    @MainActor private var panel: XCUIElement {
+        app.windows["main"].scrollViews.firstMatch
     }
 
-    /// The Reset arrows of the settings tab showing, top to bottom.
+    /// The Reset arrows of the settings tab showing, top to bottom: buttons, not part of their
+    /// group's disclosure triangle (#316).
     @MainActor private func resetArrows() -> [XCUIElement] {
-        panelControls.matching(NSPredicate(format: "label BEGINSWITH 'Reset '")).allElementsBoundByIndex
+        let arrows = panel.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reset '")).allElementsBoundByIndex
             .sorted { $0.frame.minY < $1.frame.minY }
+        XCTAssertFalse(arrows.isEmpty, "the Reset arrows, as buttons")
+        return arrows
     }
 
-    /// A settings group's on/off switch: right of its Reset arrow, in its header.
+    /// A settings group's on/off switch, in its header: a switch, not part of the group's disclosure
+    /// triangle (#316). XCUITest finds it among the checkboxes.
     @MainActor private func toggle(_ group: String) -> XCUIElement? {
-        let reset = panelControls.matching(NSPredicate(format: "label == %@", "Reset \(group)")).firstMatch
-        XCTAssert(reset.waitForExistence(timeout: 5), "Reset \(group)")
-        return panelControls.matching(NSPredicate(format: "label == %@", group)).allElementsBoundByIndex
-            .first { $0.frame.minX >= reset.frame.maxX && abs($0.frame.midY - reset.frame.midY) < 4 }
+        XCTAssert(panel.buttons["Reset \(group)"].waitForExistence(timeout: 5), "Reset \(group)")
+        let toggle = panel.checkBoxes[group]
+        return toggle.exists ? toggle : nil
     }
 
     /// Changes something in `group`: its switch if it has one, else the first slider under its header.
@@ -248,11 +249,12 @@ final class SpektraMacUITests: XCTestCase {
         // The group's own sliders: under its header, above the next group's.
         func sliders() -> [XCUIElement] {
             let next = resetArrows().map(\.frame).filter { $0.minY > reset.frame.maxY }.map(\.minY).min() ?? .infinity
-            return app.windows["main"].scrollViews.firstMatch.sliders.allElementsBoundByIndex
+            return panel.sliders.allElementsBoundByIndex
                 .filter { $0.isEnabled && $0.frame.minY > reset.frame.maxY && $0.frame.maxY < next }
         }
         if sliders().isEmpty {
-            panelControls.matching(NSPredicate(format: "label == %@", "\(group) options")).firstMatch.click()
+            // A disclosure triangle, as the label of a disclosure group.
+            panel.disclosureTriangles["\(group) options"].click()
             // Until the options have opened, their sliders aren't where they'll be.
             Thread.sleep(forTimeInterval: 1)
         }
