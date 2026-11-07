@@ -65,8 +65,7 @@ such as what's on screen or how a drag feels, a pull request still says you trie
 The same command also runs the UI tests, in `UITests/`. They drive the app as a person does, through its
 accessibility tree: whether a control is greyed out, what a menu item says, how a Reset arrow looks enabled and
 disabled, and Xcode's accessibility audit (`performAccessibilityAudit()`) of the main window with each settings tab
-showing and of the Log window. An audit finding that has an issue of its own is listed in the test with its number,
-and passes until it's fixed; any other fails the test. To run only them:
+showing and of the Log window. Any audit finding fails the test. To run only them:
 
 ```sh
 xcodebuild test -project SpektraMac.xcodeproj -scheme SpektraMac -destination 'platform=macOS' -only-testing:SpektraMacUITests

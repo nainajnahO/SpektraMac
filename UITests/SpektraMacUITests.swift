@@ -81,8 +81,7 @@ final class SpektraMacUITests: XCTestCase {
     // MARK: Accessibility
 
     /// The accessibility audit (missing labels, contrast, hit areas, clipped text…) of the main window
-    /// with each settings tab showing, and of the Log window. A finding with an issue of its own
-    /// (``knownIssue(for:)``) is printed and passes; any other fails the test.
+    /// with each settings tab showing, and of the Log window. Any finding fails the test.
     @MainActor func testAccessibilityAudit() throws {
         try launch()
         defer { quit() }
@@ -101,11 +100,7 @@ final class SpektraMacUITests: XCTestCase {
                 if let window, let element = issue.element, !window.frame.contains(element.frame) {
                     return true
                 }
-                if let known = self.knownIssue(for: issue) {
-                    print("Known finding (#\(known)), \(place): \(Self.describe(issue))")
-                } else {
-                    findings.append("\(place): \(Self.describe(issue))")
-                }
+                findings.append("\(place): \(Self.describe(issue))")
                 return true
             }
         }
@@ -120,18 +115,6 @@ final class SpektraMacUITests: XCTestCase {
         // for any window that isn't key (#315). `performAccessibilityAudit` is the app's alone.
         try audit("Log window", within: app.windows["Log"])
         XCTAssert(findings.isEmpty, "\(findings.count) findings:\n" + findings.joined(separator: "\n"))
-    }
-
-    /// The issue an audit finding has, until it's fixed: each says to take its case out of here.
-    @MainActor private func knownIssue(for issue: XCUIAccessibilityAuditIssue) -> Int? {
-        let frame = issue.element?.frame ?? .null
-        let main = app.windows["main"]
-        switch issue.auditType {
-        case .contrast where main.scrollViews.firstMatch.frame.contains(frame):
-            return 312
-        default:
-            return nil
-        }
     }
 
     @MainActor private static func describe(_ issue: XCUIAccessibilityAuditIssue) -> String {

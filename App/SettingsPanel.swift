@@ -518,9 +518,10 @@ struct ExposureStrip: View {
             .sensoryFeedback(.alignment, trigger: here) { _, new in model.isAdjustingExposure && !new.isEmpty }
             MarkName(name: here.map(\.name).formatted(.list(type: .and)),
                      fraction: (model.exposureEV - range.lowerBound) / (range.upperBound - range.lowerBound))
+            // Primary at the body's size: secondary, or primary at the caption's or callout's size
+            // over several lines, failed the accessibility audit's contrast over the inspector's
+            // glass, where it takes the colour of the photo beside it (#312).
             Text(description(here: here))
-                .font(.caption)
-                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .disabled(model.photo == nil)
@@ -558,8 +559,10 @@ private struct MarkName: View {
     var body: some View {
         GeometryReader { geometry in
             let x = fraction * geometry.size.width
+            // Primary and semibold: in the accent colour, at any weight up to 14-pt bold, it fell
+            // short of the accessibility audit's contrast over the inspector's glass (#312).
             Text(name)
-                .foregroundStyle(.tint)
+                .fontWeight(.semibold)
                 .fixedSize()
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
                 .position(x: min(max(x, width / 2), geometry.size.width - width / 2), y: geometry.size.height / 2)
