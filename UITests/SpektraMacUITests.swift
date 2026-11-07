@@ -95,8 +95,12 @@ final class SpektraMacUITests: XCTestCase {
                        .completed, "the photo's render")
         Thread.sleep(forTimeInterval: 2)
         var findings: [String] = []
-        func audit(_ place: String) throws {
+        /// The audit covers the whole app, so with a `window` given, it leaves out what's outside it.
+        func audit(_ place: String, within window: XCUIElement? = nil) throws {
             try app.performAccessibilityAudit { issue in
+                if let window, let element = issue.element, !window.frame.contains(element.frame) {
+                    return true
+                }
                 if let known = self.knownIssue(for: issue) {
                     print("Known finding (#\(known)), \(place): \(Self.describe(issue))")
                 } else {
@@ -111,7 +115,10 @@ final class SpektraMacUITests: XCTestCase {
         }
         app.typeKey("l", modifierFlags: [.command, .option])
         XCTAssert(app.windows["Log"].waitForExistence(timeout: 5))
-        try audit("Log window")
+        // The Log window's own elements: the main window was audited while it was in front, and
+        // behind the Log, macOS dims its title and subtitle below the contrast the audit wants, as
+        // for any window that isn't key (#315). `performAccessibilityAudit` is the app's alone.
+        try audit("Log window", within: app.windows["Log"])
         XCTAssert(findings.isEmpty, "\(findings.count) findings:\n" + findings.joined(separator: "\n"))
     }
 
@@ -122,9 +129,6 @@ final class SpektraMacUITests: XCTestCase {
         switch issue.auditType {
         case .contrast where main.scrollViews.firstMatch.frame.contains(frame):
             return 312
-        case .contrast where frame.minY < main.frame.minY + 60:
-            // The main window's title, dimmed while the Log window is in front.
-            return 315
         default:
             return nil
         }
