@@ -781,7 +781,11 @@ private struct ValueSlider: View {
         .accessibilityRepresentation {
             // VoiceOver's increment and decrement move a line, as the arrow keys do, whatever amount
             // the system slider asks for.
-            Slider(value: Binding { value } set: { moveOneLine(upward: $0 > value, on: ruler) }, in: range) { Text(title) }
+            Slider(value: Binding { value } set: { new in
+                if new != value {
+                    moveOneLine(upward: new > value, on: ruler)
+                }
+            }, in: range) { Text(title) }
                 .accessibilityValue(valueText)
                 .accessibilityAction(named: "Type Value", startTyping)
         }
