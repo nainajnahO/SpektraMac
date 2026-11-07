@@ -7,7 +7,7 @@ commit `3bb2c2d` on small reference cases. This page goes further: it measures e
 Python against the Mac, for speed and for how far apart the results are. It also explains each place SpektraMac does
 something differently, with pictures where they help.
 
-The table and the images are generated. With the pinned Spektrafilm installed as the README's
+The tables and the images are generated. With the pinned Spektrafilm installed as the README's
 [Faithful to Spektrafilm](../README.md#faithful-to-spektrafilm) says, this regenerates them in about three minutes:
 
 ```sh
@@ -59,6 +59,54 @@ Measured 2026-10-22 on an Apple M1 Pro with 16 GB, macOS 27.0.1, against Spektra
 The speed columns compare implementations, one step at a time: Numba on the CPU against Metal on the GPU. They don't
 compare algorithms. The whole pipeline is two rows: once at full floats, to show the port's own accuracy, and once
 as the app runs it.
+
+## Every film and paper
+
+The table above measures one pair, Portra 400 printed on Portra Endura. The parity tests check every film and every
+paper Spektrafilm has, through the whole pipeline, against the Python code. Each film printed on its own paper, and
+Portra 400 on every other paper, goes through the QA oracle of Spektrafilm's LUT tool: 50,000 random colours, rendered
+by both, compared as ΔE2000. A ΔE2000 of about 1 is the smallest difference the eye notices, so each of these is well
+below anything you could see. Slides are scanned rather than printed, so the QA oracle, which measures prints, leaves
+them out; their test-chart cases are compared stage by stage instead. Both tables are made by
+`tools/port_report.py`.
+
+<!-- port_report:films:begin -->
+Measured 2026-10-28 by `tools/port_report.py`, from the parity tests against Spektrafilm `3bb2c2d`'s reference data. Each film printed on its paper: the QA oracle's ΔE2000 on its 50,000 random sRGB samples, worst first.
+
+| Film | Paper | ΔE2000 max | p99 | mean |
+|---|---|---|---|---|
+| Kodak Portra 800 (Push 2) | Kodak Professional Portra Endura | 0.175 | 0.104 | 0.0249 |
+| Fujifilm X-Tra 400 | Fujifilm Crystal Archive Type II | 0.166 | 0.0901 | 0.0233 |
+| Fujifilm C200 | Fujifilm Crystal Archive Type II | 0.144 | 0.0782 | 0.0214 |
+| Kodak Portra 400 | Fujifilm Crystal Archive Type II | 0.139 | 0.0632 | 0.0178 |
+| Kodak Portra 400 | Kodak Professional Supra Endura | 0.139 | 0.0613 | 0.0175 |
+| Kodak Portra 800 (Push 1) | Kodak Professional Portra Endura | 0.138 | 0.0797 | 0.0218 |
+| Kodak Portra 400 | Kodak Professional Endura Premier | 0.125 | 0.0769 | 0.0181 |
+| Kodak Portra 400 | Kodak Ektacolor Edge | 0.119 | 0.0664 | 0.0171 |
+| Kodak Portra 400 | Kodak Vision Premier 2393 | 0.118 | 0.0596 | 0.0177 |
+| Kodak Portra 400 | Kodak Professional Portra Endura | 0.117 | 0.0595 | 0.017 |
+| Kodak Portra 160 | Kodak Professional Portra Endura | 0.115 | 0.0635 | 0.0172 |
+| Kodak Ektar 100 | Kodak Professional Portra Endura | 0.113 | 0.0658 | 0.0181 |
+| Kodak Portra 800 | Kodak Professional Portra Endura | 0.107 | 0.0559 | 0.0166 |
+| Kodak Gold 200 | Kodak Professional Portra Endura | 0.106 | 0.0586 | 0.0173 |
+| Fujifilm Pro 400H | Fujifilm Crystal Archive Type II | 0.104 | 0.0532 | 0.016 |
+| Kodak Portra 400 | Kodak Professional Ultra Endura | 0.101 | 0.0712 | 0.0165 |
+| Kodak Ultramax 400 | Kodak Professional Portra Endura | 0.0989 | 0.0555 | 0.0164 |
+| Kodak Vision3 50D | Kodak Vision 2383 | 0.0911 | 0.0477 | 0.0145 |
+| Kodak Verita 200D | Kodak Vision 2383 | 0.0899 | 0.0478 | 0.0148 |
+| Kodak Vision3 250D | Kodak Vision 2383 | 0.0869 | 0.0437 | 0.0139 |
+| Kodak Vision3 200T | Kodak Vision 2383 | 0.0841 | 0.0447 | 0.0135 |
+| Kodak Vision3 500T | Kodak Vision 2383 | 0.0787 | 0.0407 | 0.0133 |
+
+Each slide, scanned rather than printed, on the test chart: the largest difference at each stage, in the stage's own units, and the scan as 8-bit values.
+
+| Slide | Exposure (log₁₀) | Density | Scanned RGB | Output RGB | 8-bit |
+|---|---|---|---|---|---|
+| Fujifilm Provia 100F | 1.13e-06 | 5.96e-07 | 1.19e-06 | 5.94e-06 | max 1 level, 99.998 % identical |
+| Fujifilm Velvia 100 | 8.94e-07 | 1.19e-06 | 1.07e-06 | 5.81e-06 | max 1 level, 99.997 % identical |
+| Kodak Ektachrome 100 | 1.07e-06 | 7.15e-07 | 8.94e-07 | 6.39e-06 | max 1 level, 99.998 % identical |
+| Kodak Kodachrome 64 | 1.01e-06 | 5.96e-07 | 8.34e-07 | 5.39e-06 | max 1 level, 99.998 % identical |
+<!-- port_report:films:end -->
 
 ## Where SpektraMac does it differently
 
