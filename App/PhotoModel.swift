@@ -29,9 +29,14 @@ final class PhotoModel {
         /// The region each mark meters, white with the weight as alpha.
         let meteringOverlays: [MeteringMark: CGImage]
     }
-    /// A new photo empties the kept renders and the strips, and renders at once, showing its edit.
+    /// A new photo stops the last one's render, empties the kept renders and the strips, and renders
+    /// at once, showing its edit.
     private(set) var photo: Photo? {
         didSet {
+            // The last photo's render may have started while the engine opened this one, and waited
+            // behind it, holding that photo's size and readings. With its preview in flight, this
+            // one's own render would return at once, leaving that one to make the strips (#320).
+            stopRendering()
             finishedRenders.removeAllObjects()
             strips = [:]
             stripControls = nil
