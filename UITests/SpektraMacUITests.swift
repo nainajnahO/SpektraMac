@@ -125,8 +125,6 @@ final class SpektraMacUITests: XCTestCase {
         case .contrast where frame.minY < main.frame.minY + 60:
             // The main window's title, dimmed while the Log window is in front.
             return 315
-        case .action where issue.element?.label == "Curve":
-            return 314
         default:
             return nil
         }

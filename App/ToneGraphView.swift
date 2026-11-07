@@ -36,14 +36,10 @@ struct ToneGraphView: View {
             .accessibilityValue(description(of: toneGraph))
             .overlay(alignment: .topLeading) {
                 // Where the curve is darkest, so it's clear of the menu.
-                Picker("Curve", selection: $channel) {
-                    ForEach(ToneGraph.Channel.allCases, id: \.self) { Text($0.name) }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .fixedSize()
-                .controlSize(.small)
-                .padding(4)
+                CurveMenu(channel: $channel)
+                    .fixedSize()
+                    .controlSize(.small)
+                    .padding(4)
             }
             .frame(height: 130)
             .help("Drag the middle point sideways to set the print exposure, the side points up or down for the shadow and highlight contrast, or the curve elsewhere for the contrast. With the burn on, the shading is what it takes and the dashed line where those tones print: drag its line sideways for the threshold, or up or down for the strength.")
@@ -396,6 +392,43 @@ private struct ToneCurveLayer: View {
         // Setting the controls renders, even to what they are.
         if model.controls[keyPath: control] != value {
             model.controls[keyPath: control] = value
+        }
+    }
+}
+
+/// The menu over the graph that picks its curve, named "Curve". AppKit's pop-up button, as the
+/// Film and Paper menus are AppKit's: SwiftUI's menu-style `Picker`, and its `Menu`, give
+/// assistive apps no press action (macOS 27), so VoiceOver couldn't open it and the accessibility
+/// audit failed it (#314).
+private struct CurveMenu: NSViewRepresentable {
+    @Binding var channel: ToneGraph.Channel
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        button.addItems(withTitles: ToneGraph.Channel.allCases.map(\.name))
+        button.setAccessibilityLabel("Curve")
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.choose(_:))
+        return button
+    }
+
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        context.coordinator.channel = $channel
+        button.selectItem(at: ToneGraph.Channel.allCases.firstIndex(of: channel) ?? 0)
+        button.isEnabled = context.environment.isEnabled
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(channel: $channel) }
+
+    final class Coordinator: NSObject {
+        var channel: Binding<ToneGraph.Channel>
+
+        init(channel: Binding<ToneGraph.Channel>) {
+            self.channel = channel
+        }
+
+        @objc func choose(_ button: NSPopUpButton) {
+            channel.wrappedValue = ToneGraph.Channel.allCases[button.indexOfSelectedItem]
         }
     }
 }
