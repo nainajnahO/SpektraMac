@@ -47,7 +47,18 @@ swift test -c release -Xswiftc -enable-testing --package-path Engine
 ```
 
 Optimized, they take about a minute on an M1 Pro instead of six; `-enable-testing` keeps the `@testable import` they
-rely on. The app has no tests of its own, so a pull request says what you tried in it.
+rely on.
+
+Run the app's tests, in `AppTests/`, with:
+
+```sh
+xcodebuild test -project SpektraMac.xcodeproj -scheme SpektraMac -destination 'platform=macOS'
+```
+
+They run `PhotoModel` in the app with the real engine, in about 10 seconds once built: what the Log says rendered,
+what's set and what Undo is called. Each test keeps its settings in its own temporary folder and leaves its photos out
+of File › Open Recent, so a run leaves yours as they were. The app's window opens while they run. What they can't see,
+such as what's on screen or how a drag feels, a pull request still says you tried in the app.
 
 ### Runtime checks
 
@@ -66,8 +77,14 @@ swift test --sanitize=thread -Xswiftc -enable-testing --package-path Engine
 ```
 
 The sanitizers build unoptimized, hence the time. Under validation, Core Image prints `Error creating PSO for the uber
-shader: ci_ubershader_r4` about 140 times: that's Core Image's own shader, not the engine's, and expected. These cover
-the engine only; the app's own code has no tests to run them on.
+shader: ci_ubershader_r4` about 140 times: that's Core Image's own shader, not the engine's, and expected.
+
+After changing how `PhotoModel`'s tasks share its state, also run the app's tests under Thread Sanitizer, which should
+report nothing:
+
+```sh
+xcodebuild test -project SpektraMac.xcodeproj -scheme SpektraMac -destination 'platform=macOS' -enableThreadSanitizer YES
+```
 
 ### Reference data
 

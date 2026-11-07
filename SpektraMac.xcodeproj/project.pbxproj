@@ -10,9 +10,20 @@
 		5E0000000000000000000014 /* SpektraEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0000000000000000000031 /* SpektraEngine */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		5E0000000000000000000056 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5E0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5E0000000000000000000010;
+			remoteInfo = SpektraMac;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		5E0000000000000000000004 /* SpektraMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SpektraMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5E0000000000000000000006 /* Engine */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Engine; sourceTree = "<group>"; };
+		5E0000000000000000000050 /* SpektraMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpektraMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -34,6 +45,11 @@
 			path = App;
 			sourceTree = "<group>";
 		};
+		5E0000000000000000000051 /* AppTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AppTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -45,6 +61,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5E0000000000000000000052 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -52,6 +75,7 @@
 			isa = PBXGroup;
 			children = (
 				5E0000000000000000000005 /* App */,
+				5E0000000000000000000051 /* AppTests */,
 				5E0000000000000000000006 /* Engine */,
 				5E0000000000000000000003 /* Products */,
 			);
@@ -61,6 +85,7 @@
 			isa = PBXGroup;
 			children = (
 				5E0000000000000000000004 /* SpektraMac.app */,
+				5E0000000000000000000050 /* SpektraMacTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -91,6 +116,27 @@
 			productReference = 5E0000000000000000000004 /* SpektraMac.app */;
 			productType = "com.apple.product-type.application";
 		};
+		5E0000000000000000000055 /* SpektraMacTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5E0000000000000000000058 /* Build configuration list for PBXNativeTarget "SpektraMacTests" */;
+			buildPhases = (
+				5E0000000000000000000053 /* Sources */,
+				5E0000000000000000000052 /* Frameworks */,
+				5E0000000000000000000054 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5E0000000000000000000057 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				5E0000000000000000000051 /* AppTests */,
+			);
+			name = SpektraMacTests;
+			productName = SpektraMacTests;
+			productReference = 5E0000000000000000000050 /* SpektraMacTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -103,6 +149,10 @@
 				TargetAttributes = {
 					5E0000000000000000000010 = {
 						CreatedOnToolsVersion = 27.0;
+					};
+					5E0000000000000000000055 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 5E0000000000000000000010;
 					};
 				};
 			};
@@ -124,12 +174,20 @@
 			projectRoot = "";
 			targets = (
 				5E0000000000000000000010 /* SpektraMac */,
+				5E0000000000000000000055 /* SpektraMacTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		5E0000000000000000000013 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5E0000000000000000000054 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -146,7 +204,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5E0000000000000000000053 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		5E0000000000000000000057 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5E0000000000000000000010 /* SpektraMac */;
+			targetProxy = 5E0000000000000000000056 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		5E0000000000000000000021 /* Debug */ = {
@@ -333,6 +406,44 @@
 			};
 			name = Release;
 		};
+		5E0000000000000000000059 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = BU842SAMK8;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.4;
+				PRODUCT_BUNDLE_IDENTIFIER = nainajnahO.SpektraMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SpektraMac.app/Contents/MacOS/SpektraMac";
+			};
+			name = Debug;
+		};
+		5E000000000000000000005A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = BU842SAMK8;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.4;
+				PRODUCT_BUNDLE_IDENTIFIER = nainajnahO.SpektraMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SpektraMac.app/Contents/MacOS/SpektraMac";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -350,6 +461,15 @@
 			buildConfigurations = (
 				5E0000000000000000000024 /* Debug */,
 				5E0000000000000000000025 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5E0000000000000000000058 /* Build configuration list for PBXNativeTarget "SpektraMacTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5E0000000000000000000059 /* Debug */,
+				5E000000000000000000005A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

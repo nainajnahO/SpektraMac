@@ -9,7 +9,7 @@ code where one of Apple's frameworks could do the job, say why (CONTRIBUTING.md,
 ## Tests
 
 <!-- What you ran and what happened, and on which Mac and macOS: the engine's tests (did the parity tests run, or skip
-without golden/?) and the Release build. The app has no tests of its own, so say what you tried in it. -->
+without golden/?), the app's tests and the Release build, and what you tried in the app. -->
 
 ## Not yet tried on the Mac
 
