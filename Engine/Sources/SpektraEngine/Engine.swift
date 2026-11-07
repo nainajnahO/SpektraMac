@@ -562,14 +562,12 @@ public actor Engine {
     /// renders it once into a texture, and its preview (at most ``previewMaxSize`` on the long side)
     /// from that on the GPU. Vision looks for the metering marks' regions in the preview, and each
     /// image is metered once at every mark, in place. Throws ``PhotoTooLargeError`` for a photo over
-    /// ``maxSide`` on a side. A photo that fails to open leaves the open one open, to render on.
+    /// ``maxSide`` on a side. A photo that fails to open leaves the open one open, to render on,
+    /// with the memory and steps kept from its renders.
     public func open(_ image: CIImage) throws -> OpenedPhoto {
         let extent = image.extent.integral
         let (width, height) = (Int(extent.width), Int(extent.height))
         guard max(width, height) <= Self.maxSide else { throw PhotoTooLargeError(width: width, height: height) }
-        // The memory set aside for renders of all of the previous photo goes; the photo itself stays
-        // until this one has opened.
-        releaseFullSizeMemory()
         let full = gpu.makeReadableTexture(width: width, height: height)
         try render(image, from: extent, into: full)
         let preview = try scaled(full, toLongSide: previewMaxSize)
@@ -591,6 +589,10 @@ public actor Engine {
         let found = Result { try MeteringRegions(finding: visionView(of: preview, exposure: centreWeighted.ev)) }
         metering.wait()  // even if Vision failed: the metering reads `full`
         let regions = try found.get()
+        // Nothing left can throw: the memory set aside for renders of all of the previous photo
+        // goes, with its kept steps. Until here, a photo that fails to open leaves them, so the
+        // open photo's next zoom or save starts from them.
+        releaseFullSizeMemory()
         let previewImage = PhotoImage(texture: preview, metering: MeteringReadings(
             luminance: previewLuminance.y, width: previewLuminance.width, height: previewLuminance.height, regions: regions))
         let fullImage = fullLuminance.map { luminance in

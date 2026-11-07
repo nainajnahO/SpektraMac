@@ -126,14 +126,15 @@ final class PhotoModel {
                 beginChange()
             } else {
                 endChange()
-                if awaitsRelease {
-                    render(from: .reduced)
+                if let start = awaitsRelease {
+                    render(from: start)
                 }
             }
         }
     }
-    /// The preview is on screen, and the blurs and grain wait for the slider to be let go.
-    private var awaitsRelease = false
+    /// The preview or a kept render is on screen, and the blurs and grain wait for the slider to be
+    /// let go: where the render carries on from then.
+    private var awaitsRelease: RenderStart?
     /// Display-sized rendering of the last simulation.
     private(set) var displayImage: CGImage?
     /// The Print tab's tone graph and the controls it was made for, with each preview.
@@ -376,10 +377,11 @@ final class PhotoModel {
         }
     }
 
-    /// Where a render starts: a change to the controls at the quick preview, a slider let go at the
-    /// reduced render, a new canvas size there once it has been still for `resizeDelay`,
-    /// ``wantsFullResolution`` at the whole photo.
-    private enum RenderStart { case preview, reduced, resized, full }
+    /// Where a render starts: a change to the controls at the quick preview; a slider let go at the
+    /// reduced render, or past it if it let go over a kept one (`kept`); a new canvas size at the
+    /// reduced render once it has been still for `resizeDelay`; ``wantsFullResolution`` at the
+    /// whole photo.
+    private enum RenderStart { case preview, reduced, kept, resized, full }
 
     /// Renders the preview, then with the blurs and grain the preview leaves out, once the slider
     /// is let go if one is held (``isAdjusting``): at the size the canvas shows the photo, and the
@@ -405,7 +407,7 @@ final class PhotoModel {
             var controls = self.controls
             do {
                 // Whether a kept finished render is on screen.
-                var isFinished = false
+                var isFinished = start == .kept
                 if start == .preview {
                     repeat {
                         controls = self.controls
@@ -418,8 +420,10 @@ final class PhotoModel {
                         toneGraph = (try await engine.toneGraph(controls: controls), controls)
                     } while controls != self.controls
                     isPreviewing = false
-                    if isAdjusting && !isFinished {
-                        awaitsRelease = true
+                    // A kept render too: what follows it (the whole photo zoomed in, 0.5–0.9 s at
+                    // 24 MP, or the strips) would hold up the slider's next preview.
+                    if isAdjusting {
+                        awaitsRelease = isFinished ? .kept : .reduced
                         return
                     }
                 }
@@ -459,7 +463,7 @@ final class PhotoModel {
         isRendering = false
         isRenderingFullResolution = false
         awaitsFullResolution = false
-        awaitsRelease = false
+        awaitsRelease = nil
     }
 
     /// The long side renders are reduced to: the canvas's (the preview's before it has a size).
