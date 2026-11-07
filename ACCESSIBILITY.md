@@ -28,6 +28,9 @@ From the release after 1.3:
 - It describes the photo by its file name, film and paper, and the tone graph as one item that says how its points
   print.
 - On the Exposure strip, VoiceOver's actions (VO-Command-Space) go to each metering mark.
+- On a slider, VoiceOver's increment and decrement, and the arrow keys with Full Keyboard Access, move to the next
+  line of its ruler, as a drag does. To type a value, between lines too, use Type Value in VoiceOver's actions, or
+  press Return with Full Keyboard Access.
 - Increase Contrast makes the sliders' fill and value line stronger.
 
 This is new, so reports are especially welcome.

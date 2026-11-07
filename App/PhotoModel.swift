@@ -485,8 +485,7 @@ final class PhotoModel {
 
     /// Renders the photo and puts it on screen, unless a newer change has made it stale.
     private func show(controls: Controls, mode: RenderMode, engine: Engine, photo: Photo) async throws {
-        let start = ContinuousClock.now
-        let display = try await engine.display(controls: controls, mode: mode)
+        let (display, time) = try await EngineTime.measure(on: engine) { try $0.display(controls: controls, mode: mode) }
         try Task.checkCancellation()
         displayImage = display
         shownMode = mode
@@ -497,7 +496,6 @@ final class PhotoModel {
             finishedRenders.setObject(display, forKey: RenderKey(controls: controls, longSide: longSide),
                                       cost: display.bytesPerRow * display.height)
         }
-        let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
         let size = mode == .full ? "\(photo.width) × \(photo.height)" : "\(display.width) × \(display.height)"
         let name = switch mode {
         case .preview: "preview"
@@ -505,7 +503,7 @@ final class PhotoModel {
         case .reduced: "screen size"
         case .full, .export: "full resolution"
         }
-        note("Rendered \(name) (\(size)) in \(elapsed)")
+        note("Rendered \(name) (\(size)) \(time.formatted())")
     }
 
     /// Shows what burns as a Burn slider is taken hold of, before it moves (the previews it renders
@@ -577,7 +575,8 @@ final class PhotoModel {
         let controls = controls
         guard controls != stripControls, stripTask == nil else { return }
         stripTask = Task {
-            let start = ContinuousClock.now
+            // The frames' own times and waits, added up: between frames, a change's preview may go first.
+            var time = EngineTime()
             var count = 0
             do {
                 for strip in Controls.Strip.allCases {
@@ -591,8 +590,12 @@ final class PhotoModel {
                         // The value at the middle of the frame.
                         let value = span.lowerBound
                             + (Double(frame) + 0.5) / Double(Self.framesPerStrip) * (span.upperBound - span.lowerBound)
-                        frames.append(try await engine.display(
-                            controls: controls.setting(strip, to: value, readings: photo.metering), mode: .thumbnail))
+                        let frameControls = controls.setting(strip, to: value, readings: photo.metering)
+                        let (image, frameTime) = try await EngineTime.measure(on: engine) {
+                            try $0.display(controls: frameControls, mode: .thumbnail)
+                        }
+                        frames.append(image)
+                        time += frameTime
                         try Task.checkCancellation()
                     }
                     strips[strip] = frames
@@ -600,8 +603,7 @@ final class PhotoModel {
                 }
                 stripControls = controls
                 stripTask = nil
-                let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
-                note("Rendered \(count) thumbnails in \(elapsed)")
+                note("Rendered \(count) thumbnails \(time.formatted())")
             } catch {
                 guard !Task.isCancelled else { return }
                 stripTask = nil
@@ -631,18 +633,22 @@ final class PhotoModel {
         let keys = choices.prefix(finishedRenders.totalCostLimit / 2 / bytes)
             .map { RenderKey(controls: $0, longSide: longSide) }
         preloadTask = Task {
-            let start = ContinuousClock.now
+            // The choices' own times and waits, added up: between choices, a preview may go first.
+            var time = EngineTime()
             var count = 0
             do {
                 for key in keys where finishedRenders.object(forKey: key) == nil {
-                    let display = try await engine.display(controls: key.controls, mode: .reduced(longSide: longSide))
+                    let controls = key.controls
+                    let (display, choiceTime) = try await EngineTime.measure(on: engine) {
+                        try $0.display(controls: controls, mode: .reduced(longSide: longSide))
+                    }
                     try Task.checkCancellation()
                     finishedRenders.setObject(display, forKey: key, cost: display.bytesPerRow * display.height)
+                    time += choiceTime
                     count += 1
                 }
                 if count > 0 {
-                    let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds]))
-                    note("Rendered \(count) choices ahead in \(elapsed)")
+                    note("Rendered \(count) choices ahead \(time.formatted())")
                 }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -696,16 +702,18 @@ final class PhotoModel {
             savePhase = "Rendering \(url.lastPathComponent) at full resolution…"
             saveTask = Task {
                 defer { savePhase = nil; saveTask = nil }
-                let start = ContinuousClock.now
                 do {
-                    let image = try await engine.export(controls: controls, as: type)
+                    let (image, rendering) = try await EngineTime.measure(on: engine) {
+                        try $0.export(controls: controls, as: type)
+                    }
                     try Task.checkCancellation()
                     savePhase = "Writing \(url.lastPathComponent)…"
+                    let writing = ContinuousClock.now
                     try await Task.detached(priority: .userInitiated) {
                         try image.write(to: url, as: type, metadata: metadata, record: record)
                     }.value
-                    let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.seconds, .milliseconds]))
-                    note("Saved \(url.lastPathComponent) in \(elapsed)")
+                    let time = EngineTime(waited: rendering.waited, took: rendering.took + (.now - writing))
+                    note("Saved \(url.lastPathComponent) \(time.formatted([.seconds, .milliseconds]))")
                 } catch is CancellationError {
                     note("Cancelled saving \(url.lastPathComponent)")
                 } catch {
@@ -730,15 +738,15 @@ final class PhotoModel {
     func finishedFile(named name: String) async throws -> URL {
         let engine = try await makingEngine.value
         let (controls, metadata, record) = (controls, metadata, editRecord)
-        let start = ContinuousClock.now
-        let image = try await engine.export(controls: controls, as: .jpeg)
+        let (image, rendering) = try await EngineTime.measure(on: engine) { try $0.export(controls: controls, as: .jpeg) }
         let url = URL.temporaryDirectory.appending(path: UUID().uuidString).appending(path: "\(name).jpg")
+        let writing = ContinuousClock.now
         try await Task.detached(priority: .userInitiated) {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try image.write(to: url, as: .jpeg, metadata: metadata, record: record)
         }.value
-        let elapsed = (ContinuousClock.now - start).formatted(.units(allowed: [.seconds, .milliseconds]))
-        note("Rendered \(url.lastPathComponent) to share in \(elapsed)")
+        let time = EngineTime(waited: rendering.waited, took: rendering.took + (.now - writing))
+        note("Rendered \(url.lastPathComponent) to share \(time.formatted([.seconds, .milliseconds]))")
         return url
     }
 
@@ -1072,6 +1080,45 @@ nonisolated struct PresetFile: Transferable {
 
     static var transferRepresentation: some TransferRepresentation {
         DataRepresentation(exportedContentType: .json) { $0.json }
+    }
+}
+
+/// How long work on the engine waited for it, and took once the engine started on it. The engine
+/// does one thing at a time, so a preview asked for while a photo opens waits until it's open: timed
+/// from the asking, a 100 ms preview read as a 4-second one (#298).
+struct EngineTime {
+    var waited = Duration.zero
+    var took = Duration.zero
+
+    /// Runs `work` on `engine` and times it: from when the engine starts on it, and, apart, the wait
+    /// before that. The engine's API needn't change for it: `run(_:on:)` is isolated to the engine,
+    /// so it reads the clock as the engine starts on the work.
+    static func measure<T: Sendable>(on engine: Engine, _ work: @Sendable (isolated Engine) throws -> T)
+        async throws -> (T, EngineTime) {
+        let asked = ContinuousClock.now
+        let (value, started, finished) = try await run(work, on: engine)
+        return (value, EngineTime(waited: started - asked, took: finished - started))
+    }
+
+    /// `work` on `engine`, with when it started and finished there.
+    private static func run<T: Sendable>(_ work: @Sendable (isolated Engine) throws -> T,
+                                         on engine: isolated Engine)
+        throws -> (T, started: ContinuousClock.Instant, finished: ContinuousClock.Instant) {
+        let started = ContinuousClock.now
+        let value = try work(engine)
+        return (value, started, .now)
+    }
+
+    static func += (total: inout EngineTime, time: EngineTime) {
+        total.waited += time.waited
+        total.took += time.took
+    }
+
+    /// "in 98 ms", then ", after waiting 3 911 ms" if it waited a millisecond or more, in `units`.
+    func formatted(_ units: Set<Duration.UnitsFormatStyle.Unit> = [.milliseconds]) -> String {
+        let style = Duration.UnitsFormatStyle.units(allowed: units)
+        let wait = waited >= .milliseconds(1) ? ", after waiting \(waited.formatted(style))" : ""
+        return "in \(took.formatted(style))\(wait)"
     }
 }
 

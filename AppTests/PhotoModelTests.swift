@@ -256,6 +256,43 @@ final class PhotoModelTests {
         #expect(NSDocumentController.shared.recentDocumentURLs == recent)
     }
 
+    /// A photo opened while the engine is opening it, and another chosen straight after: the first
+    /// one's preview waits while the engine opens the second, and the Log gives the wait apart from
+    /// the preview's own time (#298).
+    @Test func previewAskedForDuringAnOpenSaysItWaited() async throws {
+        let model = try await makeModel()
+        let first = try photo(named: "First.jpg", width: 6000, height: 4000)
+        let second = try photo(named: "Second.jpg", width: 6000, height: 4000)
+        model.open(first)
+        // Long enough for the first to be decoded (Core Image decodes as the engine opens it), not
+        // for the engine to have opened it.
+        try await Task.sleep(for: .milliseconds(50))
+        model.open(second)
+        try await until { !model.isLoading && model.log.contains { $0.message.hasPrefix("Rendered preview") } }
+        let messages = model.log.map(\.message)
+        let preview = try #require(messages.first { $0.hasPrefix("Rendered preview") })
+        #expect(preview.contains(", after waiting "), "\(messages)")
+    }
+
+    // MARK: Timing the engine's work
+
+    /// Work queued behind other work on the engine is timed from when the engine starts on it, and
+    /// its wait apart (#298).
+    @Test func engineTimeKeepsTheWaitApart() async throws {
+        let engine = try Engine()
+        // Holds the engine for half a second, as opening a large photo does.
+        let busy = Task { try await EngineTime.measure(on: engine) { _ in Thread.sleep(forTimeInterval: 0.5) } }
+        try await Task.sleep(for: .milliseconds(100))
+        let (_, time) = try await EngineTime.measure(on: engine) { _ in }
+        _ = try await busy.value
+        #expect(time.waited > .milliseconds(300), "\(time)")
+        #expect(time.took < .milliseconds(50), "\(time)")
+        #expect(time.formatted().contains(", after waiting "))
+        // A wait under a millisecond, as when the engine is free, isn't mentioned.
+        #expect(EngineTime(waited: .microseconds(100), took: .milliseconds(98)).formatted()
+                == "in \(Duration.milliseconds(98).formatted(.units(allowed: [.milliseconds])))")
+    }
+
     // MARK: Helpers
 
     /// A model as the app makes one, once its engine is there, with the tests' settings.
