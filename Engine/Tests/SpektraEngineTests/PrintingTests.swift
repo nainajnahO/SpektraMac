@@ -43,7 +43,8 @@ func printExposeMatchesLogEPrint(caseName: String) throws {
     let input = gpu.upload(rgb: cmyFilm.values, width: cmyFilm.shape[1], height: cmyFilm.shape[0])
     let output = try gpu.run { simulation.encodePrintExpose(input, on: $0) }
     let difference = Difference(gpu.download(output), try SpektraEngineTests.golden(caseName, "log_e_print").values, floor: 1)
-    expectParity(difference.maxAbsolute, below: 1e-4, "log_e_print max abs", case: caseName)
+    // 3× the most measured: 6.0e-7, on the Pro 400H chart.
+    expectParity(difference.maxAbsolute, below: 2e-6, "log_e_print max abs", case: caseName)
 }
 
 /// Print exposure 1.3, +0.7 EV balanced at the enlarger (compensated mid-grey), 0.3 preflash.
@@ -124,5 +125,6 @@ func printDevelopMatchesCMYPrint(caseName: String) throws {
     let input = gpu.upload(rgb: logEPrint.values, width: logEPrint.shape[1], height: logEPrint.shape[0])
     let output = try gpu.run { simulation.encodePrintDevelop(input, on: $0) }
     let difference = Difference(gpu.download(output), try SpektraEngineTests.golden(caseName, "cmy_print").values, floor: 1)
-    expectParity(difference.maxAbsolute, below: 1e-4, "cmy_print max abs", case: caseName)
+    // 3× the most measured: 4.8e-7, one float32 step between 4 and 8, in 7 cases.
+    expectParity(difference.maxAbsolute, below: 2e-6, "cmy_print max abs", case: caseName)
 }
