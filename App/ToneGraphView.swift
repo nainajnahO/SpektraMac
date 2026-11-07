@@ -30,6 +30,8 @@ struct ToneGraphView: View {
             .equatable()
             .opacity(isEnabled ? 1 : 0.5)
             .accessibilityElement(children: .ignore)
+            // A role, which the accessibility audit wants: one item, read as a picture of the curve.
+            .accessibilityAddTraits(.isImage)
             .accessibilityLabel("Tone curve")
             .accessibilityValue(description(of: toneGraph))
             .overlay(alignment: .topLeading) {
