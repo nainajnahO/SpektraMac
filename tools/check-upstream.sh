@@ -51,13 +51,11 @@ SPEKTRA_GOLDEN=$work/golden swift test -c release -Xswiftc -enable-testing --pac
 grep -E '✘|skipped' "$log"
 grep -E 'Test run with' "$log"
 
-echo "== Largest difference per stage (max abs, and the case it's in)"
-grep ': max abs ' "$log" | awk '{
-    label = $0; sub(/: max abs .*/, "", label)
-    where = ""
-    if (label ~ /^(chart|photo|preview|diffusion|qa)-[^ ]+ /) { where = label; sub(/ .*/, "", where); sub(/^[^ ]+ /, "", label) }
-    value = $0; sub(/.*: max abs /, "", value); sub(/[,;].*/, "", value)
-    if (!(label in worst) || value + 0 > worst[label] + 0) { worst[label] = value; worstCase[label] = where }
-} END { for (label in worst) printf "%-44s %-10s %s\n", label, worst[label], worstCase[label] }' | sort
+echo "== Each parity check's worst case, tightest first: headroom (tolerance ÷ measured), measured against tolerance, case"
+grep '^parity' "$log" | awk -F' [|] ' '{
+    key = $2 " | " $4
+    room = ($7 == "inf") ? 1e300 : $7 + 0
+    if (!(key in least) || room < least[key]) { least[key] = room; line[key] = $7 " | " $2 " | " $4 " | " $5 " against " $6 " | " $3 }
+} END { for (key in line) print line[key] }' | sort -t'|' -k1,1g
 
 exit $result

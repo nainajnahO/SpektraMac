@@ -27,8 +27,7 @@ func cam16ucsMatchesColourScience(space: String) throws {
     let toRGB = simd_double3x3(rows: tables.colourSpaces[space]!.xyzToRGB)
     let inGamut = xyz.filter { (toRGB * $0).min() >= 0 && (toRGB * $0).max() <= 1 }
     let roundTrip = Difference(flat(inGamut.map { model.xyz(fromJab: model.jab(fromXYZ: $0)) }), flat(inGamut), floor: 1e-6)
-    print("CAM16-UCS around \(space) white: forward \(forward); inverse \(inverse); f64 round trip on \(inGamut.count) in gamut \(roundTrip)")
-    #expect(forward.maxRelative < 1e-7)
-    #expect(inverse.maxRelative < 1e-7)
-    #expect(roundTrip.maxAbsolute < 1e-10)
+    expectParity(forward.maxRelative, below: 1e-7, "forward max rel", case: space)
+    expectParity(inverse.maxRelative, below: 1e-7, "inverse max rel", case: space)
+    expectParity(roundTrip.maxAbsolute, below: 1e-10, "f64 round trip max abs, \(inGamut.count) in gamut", case: space)
 }

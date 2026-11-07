@@ -87,11 +87,19 @@ bundled data in `Engine/Sources/SpektraEngine/Resources/` the same way. The top 
 So unless you've made `golden/`, the parity tests won't run for you. Say so in the pull request, and the maintainer
 runs them.
 
+Each parity check prints one line, `parity | test | case | check | measured | tolerance | headroom`, the headroom being
+how many times worse the measurement can get before the test fails (`expectParity` in `Compare.swift`; the QA
+oracle adds its p99 and mean). To see how close each is to failing, tightest first:
+
+```sh
+swift test -c release -Xswiftc -enable-testing --package-path Engine 2>&1 | grep '^parity' | sort -t'|' -k7,7g
+```
+
 To see how far SpektraMac is from another Spektrafilm commit, a branch such as `dev` or a newer `main`, run
 `tools/check-upstream.sh <ref>`. It needs [uv](https://docs.astral.sh/uv/) and leaves your own install alone: it makes
 the bundled data and the reference data from that commit in a temporary folder, diffs the data against
 `Resources/` (`parameters.json` lists every parameter and its default), runs the tests against that reference data
-and prints the largest difference per stage.
+and prints each parity check's worst case against its tolerance.
 
 Every Monday, a workflow ([`upstream.yml`](.github/workflows/upstream.yml), `tools/upstream-moved.sh`) checks whether
 Spektrafilm's `main` has moved past that commit, and if it has, opens or updates one issue, "Upstream Spektrafilm has

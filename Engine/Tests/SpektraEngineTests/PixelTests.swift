@@ -13,8 +13,7 @@ private func checkPrimitive(_ name: String, tolerance: Double,
     let output = gpu.makeTexture(width: width, height: height)
     try gpu.run { encode(gpu, $0, input, output) }
     let difference = Difference(gpu.download(output), reference.values, floor: 1)
-    print("\(name): \(difference)")
-    #expect(difference.maxRelative <= tolerance, "\(name): \(difference)")
+    expectParity(difference.maxRelative, atMost: tolerance, "max rel", case: name)
 }
 
 private func rows(_ array: NPYArray) -> [SIMD3<Double>] {

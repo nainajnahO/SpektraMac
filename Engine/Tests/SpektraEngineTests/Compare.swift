@@ -108,6 +108,36 @@ struct Difference: CustomStringConvertible {
     }
 }
 
+/// Checks a parity measurement against its tolerance, `measured < tolerance`, with `#expect`, and prints
+/// it as one line:
+///
+///     parity | test | case | check | measured | tolerance | headroom | name value…
+///
+/// The headroom is tolerance ÷ measured: how many times worse the measurement can get before the test
+/// fails. After it come the `also` measurements, which nothing checks. CONTRIBUTING.md lists the lines
+/// tightest first. A failure points at the caller.
+func expectParity(_ measured: Double, below tolerance: Double, _ check: String, case caseName: String = "-",
+                  also: KeyValuePairs<String, Double> = [:], sourceLocation: SourceLocation = #_sourceLocation) {
+    printParity(measured, tolerance, check, caseName, also)
+    #expect(measured < tolerance, "\(check): \(measured), not below \(tolerance)", sourceLocation: sourceLocation)
+}
+
+/// ``expectParity(_:below:_:case:also:sourceLocation:)`` for a tolerance the measurement may reach,
+/// `measured <= tolerance`.
+func expectParity(_ measured: Double, atMost tolerance: Double, _ check: String, case caseName: String = "-",
+                  also: KeyValuePairs<String, Double> = [:], sourceLocation: SourceLocation = #_sourceLocation) {
+    printParity(measured, tolerance, check, caseName, also)
+    #expect(measured <= tolerance, "\(check): \(measured), over \(tolerance)", sourceLocation: sourceLocation)
+}
+
+private func printParity(_ measured: Double, _ tolerance: Double, _ check: String, _ caseName: String,
+                         _ also: KeyValuePairs<String, Double>) {
+    let fields = [Test.current?.name ?? "-", caseName, check,
+                  String(format: "%.3g", measured), String(format: "%.3g", tolerance), String(format: "%.3g", tolerance / measured)]
+        + also.map { "\($0.key) \(String(format: "%.3g", $0.value))" }
+    print((["parity"] + fields).joined(separator: " | "))
+}
+
 /// CIE L*a*b* of `xyz` (Y of white = 1) relative to a white of chromaticity `white`.
 func lab(fromXYZ xyz: SIMD3<Double>, white: SIMD2<Double>) -> SIMD3<Double> {
     let whiteXYZ = SIMD3(white.x / white.y, 1, (1 - white.x - white.y) / white.y)
