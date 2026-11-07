@@ -682,6 +682,12 @@ final class PhotoModel {
     /// Renders the photo at full resolution, encoded in Display P3, and writes it where the Save panel says:
     /// 16-bit TIFF or PNG, or JPEG, as its format menu sets the name's extension. The suggested name
     /// has the film in it, so saving can't replace a JPEG original by accident.
+    ///
+    /// An `NSSavePanel`, not SwiftUI's `fileExporter` as Save Preset and Export LUT use: the exporter
+    /// renders as its panel closes, as a `Transferable`'s export, and an export that throws stops the
+    /// app. ⌘. cancels the render by throwing, and SwiftUI then raises an exception in
+    /// `-[NSFileWrapper setPreferredFilename:]` (from `FileExportOperation.makeFirstFile`), which
+    /// aborts the app (macOS 27.2, #291).
     func save() {
         guard let photo, let engine else { return }
         let panel = NSSavePanel()
@@ -783,58 +789,86 @@ final class PhotoModel {
     /// Spektrafilm's LUT tool's default size: trilinear interpolation between its entries is
     /// within ΔE2000 0.56 of exact (Portra 400 → Portra Endura), a 1 MB file.
     private static let lutSize = 33
-    /// macOS declares no type for `.cube` files, so the Save panel gets a dynamic one.
-    private static let cubeType = UTType(filenameExtension: "cube", conformingTo: .text)!
+    /// macOS declares no type for `.cube` files, so the Export LUT panel gets a dynamic one.
+    nonisolated static let cubeType = UTType(filenameExtension: "cube", conformingTo: .text)!
 
-    /// Writes the controls' look as a `.cube` LUT for LightCraft, which applies one to its
-    /// display-encoded sRGB, exposed as the exposure slider shows (``Engine/lut(controls:exposureEV:size:)``).
-    /// Its title, the name LightCraft shows, is the file's.
+    /// Drives the Export LUT panel (`fileExporter`); ``exportLUT()`` sets it.
+    var isExportingLUT = false
+    /// What the Export LUT panel writes, made before it opens: an export that throws as a
+    /// `fileExporter`'s panel closes stops the app (``save()``).
+    private(set) var lutFile: LUTFile?
+    /// What the Export LUT panel suggests, and the LUT's title if the file keeps it.
+    var lutName: String { controls.scanFilm ? filmName : "\(filmName) – \(paperName)" }
+    /// What the Export LUT panel says above its name field.
+    var lutMessage: String {
+        "The LUT carries this exposure (\(exposureText) EV) and every setting a LUT can hold. Grain, halation, glare, the burn, highlight boost and the sharper edges of the couplers' Edge contrast depend on neighbouring pixels or the whole photo, so they're left out."
+    }
+
+    /// Renders the controls' look as a `.cube` LUT for LightCraft, which applies one to its
+    /// display-encoded sRGB, exposed as the exposure slider shows (``Engine/lut(controls:exposureEV:size:)``),
+    /// titled ``lutName``, then opens the Export LUT panel to write it.
     func exportLUT() {
         guard let engine else { return }
-        let stops = exposureText
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [Self.cubeType]
-        panel.nameFieldStringValue = controls.scanFilm ? filmName : "\(filmName) – \(paperName)"
-        panel.message = "The LUT carries this exposure (\(stops) EV) and every setting a LUT can hold. Grain, halation, glare, the burn, highlight boost and the sharper edges of the couplers' Edge contrast depend on neighbouring pixels or the whole photo, so they're left out."
-        panel.canCreateDirectories = true
+        let (controls, exposureEV, stops, title) = (controls, exposureEV, exposureText, lutName)
+        let comments = [
+            "Made with SpektraMac from Spektrafilm by Andrea Volpato (https://github.com/andreavolpato/spektrafilm).",
+            "Film and paper data: CC BY-SA 4.0.",
+            controls.scanFilm ? "Film: \(filmName), scanned" : "Film: \(filmName), printed on \(paperName)",
+            "Exposure: \(stops) EV",
+            "Input and output: sRGB, encoded",
+        ]
         Task {
-            guard let url = await destination(from: panel) else { return }
-            let (controls, exposureEV) = (controls, exposureEV)
-            let comments = [
-                "Made with SpektraMac from Spektrafilm by Andrea Volpato (https://github.com/andreavolpato/spektrafilm).",
-                "Film and paper data: CC BY-SA 4.0.",
-                controls.scanFilm ? "Film: \(filmName), scanned" : "Film: \(filmName), printed on \(paperName)",
-                "Exposure: \(stops) EV",
-                "Input and output: sRGB, encoded",
-            ]
             do {
                 let lut = try await engine.lut(controls: controls, exposureEV: exposureEV, size: Self.lutSize)
-                try lut.cube(title: url.deletingPathExtension().lastPathComponent, comments: comments)
-                    .write(to: url, options: .atomic)
-                note("Exported LUT \(url.lastPathComponent) at \(stops) EV")
+                lutFile = LUTFile(lut: lut, title: title, comments: comments, stops: stops)
+                isExportingLUT = true
             } catch {
                 fail("Couldn't export the LUT", error, alert: true)
             }
         }
     }
 
+    /// What the Export LUT panel says once it's done. The LUT's title, the name LightCraft shows, is
+    /// the file's: the export can't know a name typed in the panel, so a file named otherwise is
+    /// written again with its own.
+    func lutExported(_ result: Result<URL, any Error>) {
+        do {
+            let url = try result.get()
+            guard let exported = lutFile else { return }
+            let title = url.deletingPathExtension().lastPathComponent
+            if title != exported.title {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                try exported.lut.cube(title: title, comments: exported.comments).write(to: url, options: .atomic)
+            }
+            note("Exported LUT \(url.lastPathComponent) at \(exported.stops) EV")
+        } catch {
+            fail("Couldn't export the LUT", error, alert: true)
+        }
+    }
+
     // MARK: Presets
 
     var canUsePresets: Bool { engine != nil }
+    /// Drives the Save Preset panel (`fileExporter`); ``savePreset()`` sets it.
+    var isSavingPreset = false
+    /// What the Save Preset panel writes, made before it opens, as for Export LUT (``lutFile``).
+    private(set) var presetFile: PresetFile?
 
     func savePreset() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "\(filmName).json"
-        panel.canCreateDirectories = true
-        Task {
-            guard let url = await destination(from: panel) else { return }
-            do {
-                try controls.preset().write(to: url, options: .atomic)
-                note("Saved preset \(url.lastPathComponent)")
-            } catch {
-                fail("Couldn't save the preset", error, alert: true)
-            }
+        do {
+            presetFile = PresetFile(json: try controls.preset())
+            isSavingPreset = true
+        } catch {
+            fail("Couldn't save the preset", error, alert: true)
+        }
+    }
+
+    /// What the Save Preset panel says once it's done.
+    func presetSaved(_ result: Result<URL, any Error>) {
+        switch result {
+        case .success(let url): note("Saved preset \(url.lastPathComponent)")
+        case .failure(let error): fail("Couldn't save the preset", error, alert: true)
         }
     }
 
@@ -1024,6 +1058,28 @@ final class PhotoModel {
         if alert {
             failure = Failure(title: "\(context).", message: error.localizedDescription)
         }
+    }
+}
+
+/// A LUT as Export LUT writes it, titled `title` (``PhotoModel/exportLUT()``).
+nonisolated struct LUTFile: Transferable {
+    let lut: LUT
+    let title: String
+    let comments: [String]
+    /// The exposure it carries, as the slider shows it, for the Log.
+    let stops: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: PhotoModel.cubeType) { $0.lut.cube(title: $0.title, comments: $0.comments) }
+    }
+}
+
+/// The controls as Save Preset writes them (``Controls/preset()``).
+nonisolated struct PresetFile: Transferable {
+    let json: Data
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: .json) { $0.json }
     }
 }
 

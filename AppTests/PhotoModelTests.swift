@@ -218,6 +218,23 @@ final class PhotoModelTests {
         #expect(model.editRecord.keywords == [model.filmName, "SpektraMac"])
     }
 
+    // MARK: Saving
+
+    /// Export LUT renders the LUT before its panel opens, and a file named otherwise than suggested
+    /// is titled with its own name (#291).
+    @Test func exportedLUTIsTitledWithItsFilesName() async throws {
+        let model = try await makeModel()
+        model.exportLUT()
+        try await until { model.isExportingLUT }
+        let lut = try #require(model.lutFile)
+        #expect(lut.title == model.lutName)
+        let url = folder.appending(path: "Renamed.cube")
+        try lut.lut.cube(title: lut.title, comments: lut.comments).write(to: url)
+        model.lutExported(.success(url))
+        #expect(try String(contentsOf: url, encoding: .utf8).contains("TITLE \"Renamed\"\n"))
+        #expect(model.log.last?.message == "Exported LUT Renamed.cube at \(lut.stops) EV")
+    }
+
     // MARK: Opening
 
     /// A photo opened while another is still opening is the one that shows (#192), and neither goes

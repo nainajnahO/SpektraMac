@@ -59,6 +59,12 @@ struct ContentView: View {
             }
             // Photos sent by Finder's Open With and the Dock icon (the app's document types).
             .onOpenURL { url in model.open(url) }
+        .fileExporter(isPresented: $model.isExportingLUT, item: model.lutFile, contentTypes: [PhotoModel.cubeType],
+                      defaultFilename: model.lutFile?.title) { model.lutExported($0) }
+        // The LUT panel's note, for it alone: the panels below are outside it.
+        .fileDialogMessage(model.lutMessage)
+        .fileExporter(isPresented: $model.isSavingPreset, item: model.presetFile, contentTypes: [.json],
+                      defaultFilename: "\(model.filmName).json") { model.presetSaved($0) }
         .fileImporter(isPresented: $model.isImporting, allowedContentTypes: [.image]) { result in
             switch result {
             case .success(let url): model.open(url)
