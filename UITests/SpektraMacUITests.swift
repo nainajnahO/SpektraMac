@@ -35,19 +35,13 @@ final class SpektraMacUITests: XCTestCase {
             for reset in resetArrows() {
                 let group = String(reset.label.dropFirst("Reset ".count))
                 XCTAssertFalse(reset.isEnabled, "\(reset.label) at the film's defaults")
+                // Contrast's controls are all value sliders, which XCUITest can't set (#317).
+                guard group != "Contrast" else { continue }
                 let atDefaults = reset.screenshot().pngRepresentation
-                func changed() {
-                    change(group, below: reset)
-                    XCTAssertTrue(reset.isEnabled, "\(reset.label) after a change")
-                    XCTAssertNotEqual(reset.screenshot().pngRepresentation, atDefaults,
-                                      "\(reset.label) looks the same enabled as disabled")
-                }
-                if group == "Contrast" {
-                    // Its controls are all value sliders, which XCUITest can't set.
-                    XCTExpectFailure("XCUITest can't set Contrast's sliders (#317)", options: .nonStrict()) { changed() }
-                } else {
-                    changed()
-                }
+                change(group, below: reset)
+                XCTAssertTrue(reset.isEnabled, "\(reset.label) after a change")
+                XCTAssertNotEqual(reset.screenshot().pngRepresentation, atDefaults,
+                                  "\(reset.label) looks the same enabled as disabled")
                 reset.click()
                 XCTAssertFalse(reset.isEnabled, "\(reset.label) after resetting")
             }
