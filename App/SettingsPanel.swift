@@ -633,11 +633,14 @@ extension Parameters.DiffusionFilter.Family {
 
 /// A slider as Photos draws its adjustments: the name and value inside a bar that fills from
 /// `neutral` (the lower bound unless given) to the value; under the pointer, a ruler along its top
-/// and the value's line in the accent colour. Dragging anywhere on it moves the value
-/// from where it was, the bar's width for the whole range; with Full Keyboard Access the arrow
-/// keys step it. With Increase Contrast, the fill and the line are stronger. SwiftUI's `Slider`
-/// can't be restyled (there's no slider style to conform to), so the bar is drawn here, with the
-/// system slider standing in for VoiceOver, reading the value as the bar shows it.
+/// (``SliderRuler``) and the value's line in the accent colour. Dragging anywhere on it moves the
+/// value from where it was, the bar's width for the whole range, from line to line, with a
+/// trackpad click at each: a stronger one at a long line. Clicking the value opens it for typing,
+/// to any step, between lines too. With Full Keyboard Access the arrow keys move it a line and
+/// Return opens it for typing. With Increase Contrast, the fill and the line are stronger.
+/// SwiftUI's `Slider` can't be restyled (there's no slider style to conform to), so the bar is
+/// drawn here, with the system slider standing in for VoiceOver, reading the value as the bar
+/// shows it.
 private struct ValueSlider: View {
     let title: String
     @Binding var value: Double
@@ -651,6 +654,11 @@ private struct ValueSlider: View {
     /// The value when the drag began.
     @State private var dragStart: Double?
     @State private var isHovered = false
+    /// Where the value is written on the bar, in ``bar``'s space: a click there opens it for typing.
+    @State private var valueFrame: CGRect = .zero
+    @State private var isTyping = false
+    @State private var typedText = ""
+    @FocusState private var isFieldFocused: Bool
     @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.displayScale) private var displayScale
@@ -668,7 +676,14 @@ private struct ValueSlider: View {
         self.onEditingChanged = onEditingChanged
     }
 
+    /// The bar's coordinate space, where the drag and ``valueFrame`` are measured.
+    nonisolated private static let bar = "bar"
+    /// How far a click can move and still be a click: less than half the space between two lines,
+    /// so it never moves the value, even one typed between lines.
+    private static let clickTolerance = SliderRuler.minimumSpacing / 2
+
     var body: some View {
+        let ruler = SliderRuler(range: range, step: step, neutral: neutral, width: width)
         // Sizes and shades measured from Photos' (macOS 26) screenshots. Shades the system has are its
         // own (the measured text is `.secondary` in dark mode); the rest as the primary style's opacity.
         HStack {
@@ -676,6 +691,8 @@ private struct ValueSlider: View {
             Spacer(minLength: 8)
             Text(valueText)
                 .monospacedDigit()
+                .opacity(isTyping ? 0 : 1)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.bar)) } action: { valueFrame = $0 }
         }
         .font(.callout)
         .foregroundStyle(.secondary)
@@ -693,14 +710,15 @@ private struct ValueSlider: View {
                     .frame(width: 3)
                     .offset(x: min(max(x - 1.5, 0), width - 3))
                 if isActive {
-                    // Photos' ruler, over the line: a hairline every 6 pt either side of the neutral
-                    // value, every fifth longer and every tenth brighter.
+                    // Photos' ruler, over the line, its lines on the values a drag stops on, each
+                    // centred under the value line as it stops there.
                     Canvas { context, size in
                         let hairline = 1 / displayScale
-                        for tick in -Int(origin / 6)...Int((size.width - origin) / 6) {
-                            let tickX = ((origin + CGFloat(tick) * 6) * displayScale).rounded() / displayScale
-                            context.fill(Path(CGRect(x: tickX, y: 0, width: hairline, height: tick % 5 == 0 ? 5 : 3)),
-                                         with: .style(tick % 10 == 0 ? AnyShapeStyle(.primary.opacity(0.7)) : AnyShapeStyle(.tertiary)))
+                        for line in ruler.lines {
+                            let lineX = ((range.fraction(of: line.value) * size.width - hairline / 2) * displayScale).rounded() / displayScale
+                            context.fill(Path(CGRect(x: min(max(lineX, 0), size.width - hairline), y: 0, width: hairline,
+                                                     height: line.rank == .short ? 3 : 5)),
+                                         with: .style(line.rank == .bright ? AnyShapeStyle(.primary.opacity(0.7)) : AnyShapeStyle(.tertiary)))
                         }
                     }
                 }
@@ -711,18 +729,37 @@ private struct ValueSlider: View {
         .onHover { isHovered = $0 }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .contentShape(.rect)
-        .gesture(DragGesture(minimumDistance: 0)
+        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.bar))
             .onChanged { drag in
                 if dragStart == nil {
+                    finishTyping()
                     model.isAdjusting = true
                     onEditingChanged(true)
                 }
                 let start = dragStart ?? value
                 dragStart = start
-                guard width > 0 else { return }
-                value = range.stepped(start + drag.translation.width / width * (range.upperBound - range.lowerBound), by: step)
+                // A click's tremble leaves the value as it is, even between two lines.
+                guard width > 0, value != start || abs(drag.translation.width) >= Self.clickTolerance else { return }
+                value = ruler.nearestLine(to: start + drag.translation.width / width * (range.upperBound - range.lowerBound))
             }
-            .onEnded { _ in endDrag() })
+            .onEnded { drag in
+                endDrag()
+                if abs(drag.translation.width) < Self.clickTolerance, valueFrame.contains(drag.startLocation) {
+                    startTyping()
+                }
+            })
+        .coordinateSpace(.named(Self.bar))
+        // A click at each line the drag reaches, the strongest of them when it passes several at once.
+        // A Mac's trackpad plays only these two: SwiftUI's other feedback, `impact(weight:intensity:)`
+        // with it, plays only on iOS and watchOS.
+        .sensoryFeedback(trigger: value) { old, new in
+            guard dragStart != nil else { return nil }
+            return switch ruler.strongestLine(from: old, to: new) {
+            case .short: .alignment
+            case .long, .bright: .levelChange
+            case nil: nil
+            }
+        }
         // A drag cut off as the slider goes (its window closed, say) never ends otherwise.
         .onDisappear {
             if dragStart != nil {
@@ -732,19 +769,86 @@ private struct ValueSlider: View {
         .focusable(interactions: .activate)
         .onMoveCommand { direction in
             switch direction {
-            case .left: value = range.stepped(value - step, by: step)
-            case .right: value = range.stepped(value + step, by: step)
+            case .left: moveOneLine(upward: false, on: ruler)
+            case .right: moveOneLine(upward: true, on: ruler)
             default: break
             }
         }
+        .onKeyPress(.return) {
+            startTyping()
+            return .handled
+        }
         .accessibilityRepresentation {
-            Slider(value: $value, in: range, step: step) { Text(title) }
+            // VoiceOver's increment and decrement move a line, as the arrow keys do, whatever amount
+            // the system slider asks for.
+            Slider(value: Binding { value } set: { new in
+                if new != value {
+                    moveOneLine(upward: new > value, on: ruler)
+                }
+            }, in: range) { Text(title) }
                 .accessibilityValue(valueText)
+                .accessibilityAction(named: "Type Value", startTyping)
+        }
+        // Over the bar rather than in it: outside the system slider standing in for VoiceOver, and
+        // out of the drag's way.
+        .overlay(alignment: .trailing) {
+            if isTyping {
+                HStack(spacing: 4) {
+                    TextField(title, text: $typedText)
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.trailing)
+                        .monospacedDigit()
+                        .frame(width: valueFrame.width + 16)
+                        .focused($isFieldFocused)
+                        .onAppear { isFieldFocused = true }
+                        .onSubmit(finishTyping)
+                        .onExitCommand { isTyping = false }
+                        .onChange(of: isFieldFocused) { _, isFocused in
+                            if !isFocused {
+                                finishTyping()
+                            }
+                        }
+                    if !unit.isEmpty {
+                        Text(unit)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .font(.callout)
+                .padding(.trailing, 8)
+            }
         }
     }
 
     private var valueText: String {
         unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)"
+    }
+
+    private func moveOneLine(upward: Bool, on ruler: SliderRuler) {
+        if let line = ruler.line(after: value, upward: upward) {
+            value = line
+        }
+    }
+
+    private func startTyping() {
+        typedText = value.formatted(format)
+        isTyping = true
+    }
+
+    /// Sets the typed value, to its nearest step within the range (between lines too). Either "." or
+    /// "," is the decimal separator: no value here reaches a thousand, and the locale's parsing would
+    /// read the other one as a thousands separator, "1.25" as 125 where the decimals are ",". Text
+    /// that doesn't read as a number leaves the value as it was, with the beep a Mac's own number
+    /// fields give.
+    private func finishTyping() {
+        guard isTyping else { return }
+        isTyping = false
+        guard typedText != value.formatted(format) else { return }
+        let text = typedText.replacing(/[.,]/, with: format.locale.decimalSeparator ?? ".")
+        do {
+            value = range.stepped(try format.parseStrategy.parse(text), by: step)
+        } catch {
+            NSSound.beep()
+        }
     }
 
     private func endDrag() {
@@ -865,6 +969,71 @@ private struct ThumbnailStrip: View {
         isDragging = false
         model.isAdjusting = false
         onEditingChanged(false)
+    }
+}
+
+/// A ``ValueSlider``'s ruler: a line at each value a drag stops on. A line for every step when
+/// they're at least ``minimumSpacing`` apart; when they aren't, every 2nd, 5th, 10th… step, so
+/// the lines still fall on round values. Lines are counted from the neutral value (0 without
+/// one), every 5th long and every 10th bright, and the range's two ends are lines too.
+struct SliderRuler {
+    enum Rank: Comparable {
+        case short, long, bright
+    }
+
+    struct Line: Equatable {
+        let value: Double
+        let rank: Rank
+    }
+
+    /// The closest two lines get, in points. Closer, they blur into grey, and a trackpad click at
+    /// each buzzes.
+    static let minimumSpacing: CGFloat = 4
+
+    /// From the lower bound up.
+    let lines: [Line]
+    /// Half a step: values closer than this to a line are on it.
+    private let tolerance: Double
+
+    init(range: ClosedRange<Double>, step: Double, neutral: Double?, width: CGFloat) {
+        let steps = Int(((range.upperBound - range.lowerBound) / step).rounded())
+        let pointsPerStep = width / CGFloat(steps)
+        let stepsPerLine = [1, 2, 5, 10, 20, 50, 100].first { CGFloat($0) * pointsPerStep >= Self.minimumSpacing } ?? steps
+        let anchor = Int((((neutral ?? 0) - range.lowerBound) / step).rounded())
+        lines = (0...steps).compactMap { index in
+            let fromAnchor = index - anchor
+            let isCounted = fromAnchor.isMultiple(of: stepsPerLine)
+            guard isCounted || index == 0 || index == steps else { return nil }
+            let count = fromAnchor / stepsPerLine
+            let rank: Rank = !isCounted ? .short : count.isMultiple(of: 10) ? .bright : count.isMultiple(of: 5) ? .long : .short
+            // The value as `stepped(_:by:)` makes it, so a step typed and the line are one value, and
+            // the upper end exactly, as rounding can land it a hair either side.
+            return Line(value: index == steps ? range.upperBound : range.lowerBound + Double(index) * step, rank: rank)
+        }
+        tolerance = step / 2
+    }
+
+    /// The line nearest `value`: where a drag to it stops.
+    func nearestLine(to value: Double) -> Double {
+        // Never empty: the lower bound is always a line.
+        lines.min { abs($0.value - value) < abs($1.value - value) }!.value
+    }
+
+    /// The next line above `value`, or below it, from a line or from between two; nil past the last.
+    func line(after value: Double, upward: Bool) -> Double? {
+        upward ? lines.first { $0.value > value + tolerance }?.value : lines.last { $0.value < value - tolerance }?.value
+    }
+
+    /// The strongest line a move from `old` to `new` reaches: those it passes and the one it stops
+    /// on, not the one it leaves.
+    func strongestLine(from old: Double, to new: Double) -> Rank? {
+        lines.filter { line in
+            new > old
+                ? line.value > old + tolerance && line.value < new + tolerance
+                : line.value < old - tolerance && line.value > new - tolerance
+        }
+        .map(\.rank)
+        .max()
     }
 }
 
