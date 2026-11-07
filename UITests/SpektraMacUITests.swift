@@ -86,6 +86,14 @@ final class SpektraMacUITests: XCTestCase {
     @MainActor func testAccessibilityAudit() throws {
         try launch()
         defer { quit() }
+        // Once the photo has rendered, as the subtitle says, and its strips have followed: while
+        // its first renders land, SwiftUI replaces views under the audit, which then reports
+        // elements that are gone, such as a parent/child mismatch or a missing action naming no
+        // element (#313, #325).
+        let rendered = NSPredicate(format: "title CONTAINS 'Screen size' OR title CONTAINS 'Full resolution'")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: rendered, evaluatedWith: app.windows["main"])], timeout: 30),
+                       .completed, "the photo's render")
+        Thread.sleep(forTimeInterval: 2)
         var findings: [String] = []
         func audit(_ place: String) throws {
             try app.performAccessibilityAudit { issue in
@@ -117,13 +125,8 @@ final class SpektraMacUITests: XCTestCase {
         case .contrast where frame.minY < main.frame.minY + 60:
             // The main window's title, dimmed while the Log window is in front.
             return 315
-        case .parentChild:
-            return 313
         case .action where issue.element?.label == "Curve":
             return 314
-        case .action where issue.element == nil:
-            // On the Camera tab, named by none.
-            return 325
         default:
             return nil
         }
