@@ -124,6 +124,9 @@ final class SpektraMacUITests: XCTestCase {
             return 313
         case .action where issue.element?.label == "Curve":
             return 314
+        case .action where issue.element == nil:
+            // On the Camera tab, named by none.
+            return 325
         default:
             return nil
         }
@@ -147,6 +150,9 @@ final class SpektraMacUITests: XCTestCase {
         folder = URL.temporaryDirectory.appending(path: "SpektraMacUITests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         app = XCUIApplication()
+        // Without the windows it had open: each test ends the app (`terminate()`), and macOS would
+        // open them again, such as the Log window the audit leaves open (#324).
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
         app.launch()
         let photo = try writePhoto(named: "UI Test Photo.jpg")
         let built = Bundle.main.bundleURL.deletingLastPathComponent().appending(path: "SpektraMac.app")
