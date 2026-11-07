@@ -14,6 +14,7 @@ struct ContentView: View {
     var body: some View {
         @Bindable var model = model
         ImageCanvas()
+            .background(HostingViewName(name: "Photo"))
             // Focused from the start, as nothing else in the window takes focus on a click, so
             // Edit › Copy (⌘C) reaches it: the finished photo, as Share sends it.
             .focusable()
@@ -33,6 +34,7 @@ struct ContentView: View {
             // as the inspector lies over the canvas rather than beside it.
             .inspector(isPresented: $showsSettings) {
                 SettingsPanel(category: category)
+                    .background(HostingViewName(name: "Settings"))
                     // Greyed out while the canvas shows the original: they set the edit.
                     .disabled(model.showsOriginal)
                     .inspectorColumnWidth(290)
@@ -48,6 +50,8 @@ struct ContentView: View {
                         ToolbarSpacer(.flexible)
                     }
             }
+            // The window's content, around the photo's column and the inspector's.
+            .background(HostingViewName(name: "Editor"))
             .onChange(of: undoManager, initial: true) { _, undoManager in
                 model.undoManager = undoManager
             }
@@ -171,6 +175,40 @@ private struct ShowPicker: View {
         .help(model.isSlideFilm
               ? "A slide is viewed directly, so it has no print. Choose a negative film to see one printed."
               : "Print: the film printed on the paper. Film: the developed negative, or the slide itself.")
+    }
+}
+
+/// Names, for assistive apps, the AppKit view SwiftUI hosts this part of a window in, from its
+/// background. SwiftUI hosts a window's content, and each column of a split view such as the
+/// inspector's, in an `NSHostingView`, which assistive apps see as a group. It had no name, so
+/// VoiceOver said only "group" and the accessibility audit failed it, and no SwiftUI modifier
+/// reaches it: they name views inside it (#310). AppKit's own label does.
+private struct HostingViewName: NSViewRepresentable {
+    let name: String
+
+    func makeNSView(context: Context) -> Namer {
+        let namer = Namer()
+        namer.name = name
+        return namer
+    }
+
+    func updateNSView(_ namer: Namer, context: Context) {}
+
+    final class Namer: NSView {
+        var name = ""
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            // The nearest view above that assistive apps see: the hosting view.
+            var view = superview
+            while let ancestor = view, !ancestor.isAccessibilityElement() {
+                view = ancestor.superview
+            }
+            view?.setAccessibilityLabel(name)
+        }
+
+        // Clicks, drops and scrolls go to what it's behind.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
 
