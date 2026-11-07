@@ -111,10 +111,7 @@ final class SpektraMacUITests: XCTestCase {
     @MainActor private func knownIssue(for issue: XCUIAccessibilityAuditIssue) -> Int? {
         let frame = issue.element?.frame ?? .null
         let main = app.windows["main"]
-        let log = app.windows["Log"]
         switch issue.auditType {
-        case .sufficientElementDescription where issue.element?.label.isEmpty == true:
-            return log.exists && log.frame.contains(frame) ? 311 : nil
         case .contrast where main.scrollViews.firstMatch.frame.contains(frame):
             return 312
         case .contrast where frame.minY < main.frame.minY + 60:

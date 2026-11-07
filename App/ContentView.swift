@@ -511,10 +511,15 @@ struct LogView: View {
                         .font(.system(.caption, design: .monospaced))
                     }
                 }
+                // An element of its own to assistive apps, named, as each line's is in it (#311).
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Messages")
                 .padding(10)
             }
             .defaultScrollAnchor(.bottom)
         }
+        // The window's content: a group to assistive apps, named as the window (#311).
+        .background(HostingViewName(name: "Log"))
         .task { await sampleUsage() }
     }
 
