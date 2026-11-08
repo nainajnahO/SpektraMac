@@ -65,7 +65,8 @@ such as what's on screen or how a drag feels, a pull request still says you trie
 The same command also runs the UI tests, in `UITests/`. They drive the app as a person does, through its
 accessibility tree: whether a control is greyed out, what a menu item says, how a Reset arrow looks enabled and
 disabled, and Xcode's accessibility audit (`performAccessibilityAudit()`) of the main window with each settings tab
-showing and of the Log window. Any audit finding fails the test. To run only them:
+showing, with the exposure off a mark, and of the Log window, in light and in dark mode. Any audit finding fails the
+test. To run only them:
 
 ```sh
 xcodebuild test -project SpektraMac.xcodeproj -scheme SpektraMac -destination 'platform=macOS' -only-testing:SpektraMacUITests
@@ -79,10 +80,12 @@ Terminal, run this and enter your password, and after that the tests run unatten
 automationmodetool enable-automationmode-without-authentication
 ```
 
-They launch the app as it's installed for you, with your settings: each test opens a photo of its own (as Finder's
-Open With does, so it goes to File › Open Recent) and undoes its changes before the app quits, so the settings it keeps
-for the next launch are the ones it started with. Each starts with the main window alone, not the windows the app had
-open, and what's kept per window, such as which settings tab shows, may change.
+They launch the app as it's installed for you, but with `-UITesting YES`: it starts from the film's defaults, in
+settings of its own that it empties at each launch, with its windows at their default size, and leaves the photo each
+test opens (as Finder's Open With does) out of File › Open Recent. So the tests don't depend on how you last left the
+app, and a run leaves your settings and Open Recent as they were. The audit sets the app's appearance itself
+(`-UITestAppearance light` or `dark`), so it checks both whatever your Mac's is. Each test starts with the main window
+alone, not the windows the app had open, and what's kept per window, such as which settings tab shows, may change.
 
 ### Runtime checks
 

@@ -8,8 +8,9 @@ import XCTest
 /// a menu item says, how a control looks, and the accessibility audit. They need Automation Mode
 /// (CONTRIBUTING.md) and take over the screen while they run.
 ///
-/// Each test opens a photo of its own as Finder's Open With does, and undoes its changes before the
-/// app quits, so the settings the app keeps for its next launch are the ones it started with.
+/// Each test starts the app from the film's defaults, in settings of its own (`-UITesting`), and
+/// opens a photo of its own as Finder's Open With does: the installed app's settings and Open Recent
+/// stay as they were (#337).
 final class SpektraMacUITests: XCTestCase {
     private var app: XCUIApplication!
     /// The test's photo, removed after.
@@ -85,9 +86,20 @@ final class SpektraMacUITests: XCTestCase {
     // MARK: Accessibility
 
     /// The accessibility audit (missing labels, contrast, hit areas, clipped text…) of the main window
-    /// with each settings tab showing, and of the Log window. Any finding fails the test.
-    @MainActor func testAccessibilityAudit() throws {
-        try launch()
+    /// with each settings tab showing, the Camera tab again with the exposure off a mark, and of the
+    /// Log window, in light mode. Any finding fails the test.
+    @MainActor func testAccessibilityAuditInLightMode() throws {
+        try auditApp(in: "light")
+    }
+
+    /// The same in dark mode: contrast differs between the two, and the Mac may be in either.
+    @MainActor func testAccessibilityAuditInDarkMode() throws {
+        try auditApp(in: "dark")
+    }
+
+    /// The audit with the app in `appearance` (`-UITestAppearance`).
+    @MainActor private func auditApp(in appearance: String) throws {
+        try launch(appearance: appearance)
         defer { quit() }
         // Once the photo has rendered, as the subtitle says, and its strips have followed: while
         // its first renders land, SwiftUI replaces views under the audit, which then reports
@@ -104,7 +116,7 @@ final class SpektraMacUITests: XCTestCase {
                 if let window, let element = issue.element, !window.frame.contains(element.frame) {
                     return true
                 }
-                findings.append("\(place): \(Self.describe(issue))")
+                findings.append("\(appearance), \(place): \(Self.describe(issue))")
                 return true
             }
         }
@@ -112,8 +124,22 @@ final class SpektraMacUITests: XCTestCase {
             showTab(tab)
             try audit("\(tab) tab")
         }
+        // The Camera tab again with the exposure off a mark, brighter than the photo metered: the
+        // text under the strip then says how far it is from the mark, over a brighter photo (#336).
+        showTab(.camera)
+        panel.sliders["Exposure"].adjust(toNormalizedSliderPosition: 0.4)
+        let offAMark = panel.staticTexts.matching(NSPredicate(format: "value CONTAINS ' EV from '")).firstMatch
+        XCTAssert(offAMark.waitForExistence(timeout: 5), "the exposure off a mark")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: rendered, evaluatedWith: app.windows["main"])], timeout: 30),
+                       .completed, "the render off a mark")
+        Thread.sleep(forTimeInterval: 2)
+        try audit("camera tab, \((offAMark.value as? String) ?? "off a mark")")
         app.typeKey("l", modifierFlags: [.command, .option])
         XCTAssert(app.windows["Log"].waitForExistence(timeout: 5))
+        // Once it has settled: audited as it opened, a few of its times failed the contrast check
+        // in light mode, different lines each time, in 4 runs out of 10; 2 seconds later, in none
+        // of 10 (#337).
+        Thread.sleep(forTimeInterval: 2)
         // The Log window's own elements: the main window was audited while it was in front, and
         // behind the Log, macOS dims its title and subtitle below the contrast the audit wants, as
         // for any window that isn't key (#315). `performAccessibilityAudit` is the app's alone.
@@ -133,15 +159,16 @@ final class SpektraMacUITests: XCTestCase {
     /// The settings tabs, in order: ⌥⌘1, ⌥⌘2 and ⌥⌘3 show them.
     private enum Tab: Int, CaseIterable { case camera = 1, film, print }
 
-    /// Launches the app and opens a photo in it.
-    @MainActor private func launch() throws {
+    /// Launches the app, in `appearance` if given, and opens a photo in it.
+    @MainActor private func launch(appearance: String? = nil) throws {
         continueAfterFailure = true
         folder = URL.temporaryDirectory.appending(path: "SpektraMacUITests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         app = XCUIApplication()
         // Without the windows it had open: each test ends the app (`terminate()`), and macOS would
         // open them again, such as the Log window the audit leaves open (#324).
-        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-UITesting", "YES"]
+            + (appearance.map { ["-UITestAppearance", $0] } ?? [])
         app.launch()
         let photo = try writePhoto(named: "UI Test Photo.jpg")
         let built = Bundle.main.bundleURL.deletingLastPathComponent().appending(path: "SpektraMac.app")
@@ -161,11 +188,8 @@ final class SpektraMacUITests: XCTestCase {
         _ = undoItem()
     }
 
-    /// Undoes every change the test made, so the app keeps the settings it started with, then quits.
+    /// Quits the app, which keeps its settings apart from the installed app's (`-UITesting`).
     @MainActor private func quit() {
-        while undoItem().isEnabled {
-            app.typeKey("z", modifierFlags: .command)
-        }
         app.terminate()
         try? FileManager.default.removeItem(at: folder)
     }
