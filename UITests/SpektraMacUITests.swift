@@ -252,14 +252,9 @@ final class SpektraMacUITests: XCTestCase {
         }
         let slider = sliders().min { $0.frame.minY < $1.frame.minY }
         guard let slider else { return XCTFail("Nothing to change in \(group)") }
-        if inOptions {
-            // A value slider, as the options' sliders all are, which follows a drag's distance:
-            // adjust(toNormalizedSliderPosition:) drags it from its value to there (#317).
-            slider.adjust(toNormalizedSliderPosition: 0.85)
-        } else {
-            // A thumbnail strip, which a click along it sets there.
-            slider.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).click()
-        }
+        // A value slider under Options, or a thumbnail strip: adjust(toNormalizedSliderPosition:)
+        // drags either from its value to there (#317, #339).
+        slider.adjust(toNormalizedSliderPosition: 0.85)
     }
 
     /// A 1200 × 800 JPEG in the test's folder: a gradient from dark blue to light orange.
