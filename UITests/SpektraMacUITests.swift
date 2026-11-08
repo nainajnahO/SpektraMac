@@ -35,8 +35,6 @@ final class SpektraMacUITests: XCTestCase {
             for reset in resetArrows() {
                 let group = String(reset.label.dropFirst("Reset ".count))
                 XCTAssertFalse(reset.isEnabled, "\(reset.label) at the film's defaults")
-                // Contrast's controls are all value sliders, which XCUITest can't set (#317).
-                guard group != "Contrast" else { continue }
                 let atDefaults = reset.screenshot().pngRepresentation
                 change(group, below: reset)
                 XCTAssertTrue(reset.isEnabled, "\(reset.label) after a change")
@@ -237,7 +235,8 @@ final class SpektraMacUITests: XCTestCase {
             return panel.sliders.allElementsBoundByIndex
                 .filter { $0.isEnabled && $0.frame.minY > reset.frame.maxY && $0.frame.maxY < next }
         }
-        if sliders().isEmpty {
+        let inOptions = sliders().isEmpty
+        if inOptions {
             // A disclosure triangle, as the label of a disclosure group.
             panel.disclosureTriangles["\(group) options"].click()
             // Until the options have opened, their sliders aren't where they'll be.
@@ -245,10 +244,14 @@ final class SpektraMacUITests: XCTestCase {
         }
         let slider = sliders().min { $0.frame.minY < $1.frame.minY }
         guard let slider else { return XCTFail("Nothing to change in \(group)") }
-        // A click along it, which sets a thumbnail strip there. A value slider follows a drag's
-        // distance instead, and XCUITest can set it neither so nor with adjust(toNormalizedSliderPosition:),
-        // as it has no orientation (#317).
-        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).click()
+        if inOptions {
+            // A value slider, as the options' sliders all are, which follows a drag's distance:
+            // adjust(toNormalizedSliderPosition:) drags it from its value to there (#317).
+            slider.adjust(toNormalizedSliderPosition: 0.85)
+        } else {
+            // A thumbnail strip, which a click along it sets there.
+            slider.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).click()
+        }
     }
 
     /// A 1200 × 800 JPEG in the test's folder: a gradient from dark blue to light orange.
