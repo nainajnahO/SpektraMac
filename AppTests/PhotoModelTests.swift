@@ -266,11 +266,12 @@ final class PhotoModelTests {
         let second = try photo(named: "Second.jpg", width: 6000, height: 4000)
         model.open(first)
         // Long enough for the first to be decoded (Core Image decodes as the engine opens it), not
-        // for the engine to have opened it.
-        try await Task.sleep(for: .milliseconds(50))
+        // for the engine to have opened it. Any sooner, and the second replaces it before it opens.
+        try await Task.sleep(for: .milliseconds(50) * Self.slowdown)
         model.open(second)
         try await until { !model.isLoading && model.log.contains { $0.message.hasPrefix("Rendered preview") } }
         let messages = model.log.map(\.message)
+        #expect(messages.contains { $0.hasPrefix("Opened First.jpg") }, "\(messages)")
         let preview = try #require(messages.first { $0.hasPrefix("Rendered preview") })
         #expect(preview.contains(", after waiting "), "\(messages)")
     }
@@ -388,11 +389,17 @@ final class PhotoModelTests {
         undoManager.endUndoGrouping()
     }
 
+    /// How many times as long the tests wait for the app: 10 under Thread Sanitizer, where the app
+    /// and the engine run 5–10× slower (#322), else 1. Its runtime is loaded only into a build made
+    /// with it.
+    private static let slowdown = dlsym(dlopen(nil, RTLD_NOW), "__tsan_init") == nil ? 1 : 10
+
     private struct TimedOut: Error {}
 
-    /// Waits until `condition` holds, letting the model's tasks run: at most `timeout`.
+    /// Waits until `condition` holds, letting the model's tasks run: at most `timeout`, ``slowdown``
+    /// times over.
     private func until(timeout: Duration = .seconds(30), _ condition: () -> Bool) async throws {
-        let deadline = ContinuousClock.now + timeout
+        let deadline = ContinuousClock.now + timeout * Self.slowdown
         while !condition() {
             guard ContinuousClock.now < deadline else { throw TimedOut() }
             try await Task.sleep(for: .milliseconds(10))
