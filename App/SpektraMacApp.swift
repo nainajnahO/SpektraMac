@@ -12,6 +12,9 @@ struct SpektraMacApp: App {
                 .environment(model)
         }
         .defaultSize(width: 1100, height: 760)
+        // Launched by the UI tests, at its default size and place, which it doesn't keep: a saved
+        // window size changes what the accessibility audit finds (#337).
+        .restorationBehavior(AppDelegate.isUITesting ? .disabled : .automatic)
         .commands {
             // Nothing here prints.
             CommandGroup(replacing: .printItem) {}
@@ -64,6 +67,7 @@ struct SpektraMacApp: App {
                 .environment(model)
         }
         .defaultSize(width: 420, height: 480)
+        .restorationBehavior(AppDelegate.isUITesting ? .disabled : .automatic)
         // Window › Log, as the toolbar's Log button.
         .keyboardShortcut("l", modifiers: [.command, .option])
     }
@@ -124,7 +128,29 @@ struct ViewCommands: Commands {
 /// Owns the model, so the app can ask before quitting during a save, and keep the settings for the
 /// next launch.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let model = PhotoModel()
+    /// Launched by the UI tests (`-UITesting YES`), the app starts from the film's defaults, in
+    /// settings of its own emptied at each launch, with its windows at their default size, and
+    /// leaves its photos out of Open Recent: the test build shares the installed app's container,
+    /// and a run leaves its settings as they were (#337).
+    static let isUITesting = UserDefaults.standard.bool(forKey: "UITesting")
+
+    let model: PhotoModel = {
+        guard AppDelegate.isUITesting else { return PhotoModel() }
+        // Nil only for the app's own domain or the global one.
+        let defaults = UserDefaults(suiteName: "UITesting")!
+        defaults.removePersistentDomain(forName: "UITesting")
+        return PhotoModel(defaults: defaults, addsToRecentPhotos: false)
+    }()
+
+    /// The UI tests' audit checks the app in each appearance, whatever the Mac's
+    /// (`-UITestAppearance light` or `dark`): passed as `-AppleInterfaceStyle`, it has no effect.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        switch UserDefaults.standard.string(forKey: "UITestAppearance") {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: break
+        }
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let phase = model.savePhase else { return .terminateNow }
