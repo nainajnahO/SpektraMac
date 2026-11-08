@@ -70,11 +70,11 @@ final class SpektraMacUITests: XCTestCase {
         showTab(.film)
         try XCTUnwrap(toggle("Halation")).click()
         var undo = undoItem()
-        XCTAssert(undo.title.hasPrefix("Undo Halation"), "Edit › Undo shows “\(undo.title)”")
+        XCTAssert(undo.title.contains("Undo Halation"), "Edit › Undo shows “\(undo.title)”")
         XCTAssertTrue(undo.isEnabled, "Undo after a change")
         app.typeKey("z", modifierFlags: .command)
         undo = undoItem()
-        XCTAssertFalse(undo.title.hasPrefix("Undo Halation"), "Edit › Undo shows “\(undo.title)” once undone")
+        XCTAssertFalse(undo.title.contains("Undo Halation"), "Edit › Undo shows “\(undo.title)” once undone")
         XCTAssertFalse(undo.isEnabled, "Undo with nothing to undo")
     }
 
@@ -174,6 +174,8 @@ final class SpektraMacUITests: XCTestCase {
         // Once macOS has updated the menu for the window.
         Thread.sleep(forTimeInterval: 1)
         // Its title as the menu shows it: its accessibility title stays “Undo” whatever it shows.
+        // Vision reads the shortcut's ⌘Z too, as it can (“96 Z”, say), and not always after the
+        // title, so the title is somewhere in the text, not at its start.
         let undo = (Self.text(in: item.screenshot()), item.isEnabled)
         app.typeKey(.escape, modifierFlags: [])
         return undo
