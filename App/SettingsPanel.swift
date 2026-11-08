@@ -523,9 +523,15 @@ struct ExposureStrip: View {
             // Primary at the body's size, medium: secondary, or primary at the caption's or callout's
             // size over several lines, failed the accessibility audit's contrast over the inspector's
             // glass, where it takes the colour of the photo beside it (#312), and so did regular weight
-            // in dark mode, in a large window, with the exposure brighter than a mark (#336).
+            // in dark mode, in a large window, with the exposure brighter than a mark (#336). Over two
+            // or three lines it failed even so, in light mode and in a large window in dark mode. Bold,
+            // an inset from the glass's edge and a material behind it each failed somewhere; only an
+            // opaque backing passed everywhere (#346).
             Text(description(here: here))
                 .fontWeight(.medium)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(.background, in: .rect(cornerRadius: 4))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .disabled(model.photo == nil)
