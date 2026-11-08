@@ -503,8 +503,9 @@ struct LogView: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(model.log) { entry in
                         HStack(alignment: .top, spacing: 8) {
+                            // In the primary colour, as the message: at the caption's size, the
+                            // secondary falls short of the audit's contrast in light mode.
                             Text(entry.time, format: .dateTime.hour().minute().second())
-                                .foregroundStyle(.secondary)
                             Text(entry.message)
                                 .textSelection(.enabled)
                         }
