@@ -71,7 +71,13 @@ final class SpektraMacUITests: XCTestCase {
         XCTAssert(undo.title.contains("Undo Halation"), "Edit › Undo shows “\(undo.title)”")
         XCTAssertTrue(undo.isEnabled, "Undo after a change")
         app.typeKey("z", modifierFlags: .command)
-        undo = undoItem()
+        // Once in a while, a second after ⌘Z, macOS hasn't updated the menu yet: Undo no longer
+        // names the change, but still shows enabled (#334). Opened again until it's greyed out, for
+        // up to five seconds.
+        let deadline = Date.now.addingTimeInterval(5)
+        repeat {
+            undo = undoItem()
+        } while undo.isEnabled && Date.now < deadline
         XCTAssertFalse(undo.title.contains("Undo Halation"), "Edit › Undo shows “\(undo.title)” once undone")
         XCTAssertFalse(undo.isEnabled, "Undo with nothing to undo")
     }
