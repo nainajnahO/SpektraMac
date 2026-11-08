@@ -318,7 +318,8 @@ private struct CircleToggleStyle: ToggleStyle {
 
 /// The Film or Paper row, or a diffusion filter's: its choices in a pop-up menu (``ChoiceMenu``).
 /// A row of its own, as `LabeledContent` gives its content at most about half the row, cutting
-/// short names.
+/// short names. The menu carries the title for assistive apps, as a slider or switch does here,
+/// so the title beside it isn't an element of its own, read twice.
 private struct ChoiceRow<Value: Hashable>: View {
     let title: String
     let sections: [ChoiceMenu<Value>.Section]
@@ -331,6 +332,7 @@ private struct ChoiceRow<Value: Hashable>: View {
         HStack {
             Text(title)
                 .fixedSize()
+                .accessibilityHidden(true)
             Spacer(minLength: 8)
             ChoiceMenu(sections: sections, selection: $selection, controls: $controls, choosing: choosing)
                 .layoutPriority(1)
