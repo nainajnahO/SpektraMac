@@ -868,12 +868,13 @@ private struct ValueSlider: View {
     }
 }
 
-/// A ``ValueSlider`` as accessibility sees it: a horizontal slider, reading the value as the bar
-/// shows it. VoiceOver's increment and decrement move it a line, as the arrow keys do; an assistive
-/// app that sets the value, such as Voice Control, sets it to the nearest step, as typing does.
-/// An AppKit view, as SwiftUI can't give an element an orientation: its stand-in, a `Slider` in
-/// `accessibilityRepresentation`, has none, and assistive apps and XCUITest's
-/// `adjust(toNormalizedSliderPosition:)` need it to know which way the slider runs (#317).
+/// A ``ValueSlider`` or a ``ThumbnailStrip`` as accessibility sees it: a horizontal slider, reading
+/// the value as the control shows it. VoiceOver's increment and decrement move it as the arrow keys
+/// do, a slider a line and a strip a step; an assistive app that sets the value, such as Voice
+/// Control, sets it to the nearest step, as typing or a drag does. An AppKit view, as SwiftUI can't
+/// give an element an orientation: its stand-in, a `Slider` in `accessibilityRepresentation`, has
+/// none, and assistive apps and XCUITest's `adjust(toNormalizedSliderPosition:)` need it to know
+/// which way the slider runs (#317, #339).
 private struct SliderElement: NSViewRepresentable {
     let title: String
     let value: Double
@@ -897,7 +898,7 @@ private struct SliderElement: NSViewRepresentable {
         fileprivate var slider: SliderElement?
         fileprivate var isEnabled = true
 
-        // The pointer goes through to the bar, which SwiftUI draws and drags.
+        // The pointer goes through to the control, which SwiftUI draws and drags.
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
         override func isAccessibilityElement() -> Bool { true }
@@ -929,9 +930,10 @@ private struct SliderElement: NSViewRepresentable {
 /// A control as Photos shows its main adjustments: frames of the photo across its range
 /// (``Controls/Strip``), with a line at the value; `marks` are dots under it. As in Photos, the
 /// value itself shows on the control's bar under Options. Clicking or dragging along it sets the
-/// value there; with Full Keyboard Access the arrow keys step it, and the system slider stands in
-/// for VoiceOver, reading the value in `format` and `unit`, with an action to go to each mark.
-/// Drawn here, as Photos' strip isn't one of SwiftUI's or AppKit's controls.
+/// value there; with Full Keyboard Access the arrow keys step it. Accessibility finds an AppKit
+/// slider in its place (``SliderElement``), reading the value in `format` and `unit`, with an
+/// action to go to each mark. Drawn here, as Photos' strip isn't one of SwiftUI's or AppKit's
+/// controls.
 private struct ThumbnailStrip: View {
     let title: String
     @Binding var value: Double
@@ -1017,20 +1019,28 @@ private struct ThumbnailStrip: View {
         .focusable(interactions: .activate)
         .onMoveCommand { direction in
             switch direction {
-            case .left: value = range.stepped(value - step, by: step)
-            case .right: value = range.stepped(value + step, by: step)
+            case .left: moveOneStep(upward: false)
+            case .right: moveOneStep(upward: true)
             default: break
             }
         }
-        .accessibilityRepresentation {
-            Slider(value: $value, in: range, step: step) { Text(title) }
-                .accessibilityValue(unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)")
+        // Accessibility finds the AppKit slider behind it instead.
+        .accessibilityHidden(true)
+        .background {
+            SliderElement(title: title, value: value, range: range,
+                          valueText: unit.isEmpty ? value.formatted(format) : "\(value.formatted(format)) \(unit)",
+                          set: { value = range.stepped($0, by: step) },
+                          move: { moveOneStep(upward: $0) })
                 .accessibilityActions {
                     ForEach(marks, id: \.value) { mark in
                         Button(mark.name) { value = mark.value }
                     }
                 }
         }
+    }
+
+    private func moveOneStep(upward: Bool) {
+        value = range.stepped(value + (upward ? step : -step), by: step)
     }
 
     private func endDrag() {

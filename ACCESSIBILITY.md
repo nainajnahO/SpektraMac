@@ -32,7 +32,8 @@ From the release after 1.3:
 - On a slider, VoiceOver's increment and decrement, and the arrow keys with Full Keyboard Access, move to the next
   line of its ruler, as a drag does. To type a value, between lines too, use Type Value in VoiceOver's actions, or
   press Return with Full Keyboard Access.
-- An assistive app can set a slider under Options to any value: it lands on the nearest step, as a typed value does.
+- An assistive app can set a slider under Options, or a strip such as Exposure, to any value: it lands on the nearest
+  step, as a typed value or a drag does.
 - Increase Contrast makes the sliders' fill and value line stronger.
 
 This is new, so reports are especially welcome.
