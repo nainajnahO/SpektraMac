@@ -654,8 +654,7 @@ extension Parameters.DiffusionFilter.Family {
 /// to any step, between lines too. With Full Keyboard Access the arrow keys move it a line and
 /// Return opens it for typing. With Increase Contrast, the fill and the line are stronger.
 /// SwiftUI's `Slider` can't be restyled (there's no slider style to conform to), so the bar is
-/// drawn here, with the system slider standing in for VoiceOver, reading the value as the bar
-/// shows it.
+/// drawn here, and accessibility finds an AppKit slider in its place (``SliderElement``).
 private struct ValueSlider: View {
     let title: String
     @Binding var value: Double
@@ -793,19 +792,15 @@ private struct ValueSlider: View {
             startTyping()
             return .handled
         }
-        .accessibilityRepresentation {
-            // VoiceOver's increment and decrement move a line, as the arrow keys do, whatever amount
-            // the system slider asks for.
-            Slider(value: Binding { value } set: { new in
-                if new != value {
-                    moveOneLine(upward: new > value, on: ruler)
-                }
-            }, in: range) { Text(title) }
-                .accessibilityValue(valueText)
+        // Accessibility finds the AppKit slider behind it instead.
+        .accessibilityHidden(true)
+        .background {
+            SliderElement(title: title, value: value, range: range, valueText: valueText,
+                          set: { value = range.stepped($0, by: step) },
+                          move: { moveOneLine(upward: $0, on: ruler) })
                 .accessibilityAction(named: "Type Value", startTyping)
         }
-        // Over the bar rather than in it: outside the system slider standing in for VoiceOver, and
-        // out of the drag's way.
+        // Over the bar rather than in it: outside what accessibility hides, and out of the drag's way.
         .overlay(alignment: .trailing) {
             if isTyping {
                 HStack(spacing: 4) {
@@ -870,6 +865,64 @@ private struct ValueSlider: View {
         dragStart = nil
         model.isAdjusting = false
         onEditingChanged(false)
+    }
+}
+
+/// A ``ValueSlider`` as accessibility sees it: a horizontal slider, reading the value as the bar
+/// shows it. VoiceOver's increment and decrement move it a line, as the arrow keys do; an assistive
+/// app that sets the value, such as Voice Control, sets it to the nearest step, as typing does.
+/// An AppKit view, as SwiftUI can't give an element an orientation: its stand-in, a `Slider` in
+/// `accessibilityRepresentation`, has none, and assistive apps and XCUITest's
+/// `adjust(toNormalizedSliderPosition:)` need it to know which way the slider runs (#317).
+private struct SliderElement: NSViewRepresentable {
+    let title: String
+    let value: Double
+    let range: ClosedRange<Double>
+    let valueText: String
+    let set: (Double) -> Void
+    let move: (_ upward: Bool) -> Void
+
+    func makeNSView(context: Context) -> Element { Element() }
+
+    func updateNSView(_ element: Element, context: Context) {
+        let oldValue = element.slider?.value
+        element.slider = self
+        element.isEnabled = context.environment.isEnabled
+        if let oldValue, oldValue != value {
+            NSAccessibility.post(element: element, notification: .valueChanged)
+        }
+    }
+
+    final class Element: NSView, NSAccessibilitySlider {
+        fileprivate var slider: SliderElement?
+        fileprivate var isEnabled = true
+
+        // The pointer goes through to the bar, which SwiftUI draws and drags.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func isAccessibilityElement() -> Bool { true }
+        override func accessibilityRole() -> NSAccessibility.Role? { .slider }
+        override func accessibilityOrientation() -> NSAccessibilityOrientation { .horizontal }
+        override func accessibilityLabel() -> String? { slider?.title }
+        override func accessibilityValue() -> Any? { slider?.value }
+        override func accessibilityValueDescription() -> String? { slider?.valueText }
+        override func accessibilityMinValue() -> Any? { slider?.range.lowerBound }
+        override func accessibilityMaxValue() -> Any? { slider?.range.upperBound }
+        override func isAccessibilityEnabled() -> Bool { isEnabled }
+
+        override func setAccessibilityValue(_ value: Any?) {
+            guard isEnabled, let number = value as? NSNumber else { return }
+            slider?.set(number.doubleValue)
+        }
+
+        override func accessibilityPerformIncrement() -> Bool { perform { $0.move(true) } }
+        override func accessibilityPerformDecrement() -> Bool { perform { $0.move(false) } }
+
+        private func perform(_ action: (SliderElement) -> Void) -> Bool {
+            guard isEnabled, let slider else { return false }
+            action(slider)
+            return true
+        }
     }
 }
 
