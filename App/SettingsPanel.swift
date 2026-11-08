@@ -520,10 +520,12 @@ struct ExposureStrip: View {
             .sensoryFeedback(.alignment, trigger: here) { _, new in model.isAdjustingExposure && !new.isEmpty }
             MarkName(name: here.map(\.name).formatted(.list(type: .and)),
                      fraction: (model.exposureEV - range.lowerBound) / (range.upperBound - range.lowerBound))
-            // Primary at the body's size: secondary, or primary at the caption's or callout's size
-            // over several lines, failed the accessibility audit's contrast over the inspector's
-            // glass, where it takes the colour of the photo beside it (#312).
+            // Primary at the body's size, medium: secondary, or primary at the caption's or callout's
+            // size over several lines, failed the accessibility audit's contrast over the inspector's
+            // glass, where it takes the colour of the photo beside it (#312), and so did regular weight
+            // in dark mode, in a large window, with the exposure brighter than a mark (#336).
             Text(description(here: here))
+                .fontWeight(.medium)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .disabled(model.photo == nil)
