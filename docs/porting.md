@@ -115,7 +115,7 @@ Spektrafilm at `3bb2c2d` has no black-and-white film. Its `dev` branch, at commi
 [`6cd00c8`](https://github.com/andreavolpato/spektrafilm/commit/6cd00c8d4f30b5b550f50f4bbd3753c9f2a48507), has three
 stocks of one layer of silver each: Kodak Double-X 5222, a negative; Tri-X Reversal 7266, viewed as a slide; and the
 print film 2302. SpektraMac bundles those three and ports nothing else of `dev`
-([#350](https://github.com/nainajnahO/SpektraMac/issues/350)). `tools/black_and_white.py` copies their profiles and
+([#351](https://github.com/nainajnahO/SpektraMac/pull/351)). `tools/black_and_white.py` copies their profiles and
 their neutral print filters from that commit, and makes their reference data with it.
 
 **One layer in three channels.** A one-layer stock is read with its sensitivity and its curves repeated in all three
