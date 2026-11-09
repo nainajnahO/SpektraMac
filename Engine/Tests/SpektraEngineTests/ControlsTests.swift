@@ -23,7 +23,8 @@ private func json(_ controls: Controls) throws -> [String: Any] {
 
 /// Controls with every stored property away from its default, whatever they are, through the
 /// preset's JSON: each number moved by 1 (whole numbers kept whole, so the exposure mark becomes
-/// the next one) and each Boolean flipped, nested ones too, and the stock names changed.
+/// the next one) and each Boolean flipped, nested ones too, the stock names changed, and the
+/// development times, which a preset leaves out at their default, given.
 private func variedControls() throws -> Controls {
     func vary(_ value: Any) -> Any {
         switch value {
@@ -37,6 +38,8 @@ private func variedControls() throws -> Controls {
     var varied = try json(Controls()).mapValues(vary)
     varied["film"] = "kodak_gold_200"
     varied["paper"] = "kodak_2383"
+    varied["filmDevelopmentTime"] = 9.0
+    varied["paperDevelopmentTime"] = 7.0
     return try Controls(preset: JSONSerialization.data(withJSONObject: varied))
 }
 
@@ -57,8 +60,8 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
     MeteringReadings(luminance: [Double](repeating: 0.184 * exp2(-ev), count: 16), width: 4, height: 4, regions: nil)
 }
 
-/// Every stored property but the stocks and Print | Film is reset by exactly one adjustment, to
-/// the defaults it's given: a new control fails here until it's placed in one.
+/// Every stored property but the stocks, their development and Print | Film is reset by exactly
+/// one adjustment, to the defaults it's given: a new control fails here until it's placed in one.
 @Test func everyControlIsResetByOneAdjustment() throws {
     let (defaults, varied) = (Controls(), try variedControls())
     let (defaultValues, variedValues) = (values(defaults), values(varied))
@@ -72,7 +75,7 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
         }
     }
     for name in controlNames {
-        let expected = ["film", "paper", "scanFilm"].contains(name) ? 0 : 1
+        let expected = ["film", "paper", "scanFilm", "filmDevelopmentTime", "paperDevelopmentTime"].contains(name) ? 0 : 1
         #expect(resetBy[name, default: []].count == expected, "\(name) is reset by \(resetBy[name] ?? [])")
     }
 }
@@ -101,11 +104,12 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
     #expect(Controls.groupName(changedFrom: Controls(), to: Controls()) == "Settings")
 }
 
-/// Choosing each film sets its target paper if it has one, and views exactly the slides directly,
-/// leaving every other control as it was.
+/// Choosing each film sets its target paper if it has one (Double-X, whose profile names none,
+/// the black-and-white print film), develops the film and a paper it set their standard way, and
+/// views exactly the slides directly, leaving every other control as it was.
 @Test func choosingAFilmSetsItsPaperAndViewsSlides() throws {
     let films = try Profile.stocks().map(Profile.load).map(\.info).filter { $0.stage == .filming }
-    #expect(films.count == 20)
+    #expect(films.count == 22)
     var start = try variedControls()
     start.paper = "kodak_2393"  // no film's target print
     var slides: [String] = []
@@ -113,14 +117,18 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
         let chosen = start.choosing(film: film.stock, from: films)
         var expected = start
         expected.film = film.stock
-        expected.paper = film.targetPrint ?? start.paper
+        expected.filmDevelopmentTime = nil
+        if let paper = film.stock == "kodak_doublex" ? "kodak_2302" : film.targetPrint {
+            expected.paper = paper
+            expected.paperDevelopmentTime = nil
+        }
         expected.scanFilm = chosen.scanFilm
         #expect(chosen == expected, "\(film.stock)")
         if chosen.scanFilm {
             slides.append(film.stock)
         }
     }
-    #expect(slides.sorted() == ["fujifilm_provia_100f", "fujifilm_velvia_100", "kodak_ektachrome_100", "kodak_kodachrome_64"])
+    #expect(slides.sorted() == ["fujifilm_provia_100f", "fujifilm_velvia_100", "kodak_ektachrome_100", "kodak_kodachrome_64", "kodak_trix"])
     // A film that isn't there: only the film changes.
     #expect(start.choosing(film: "unknown", from: films).paper == start.paper)
 }
@@ -174,13 +182,17 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
 }
 
 /// A strip's frames set its control, the exposure's from the controls' mark; a strip whose control
-/// changes nothing the controls show has none.
-@Test func stripsFrameTheirControl() {
+/// changes nothing the controls show has none: the print's while the film shows, and the
+/// saturation's with the couplers off, or on a black-and-white film, which has one layer.
+@Test func stripsFrameTheirControl() throws {
+    let films = try Profile.stocks().map(Profile.load).map(\.info).filter { $0.stage == .filming }
     var controls = Controls()
-    #expect(Controls.Strip.allCases.allSatisfy { $0.applies(to: controls) })
+    #expect(Controls.Strip.allCases.allSatisfy { $0.applies(to: controls, films: films) })
+    #expect(Controls.Strip.allCases.filter { $0.applies(to: controls.choosing(film: "kodak_doublex", from: films), films: films) }
+            == [.exposure, .printExposure])
     controls.couplers = false
     controls.scanFilm = true
-    #expect(Controls.Strip.allCases.filter { $0.applies(to: controls) } == [.exposure])
+    #expect(Controls.Strip.allCases.filter { $0.applies(to: controls, films: films) } == [.exposure])
     let metered = readings(centreWeighted: 2)
     #expect(abs(Controls().setting(.exposure, to: 3, readings: metered).exposureEV(readings: metered) - 3) < 1e-12)
     #expect(Controls().setting(.couplerSaturation, to: 0.4, readings: metered).couplerSaturation == 0.4)

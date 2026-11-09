@@ -86,6 +86,17 @@ final class PhotoModel {
     var paperName: String { papers.first { $0.stock == controls.paper }?.name ?? controls.paper }
     var films: [ProfileInfo] { engine?.films ?? [] }
     var papers: [ProfileInfo] { engine?.papers ?? [] }
+    /// A black-and-white stock has one layer, so settings between or across a colour stock's
+    /// three have nothing to set: the couplers' saturation on such a film, and on such a paper
+    /// the tone graph's curve per colour, and the filters that balance a print's colour if the
+    /// film is one too.
+    var isBlackAndWhiteFilm: Bool { films.first { $0.stock == controls.film }?.channelModel == .blackAndWhite }
+    var isBlackAndWhitePaper: Bool { papers.first { $0.stock == controls.paper }?.channelModel == .blackAndWhite }
+    /// The times a stock can be developed for, if it has a choice of them, with its standard one
+    /// and the one `minutes` asks for (``Engine/developmentTimes(of:asking:)``).
+    func developmentTimes(of stock: String, asking minutes: Double?) -> (measured: [Double], standard: Double, developed: Double)? {
+        engine?.developmentTimes(of: stock, asking: minutes)
+    }
     /// The exposure the slider shows, in stops over the photo as shot (``Controls/exposureEV(readings:)``).
     /// Set near a mark, it lands on the mark (``Controls/settingExposure(_:readings:)``).
     var exposureEV: Double {
@@ -585,7 +596,7 @@ final class PhotoModel {
             var count = 0
             do {
                 for strip in Controls.Strip.allCases {
-                    guard strip.applies(to: controls) else {
+                    guard strip.applies(to: controls, films: films) else {
                         strips[strip] = nil
                         continue
                     }

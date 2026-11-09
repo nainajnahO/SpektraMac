@@ -304,6 +304,34 @@ final class PhotoModelTests {
         }
     }
 
+    // MARK: Black-and-white film
+
+    /// Choosing Double-X prints it on the black-and-white print film, each at its standard
+    /// development with its times to choose from, and its strips leave out the saturation, which
+    /// is between a colour film's layers (#350).
+    @Test func doubleXPrintsOnItsPrintFilmWithDevelopmentTimes() async throws {
+        let model = try await openedModel()
+        #expect(!model.isBlackAndWhiteFilm && model.strips[.couplerSaturation] != nil)
+        #expect(model.developmentTimes(of: model.controls.film, asking: nil) == nil)
+
+        let start = model.log.count
+        model.film = "kodak_doublex"
+        #expect(model.controls.paper == "kodak_2302")
+        #expect(model.isBlackAndWhiteFilm && model.isBlackAndWhitePaper)
+        let film = try #require(model.developmentTimes(of: "kodak_doublex", asking: model.controls.filmDevelopmentTime))
+        #expect(film.measured == [4, 5, 6.5, 9, 12] && film.standard == 6.5 && film.developed == 6.5)
+        let paper = try #require(model.developmentTimes(of: "kodak_2302", asking: model.controls.paperDevelopmentTime))
+        #expect(paper.measured == [2, 3.5, 5, 7, 9] && paper.standard == 5 && paper.developed == 5)
+        try await until { messages(of: model, since: start).contains { $0.contains("thumbnails in") } }
+        #expect(model.strips[.couplerSaturation] == nil && model.strips[.printExposure] != nil)
+
+        // Another film starts from its own standard development.
+        model.controls.filmDevelopmentTime = 9
+        #expect(model.developmentTimes(of: "kodak_doublex", asking: model.controls.filmDevelopmentTime)?.developed == 9)
+        model.film = "kodak_trix"
+        #expect(model.controls.filmDevelopmentTime == nil && model.isSlideFilm)
+    }
+
     // MARK: Timing the engine's work
 
     /// Work queued behind other work on the engine is timed from when the engine starts on it, and

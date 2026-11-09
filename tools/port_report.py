@@ -14,7 +14,8 @@ the table between docs/porting.md's markers. The prose around them is written by
 
 The "Every film and paper" tables come from the parity tests against golden/ (or SPEKTRA_GOLDEN): the QA
 oracle's ΔE2000 for each printed pair, and each slide's chart stage by stage, read from the tests' `parity`
-lines (`expectParity` in Engine/Tests/SpektraEngineTests/Compare.swift).
+lines (`expectParity` in Engine/Tests/SpektraEngineTests/Compare.swift). The "Black-and-white film" table
+comes the same way from those stocks' tests, against tools/black_and_white.py's reference data.
 
 Inputs, both public domain:
 - photo: scikit-image's `astronaut` (NASA), cropped to 3:2 and enlarged to 2400 x 1600 with Lanczos, run as
@@ -68,12 +69,19 @@ DOC = REPO / "docs/porting.md"
 IMAGES = REPO / "docs/porting"
 BEGIN, END = "<!-- port_report:begin -->", "<!-- port_report:end -->"
 FILMS_BEGIN, FILMS_END = "<!-- port_report:films:begin -->", "<!-- port_report:films:end -->"
+BW_BEGIN, BW_END = "<!-- port_report:bw:begin -->", "<!-- port_report:bw:end -->"
 PROFILES = REPO / "Engine/Sources/SpektraEngine/Resources/profiles"
 # The parity tests the films tables read: the QA oracle, and the stages a slide's chart goes through.
 SLIDE_STAGES = [("exposeMatchesLogEFilm(caseName:)", "log_e_film max abs", "Exposure (log₁₀)"),
                 ("developMatchesCMYFilm(caseName:)", "cmy_film max abs", "Density"),
                 ("scanMatchesPythonBeforeGamutCompression(caseName:)", "scanned RGB max abs", "Scanned RGB"),
                 ("chainMatchesPython(caseName:)", "rgb_out max abs", "Output RGB")]
+# The stages of a black-and-white case (BlackAndWhiteTests.swift); a film that's viewed has no print.
+BW_STAGES = [("blackAndWhiteExposeMatchesDev(caseName:)", "log_e_film max abs", "Exposure (log₁₀)"),
+             ("blackAndWhiteDevelopMatchesDev(caseName:)", "cmy_film max abs", "Density"),
+             ("blackAndWhitePrintExposeMatchesDev(caseName:)", "log_e_print max abs", "Print exposure (log₁₀)"),
+             ("blackAndWhitePrintDevelopMatchesDev(caseName:)", "cmy_print max abs", "Print density"),
+             ("blackAndWhiteChainMatchesDev(caseName:)", "rgb_out max abs", "Output RGB")]
 HEIGHT, WIDTH = 1600, 2400
 FILM, PAPER = "kodak_portra_400", "kodak_portra_endura"
 CROP = 400
@@ -312,7 +320,7 @@ def run_swift(folder: Path, cases: list[Case]) -> dict[str, float]:
 def run_parity() -> list[list[str]]:
     """The `parity` lines of the tests the films tables read, each split into its fields: test, case,
     check, measured, tolerance, headroom and any extra measurements."""
-    tests = ["qaOracleDeltaE"] + [test.split("(")[0] for test, _, _ in SLIDE_STAGES]
+    tests = ["qaOracleDeltaE"] + [test.split("(")[0] for test, _, _ in SLIDE_STAGES + BW_STAGES]
     result = subprocess.run(["swift", "test", "-c", "release", "-Xswiftc", "-enable-testing", "--package-path",
                              str(REPO / "Engine"), "--filter", "|".join(tests)], capture_output=True, text=True)
     if result.returncode != 0:
@@ -324,14 +332,38 @@ def run_parity() -> list[list[str]]:
     return rows
 
 
+def reference_commit(manifest: str) -> str:
+    return json.loads((Path(os.environ.get("SPEKTRA_GOLDEN", REPO / "golden")) / manifest).read_text())[
+        "spektrafilmCommit"][:7]
+
+
+def stock_info() -> dict[str, dict]:
+    return {path.stem: json.loads(path.read_text())["info"] for path in PROFILES.glob("*.json")}
+
+
+def stages_table(rows: list[list[str]], first_column: str, stages: list[tuple[str, str, str]],
+                 cases: list[tuple[str, str]]) -> list[str]:
+    """A table of `cases` (the parity case, and what the table calls it): the largest difference at each of
+    `stages`, nothing where the case hasn't the stage, and its output as 8-bit values, from the last stage's test."""
+    chain = stages[-1][0]
+    lines = [f"| {first_column} | " + " | ".join(name for _, _, name in stages) + " | 8-bit |",
+             "|---|" + "---|" * (len(stages) + 1)]
+    for case, name in cases:
+        measured = {(row[0], row[2]): row[3] for row in rows if row[1] == case}
+        steps = measured[(chain, "8-bit steps, max")]
+        differing = float(measured[(chain, "8-bit values not identical")])
+        eight_bit = f"max {steps} level{'' if steps == '1' else 's'}, {100 * (1 - differing):.3f} % identical"
+        lines.append(f"| {name} | " + " | ".join(measured.get((test, check), "") for test, check, _ in stages)
+                     + f" | {eight_bit} |")
+    return lines
+
+
 def films_tables(rows: list[list[str]]) -> str:
-    profiles = {path.stem: json.loads(path.read_text())["info"] for path in PROFILES.glob("*.json")}
-    commit = json.loads((Path(os.environ.get("SPEKTRA_GOLDEN", REPO / "golden")) / "manifest.json").read_text())[
-        "spektrafilmCommit"]
+    profiles = stock_info()
     qa = [row for row in rows if row[0] == "qaOracleDeltaE(pair:)"]
     lines = [f"Measured {date.today().isoformat()} by `tools/port_report.py`, from the parity tests against Spektrafilm "
-             f"`{commit[:7]}`'s reference data. Each film printed on its paper: the QA oracle's ΔE2000 on its 50,000 "
-             "random sRGB samples, worst first.",
+             f"`{reference_commit('manifest.json')}`'s reference data. Each film printed on its paper: the QA oracle's "
+             "ΔE2000 on its 50,000 random sRGB samples, worst first.",
              "",
              "| Film | Paper | ΔE2000 max | p99 | mean |",
              "|---|---|---|---|---|"]
@@ -339,22 +371,34 @@ def films_tables(rows: list[list[str]]) -> str:
         film, paper = row[1].split("-")
         also = dict(field.split(" ") for field in row[6:])
         lines.append(f"| {profiles[film]['name']} | {profiles[paper]['name']} | {row[3]} | {also['p99']} | {also['mean']} |")
-    slides = sorted(stock for stock, info in profiles.items() if info["type"] == "positive")
+    # The colour slides: the black-and-white one is in that film's own table.
+    slides = sorted(stock for stock, info in profiles.items()
+                    if info["type"] == "positive" and info["channel_model"] == "color")
     lines += ["",
               "Each slide, scanned rather than printed, on the test chart: the largest difference at each stage, in the "
               "stage's own units, and the scan as 8-bit values.",
-              "",
-              "| Slide | " + " | ".join(name for _, _, name in SLIDE_STAGES) + " | 8-bit |",
-              "|---|" + "---|" * (len(SLIDE_STAGES) + 1)]
-    for slide in slides:
-        case = f"chart-{slide}-scan"
-        measured = {(row[0], row[2]): row[3] for row in rows if row[1] == case}
-        steps = measured[("chainMatchesPython(caseName:)", "8-bit steps, max")]
-        differing = float(measured[("chainMatchesPython(caseName:)", "8-bit values not identical")])
-        eight_bit = f"max {steps} level{'' if steps == '1' else 's'}, {100 * (1 - differing):.3f} % identical"
-        lines.append(f"| {profiles[slide]['name']} | " + " | ".join(measured[(test, check)] for test, check, _ in SLIDE_STAGES)
-                     + f" | {eight_bit} |")
+              ""]
+    lines += stages_table(rows, "Slide", SLIDE_STAGES,
+                          [(f"chart-{slide}-scan", profiles[slide]["name"]) for slide in slides])
     return "\n".join(lines)
+
+
+def bw_table(rows: list[list[str]]) -> str:
+    profiles = stock_info()
+    cases = []
+    for case in sorted({row[1] for row in rows if row[0] == BW_STAGES[-1][0]}):
+        # As tools/black_and_white.py names it: the input, the film, its print or `scan`, any development asked for.
+        image, film, paper, *development = case.split("-")
+        name = profiles[film]["name"] + (", viewed" if paper == "scan" else f" on {profiles[paper]['name']}")
+        if development:
+            film_minutes, print_minutes = development[0].removeprefix("developed_").split("_")
+            name += f", asked for {film_minutes} and {print_minutes} minutes"
+        cases.append((case, name + (", the photo" if image == "photo" else "")))
+    lines = [f"Measured {date.today().isoformat()} by `tools/port_report.py`, from the parity tests against Spektrafilm "
+             f"`{reference_commit('manifest-bw.json')}`'s reference data, on the test chart but for the last row: the "
+             "largest difference at each stage, in the stage's own units, and the output as 8-bit values.",
+             ""]
+    return "\n".join(lines + stages_table(rows, "Film", BW_STAGES, cases))
 
 
 def replaced(text: str, begin: str, end: str, content: str) -> str:
@@ -515,9 +559,10 @@ def main():
         macs = {case.name: np.load(folder / case.name / "mac.npy").astype(np.float64) for case in cases}
     by_name = {case.name: case for case in cases}
     images(by_name, macs)
-    films = films_tables(run_parity())
+    parity = run_parity()
     text = replaced(DOC.read_text(), BEGIN, END, table(cases, macs, mac_seconds))
-    DOC.write_text(replaced(text, FILMS_BEGIN, FILMS_END, films))
+    text = replaced(text, FILMS_BEGIN, FILMS_END, films_tables(parity))
+    DOC.write_text(replaced(text, BW_BEGIN, BW_END, bw_table(parity)))
     print(f"Wrote {DOC.relative_to(REPO)} and {IMAGES.relative_to(REPO)}/")
 
 

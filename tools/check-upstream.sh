@@ -5,6 +5,10 @@
 # (uv run --isolated: the pinned uv tool install isn't touched), diffs the data against the bundled
 # Resources, runs the engine's tests against that reference data and prints the largest difference
 # per stage. Exits non-zero if a script fails, the data differ or a test fails.
+#
+# The black-and-white stocks aren't from that commit but from tools/black_and_white.py's own: their
+# data is added to the export as that script bundles it, so the rest compares, and their parity
+# tests, which have no reference data from <ref>, are skipped.
 set -u
 ref=${1:?usage: tools/check-upstream.sh <ref>}
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -21,6 +25,10 @@ spektrafilm_python() {
 echo "== Exporting the bundled data from Spektrafilm at $ref"
 if ! spektrafilm_python "$repo/tools/export_tables.py" --out "$work/Resources"; then
     echo "export_tables.py failed at $ref"
+    exit 1
+fi
+if ! uv run --quiet "$repo/tools/black_and_white.py" --resources "$work/Resources"; then
+    echo "black_and_white.py failed"
     exit 1
 fi
 
