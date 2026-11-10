@@ -546,7 +546,7 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
 /// moves it from there, keeping that mark however near another it goes. A dot is in the accent
 /// colour while the exposure is on it. With the pointer on a dot, a bubble says what its mark
 /// meters, and the canvas tints the region it meters. As a drag passes a mark, the trackpad clicks.
-/// Marks whose dots would overlap share one, whose bubble has each.
+/// Marks whose dots would be less than a dot apart share one, whose bubble has each.
 struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
     /// The strip's width, for how near two readings put their dots.
@@ -562,10 +562,11 @@ struct ExposureStrip: View {
         // The mark the exposure counts from: the one chosen, or the one it starts from on a photo
         // with no reading for it.
         let counted = model.photo.map { $0.metering.reading(resolving: model.controls.exposureMark) }
-        // A dot's width, in stops: readings nearer than that would draw overlapping dots. Before the
-        // strip is measured, only the same reading.
-        let overlap = width > 0 ? ThumbnailStrip.dotSize / width * (range.upperBound - range.lowerBound) : 0
-        let dots = Self.dots(of: readings, within: overlap)
+        // Two dots' width, in stops: readings nearer than that would draw dots less than a dot apart,
+        // which read as one, and a click between them could be for either. Before the strip is
+        // measured, only the same reading.
+        let nearby = width > 0 ? 2 * ThumbnailStrip.dotSize / width * (range.upperBound - range.lowerBound) : 0
+        let dots = Self.dots(of: readings, within: nearby)
         let marks = dots.map { dot in
             let note = if let counted, dot.marks.contains(counted.mark), counted.mark != model.controls.exposureMark {
                 "No \(model.controls.exposureMark.name.lowercased()) found in this photo, so the exposure counts from \(counted.mark.name)."
@@ -602,13 +603,13 @@ struct ExposureStrip: View {
     static let stops = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))
         .sign(strategy: .always(includingZero: false))
 
-    /// The dots of `readings`: one for each run of readings no more than `overlap` stops from the
+    /// The dots of `readings`: one for each run of readings no more than `nearby` stops from the
     /// one before, midway between its ends, with its marks in ``MeteringMark``'s order.
-    private static func dots(of readings: [(mark: MeteringMark, ev: Double)], within overlap: Double)
+    private static func dots(of readings: [(mark: MeteringMark, ev: Double)], within nearby: Double)
         -> [(marks: [MeteringMark], value: Double)] {
         var runs: [[(mark: MeteringMark, ev: Double)]] = []
         for reading in readings.sorted(by: { $0.ev < $1.ev }) {
-            if let last = runs.last?.last, reading.ev - last.ev <= overlap {
+            if let last = runs.last?.last, reading.ev - last.ev <= nearby {
                 runs[runs.count - 1].append(reading)
             } else {
                 runs.append([reading])

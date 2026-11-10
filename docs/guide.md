@@ -109,9 +109,9 @@ and a bubble opens under it with the mark's symbol, its name and what it meters,
 pink. Click the dot to put the exposure on that mark. A dot is in the accent colour while the exposure is on it.
 Apple's Vision finds the faces, people and objects when the photo opens.
 
-Marks that read the same, or so nearly that their dots would overlap, share one dot. Its bubble lists each of them,
-and a click puts the exposure on the mark you last clicked, if it's one of them, or else on the first in the table
-below.
+Marks that read the same, or so nearly that their dots would almost touch, share one dot. Its bubble lists each of
+them, and a click puts the exposure on the mark you last clicked, if it's one of them, or else on the first in the
+table below.
 
 Dragging the strip moves the exposure from the mark you clicked, and doesn't stop at the other dots. As a drag passes
 a dot, the trackpad clicks.
