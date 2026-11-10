@@ -394,7 +394,7 @@ private struct ImageCanvas: View {
         CGPoint(x: visibleArea.midX, y: visibleArea.midY)
     }
 
-    /// While the Exposure slider is held on a mark, or the pointer is on a mark's dot or shortcut:
+    /// While the Exposure slider is held on a mark, or the pointer is on a mark's dot:
     /// the region that mark meters, tinted.
     @ViewBuilder private var meteringOverlay: some View {
         if let photo = model.photo {

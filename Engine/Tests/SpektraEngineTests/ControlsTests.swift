@@ -155,22 +155,20 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
     #expect(unchanged.controls == Controls() && unchanged.changed.isEmpty)
 }
 
-/// The Exposure slider lands on a mark within ``Controls/exposureSnap`` of it, and elsewhere keeps
-/// the nearest mark and the offset from it, which the next photo's reading of that mark takes.
-@Test func exposureLandsOnANearbyMark() {
+/// The Exposure slider keeps the controls' mark wherever it's set, beside another mark too, and
+/// moves the offset from it, which the next photo's reading of that mark takes. A mark the photo
+/// has no reading for is kept too, the offset counting from the mark it starts from.
+@Test func exposureKeepsItsMark() {
     let metered = readings(centreWeighted: 2)
     #expect(abs(metered.ev[MeteringMark.centreWeighted.rawValue]! - 2) < 1e-12)
-    for (ev, mark) in [(1.86, MeteringMark.centreWeighted), (2.0, .centreWeighted), (2.14, .centreWeighted),
-                       (-0.14, .asShot), (0.1, .asShot)] {
-        let set = Controls().settingExposure(ev, readings: metered)
-        #expect(set.exposureMark == mark && set.exposureOffsetEV == 0, "\(ev)")
-    }
-    let over = Controls().settingExposure(2.5, readings: metered)
-    #expect(over.exposureMark == .centreWeighted && abs(over.exposureOffsetEV - 0.5) < 1e-12)
-    #expect(abs(over.exposureEV(readings: metered) - 2.5) < 1e-12)
-    #expect(abs(over.exposureEV(readings: readings(centreWeighted: -3)) - -2.5) < 1e-12)
-    let under = Controls().settingExposure(-1.2, readings: metered)
-    #expect(under.exposureMark == .asShot && abs(under.exposureOffsetEV - -1.2) < 1e-12)
+    #expect(abs(metered.ev[MeteringMark.asShot.rawValue]!) < 1e-12)
+    let besideAsShot = Controls().setting(.exposure, to: 0.1, readings: metered)
+    #expect(besideAsShot.exposureMark == .centreWeighted && abs(besideAsShot.exposureOffsetEV - -1.9) < 1e-12)
+    #expect(abs(besideAsShot.exposureEV(readings: readings(centreWeighted: -3)) - -4.9) < 1e-12)
+    var faces = Controls()
+    faces.exposureMark = .faces
+    let over = faces.setting(.exposure, to: 2.5, readings: metered)
+    #expect(over.exposureMark == .faces && abs(over.exposureOffsetEV - 0.5) < 1e-12)
 }
 
 /// The exposure's range is −4…+8 stops, widened to whole stops past a reading outside it.

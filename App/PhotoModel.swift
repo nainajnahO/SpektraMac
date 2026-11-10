@@ -98,13 +98,22 @@ final class PhotoModel {
         engine?.developmentTimes(of: stock, asking: minutes)
     }
     /// The exposure the slider shows, in stops over the photo as shot (``Controls/exposureEV(readings:)``).
-    /// Set near a mark, it lands on the mark (``Controls/settingExposure(_:readings:)``).
+    /// Set, it keeps the controls' mark and moves the offset from it, near another mark too: only a
+    /// click on a mark's dot puts the exposure on one (``putExposure(on:)``).
     var exposureEV: Double {
         get { photo.map { controls.exposureEV(readings: $0.metering) } ?? controls.exposureOffsetEV }
         set {
             guard let photo else { return }
-            controls = controls.settingExposure(newValue, readings: photo.metering)
+            controls = controls.setting(.exposure, to: newValue, readings: photo.metering)
         }
+    }
+    /// Puts the exposure on `mark`, at no offset from it: one change of the controls, so one step
+    /// undoes it.
+    func putExposure(on mark: MeteringMark) {
+        var controls = controls
+        controls.exposureMark = mark
+        controls.exposureOffsetEV = 0
+        self.controls = controls
     }
     /// The exposure's range (``Controls/exposureRange(readings:)``).
     var exposureRange: ClosedRange<Double> {
@@ -120,8 +129,8 @@ final class PhotoModel {
     }
     /// While the Exposure slider is held: the canvas then tints the region the mark it's on meters.
     var isAdjustingExposure = false
-    /// The marks of the dot or the shortcut under the pointer, on the Exposure strip or under it:
-    /// the canvas then tints the regions they meter, as it does while the strip is held.
+    /// The marks of the dot under the pointer, under the Exposure strip: the canvas then tints the
+    /// regions they meter, as it does while the strip is held on them.
     var hoveredMarks: [MeteringMark] = []
     /// While a Burn slider is held: the canvas then shows what burns (``burnMask``).
     var isAdjustingBurn = false {

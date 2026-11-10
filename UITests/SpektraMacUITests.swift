@@ -80,41 +80,42 @@ final class SpektraMacUITests: XCTestCase {
         XCTAssertFalse(app.popUpButtons["Development"].exists, "Development on Portra 400")
     }
 
-    // MARK: Metering shortcuts
+    // MARK: Metering marks
 
-    /// A mark's shortcut under the Exposure strip puts the exposure on the mark from off it, and
-    /// Undo takes that back in one step; a click on the mark's dot puts it there too. A mark the
-    /// photo has no reading for is greyed out (#353).
-    @MainActor func testMeteringShortcutsPutTheExposureOnTheirMark() throws {
+    /// The Exposure strip set beside a mark stays off it, counting from the mark it was on; the
+    /// pointer on a mark's dot shows the mark's name, and a click there puts the exposure on the
+    /// mark, in one step to undo, for the strip to count from after (#353).
+    @MainActor func testClickingADotPutsTheExposureOnItsMark() throws {
         try launch()
         defer { quit() }
         showTab(.camera)
-        // The test's photo is a gradient, with no face in it.
-        XCTAssert(shortcut("Faces").waitForExistence(timeout: 5), "the Faces shortcut")
-        XCTAssertFalse(shortcut("Faces").isEnabled, "Faces on a photo with no face")
+        // The test's photo is a gradient: As shot reads it at 0 and Centre-weighted, the film's
+        // default, 0.016 stops over, a third of a point to its right on the strip. Its range is
+        // −4…+8 stops.
         let strip = panel.sliders["Exposure"]
-        strip.adjust(toNormalizedSliderPosition: 0.9)
-        let offAMark = text(containing: " EV from ")
-        XCTAssert(offAMark.waitForExistence(timeout: 5), "the exposure off a mark")
-        let offset = offAMark.value as? String
-        XCTAssertEqual(shortcut("As shot").value as? Int, 0, "As shot's shortcut off the mark")
-        shortcut("As shot").click()
+        XCTAssert(strip.waitForExistence(timeout: 5), "the Exposure strip")
+        let centreWeighted = strip.normalizedSliderPosition
+        strip.adjust(toNormalizedSliderPosition: 4.1 / 12)
+        let besideTheMarks = text(beginning: "+0.1 EV from Centre-weighted")
+        XCTAssert(besideTheMarks.waitForExistence(timeout: 5), "the exposure a tenth of a stop off the marks")
+        // In the row under the strip's frames, 6 points left of the dots: within As shot's reach,
+        // where a click on the frames would land 0.3 stops under.
+        let besideAsShot = strip.coordinate(withNormalizedOffset: CGVector(dx: centreWeighted, dy: 1))
+            .withOffset(CGVector(dx: -6, dy: -7))
+        besideAsShot.hover()
+        XCTAssert(text("As shot").waitForExistence(timeout: 5), "As shot's name with the pointer on its dot")
+        besideAsShot.click()
         XCTAssert(text(beginning: "As shot:").waitForExistence(timeout: 5), "the exposure on As shot")
-        XCTAssertEqual(shortcut("As shot").value as? Int, 1, "As shot's shortcut on the mark")
-        let asShot = strip.normalizedSliderPosition
         let undo = undoItem()
         XCTAssert(undo.title.contains("Undo Exposure"), "Edit › Undo shows “\(undo.title)”")
-        // The mark and the offset back as they were, in one step.
+        // Nearer Centre-weighted's reading than As shot's, but counting from As shot.
+        strip.adjust(toNormalizedSliderPosition: 0.9)
+        XCTAssert(text(containing: " EV from As shot").waitForExistence(timeout: 5), "the exposure from As shot")
+        // The click's mark and offset back as they were, in one step.
         app.typeKey("z", modifierFlags: .command)
-        XCTAssert(offAMark.waitForExistence(timeout: 5), "the exposure off a mark after Undo")
-        XCTAssertEqual(offAMark.value as? String, offset, "the offset after Undo")
-        // A click beside As shot's dot, in the row under the strip's frames: 6 points to its right,
-        // within a dot's reach, where a click on the frames would land 0.3 stops off the mark.
-        // Centre-weighted reads this photo a fraction of a point away, so the click may land on
-        // either: on a mark either way.
-        strip.coordinate(withNormalizedOffset: CGVector(dx: asShot, dy: 1)).withOffset(CGVector(dx: 6, dy: -6)).click()
-        XCTAssert(offAMark.waitForNonExistence(timeout: 5), "the exposure on a mark after a click on its dot")
-        XCTAssertEqual(shortcut("As shot").value as? Int, 1, "As shot's shortcut after a click on its dot")
+        XCTAssert(text(beginning: "As shot:").waitForExistence(timeout: 5), "the exposure on As shot after Undo")
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssert(besideTheMarks.waitForExistence(timeout: 5), "the exposure off the marks after a second Undo")
     }
 
     // MARK: Undo
@@ -295,9 +296,9 @@ final class SpektraMacUITests: XCTestCase {
         app.windows["main"].scrollViews.firstMatch
     }
 
-    /// A metering mark's shortcut under the Exposure strip.
-    @MainActor private func shortcut(_ mark: String) -> XCUIElement {
-        panel.checkBoxes[mark]
+    /// The settings panel's text that is `whole`, such as a mark's name under the Exposure strip.
+    @MainActor private func text(_ whole: String) -> XCUIElement {
+        panel.staticTexts.matching(NSPredicate(format: "value == %@", whole)).firstMatch
     }
 
     /// The settings panel's text that contains `part`, such as the line under the Exposure strip.
