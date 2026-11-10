@@ -1019,8 +1019,11 @@ private struct ThumbnailStrip: View {
     /// How far from a dot, in points, a click still lands on it: about a third of a stop, where the
     /// dots alone are 4 points across.
     private static let dotReach: CGFloat = 8
-    /// The height of the dots' row: taller than the dots, to be somewhere to click.
-    private static let dotsHeight: CGFloat = 12
+    /// The height of the dots' row, the dots 4 points under the frames and 4 points across.
+    private static let dotsHeight: CGFloat = 8
+    /// How far under the dots' row a click or the pointer still reaches its dots: into the space
+    /// above the next control, so the row is taller to point at than it is in the layout.
+    private static let dotsReachBelow: CGFloat = 4
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1068,10 +1071,10 @@ private struct ThumbnailStrip: View {
                         let size: CGFloat = mark.value == hoveredMark ? 6 : 4
                         Circle().fill(mark.isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                             .frame(width: size, height: size)
-                            // The row's height, so the bubble hangs from the row's foot, clear of the
-                            // pointer in the row: under the pointer, it would take the hover away
-                            // from the dot, and close.
-                            .frame(height: Self.dotsHeight)
+                            // As tall as the row reaches, so the bubble hangs from below where the
+                            // pointer can be on the dot: under the pointer, it would take the hover
+                            // away from the dot, and close.
+                            .frame(height: Self.dotsHeight + Self.dotsReachBelow)
                             .popover(isPresented: Binding {
                                 hoveredMark == mark.value
                             } set: { isPresented in
@@ -1083,10 +1086,12 @@ private struct ThumbnailStrip: View {
                                     // It follows the pointer: a click outside it is for the strip.
                                     .interactiveDismissDisabled()
                             }
-                            .position(x: range.fraction(of: mark.value) * width, y: Self.dotsHeight / 2)
+                            .position(x: range.fraction(of: mark.value) * width,
+                                      y: (Self.dotsHeight + Self.dotsReachBelow) / 2)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: Self.dotsHeight, maxHeight: Self.dotsHeight)
+                .frame(maxWidth: .infinity, minHeight: Self.dotsHeight + Self.dotsReachBelow,
+                       maxHeight: Self.dotsHeight + Self.dotsReachBelow)
                 .contentShape(.rect)
                 .onContinuousHover { phase in
                     var hovered: Double?
@@ -1100,6 +1105,9 @@ private struct ThumbnailStrip: View {
                 .onTapGesture { location in
                     dot(at: location.x)?.choose()
                 }
+                // In the layout, only the row: what it reaches below lies in the space over the
+                // next control.
+                .padding(.bottom, -Self.dotsReachBelow)
             }
         }
         .opacity(isEnabled ? 1 : 0.5)
