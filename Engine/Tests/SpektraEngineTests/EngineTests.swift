@@ -294,11 +294,11 @@ func controlsDigestLikePython(caseName: String) throws {
     }
 }
 
-/// The pickers' lists: Spektrafilm's `FilmStocks` and `PrintPapers`, and every film's target
-/// print among the papers.
+/// The pickers' lists: Spektrafilm's `FilmStocks` and `PrintPapers` with its black-and-white
+/// stocks, and every film's target print among the papers.
 @Test func stockLists() throws {
     let engine = try Engine()
-    #expect(engine.films.count == 20 && engine.papers.count == 8)
+    #expect(engine.films.count == 22 && engine.papers.count == 9)
     let papers = Set(engine.papers.map(\.stock))
     #expect(engine.films.compactMap(\.targetPrint).allSatisfy(papers.contains))
 }
@@ -847,27 +847,88 @@ extension PhotoOpeningTests {
         return RGBImage(width: width, height: height, pixels: Array(repeatElement(row, count: height).joined())).ciImage
     }
 
-    /// Every film on its paper (slides scanned), and Portra 400 on every paper.
+    /// Every film on its paper (slides scanned), Portra 400 on every paper, and Double-X, which
+    /// has one layer, on a colour paper.
     @Test func everyStockRendersFinite() async throws {
         let engine = try Engine()
         _ = try await engine.open(Self.ramp())
-        let films = engine.films.map { film in
-            var controls = Controls()
-            controls.film = film.stock
-            controls.paper = film.targetPrint ?? controls.paper
-            controls.scanFilm = film.type == .positive
-            return controls
-        }
+        let films = engine.films.map { Controls().choosing(film: $0.stock, from: engine.films) }
         let papers = engine.papers.map { paper in
             var controls = Controls()
             controls.paper = paper.stock
             return controls
         }
-        #expect(films.count == 20 && papers.count == 8)
-        for controls in films + papers {
+        #expect(films.count == 22 && papers.count == 9)
+        var doubleXOnColour = Controls()
+        doubleXOnColour.film = "kodak_doublex"
+        for controls in films + papers + [doubleXOnColour] {
             let pixels = try await engine.render(controls: controls, mode: .full).pixels
             #expect(pixels.allSatisfy { $0.isFinite }, "\(controls.film) on \(controls.scanFilm ? "the scanner" : controls.paper)")
         }
+    }
+
+    /// A black-and-white film's grain is grey, printed on the black-and-white print film or viewed
+    /// itself, with the halation and glare on too: the grain of the two channels its one layer is
+    /// copied into (``Profile``) never reaches the image.
+    @Test func blackAndWhiteGrainIsGrey() async throws {
+        let engine = try Engine()
+        _ = try await engine.open(Self.ramp())
+        var negative = Controls().choosing(film: "kodak_doublex", from: engine.films)
+        negative.scanFilm = true
+        for controls in [Controls().choosing(film: "kodak_doublex", from: engine.films), negative,
+                         Controls().choosing(film: "kodak_trix", from: engine.films)] {
+            var smooth = controls
+            smooth.grain = false
+            let pixels = try await engine.render(controls: controls, mode: .export).pixels
+            let withoutGrain = try await engine.render(controls: smooth, mode: .export).pixels
+            let grain = zip(pixels, withoutGrain).map { abs($0 - $1) }.max()!
+            let apart = stride(from: 0, to: pixels.count, by: 3).map { pixel in
+                pixels[pixel..<pixel + 3].max()! - pixels[pixel..<pixel + 3].min()!
+            }.max()!
+            // The grain moves a pixel by 0.0016 to 0.0034 here, and its channels are apart by 3e-6
+            // at most, 1.0e-4 on Double-X's negative, whose base isn't quite colourless: 3× that.
+            let name = "\(controls.film) \(controls.scanFilm ? "viewed" : "printed")"
+            #expect(grain > 1e-3, "\(name): no grain to check, \(grain)")
+            #expect(apart < 3e-4, "\(name): channels \(apart) apart")
+        }
+    }
+
+    /// Double-X on the black-and-white print film, at each time either was measured developed
+    /// for: finite, each a different image, and the standard time's the one no time gives. A
+    /// colour film on a colour paper renders the same whatever the times.
+    @Test func everyDevelopmentTimeRenders() async throws {
+        let engine = try Engine()
+        _ = try await engine.open(Self.ramp())
+        #expect(engine.developmentTimes(of: "kodak_doublex", asking: nil)?.measured == [4, 5, 6.5, 9, 12])
+        #expect(engine.developmentTimes(of: "kodak_doublex", asking: 8)?.developed == 9)
+        #expect(engine.developmentTimes(of: "kodak_2302", asking: nil)?.developed == 5)
+        #expect(engine.developmentTimes(of: "kodak_trix", asking: nil) == nil)
+        #expect(engine.developmentTimes(of: "kodak_portra_400", asking: 9) == nil)
+
+        func render(_ controls: Controls) async throws -> [UInt32] {
+            let pixels = try await engine.render(controls: controls, mode: .full).pixels
+            #expect(pixels.allSatisfy { $0.isFinite },
+                    "\(controls.film) on \(controls.paper), \(controls.filmDevelopmentTime ?? .nan) and \(controls.paperDevelopmentTime ?? .nan) minutes")
+            return pixels.map(\.bitPattern)
+        }
+        let doubleX = Controls().choosing(film: "kodak_doublex", from: engine.films)
+        let standard = try await render(doubleX)
+        for (control, stock) in [(\Controls.filmDevelopmentTime, doubleX.film), (\.paperDevelopmentTime, doubleX.paper)] {
+            let times = try #require(engine.developmentTimes(of: stock, asking: nil))
+            var renders: [[UInt32]] = []
+            for minutes in times.measured {
+                var controls = doubleX
+                controls[keyPath: control] = minutes
+                renders.append(try await render(controls))
+                #expect((renders.last == standard) == (minutes == times.developed), "\(stock) for \(minutes) minutes")
+            }
+            #expect(Set(renders).count == renders.count, "\(stock)")
+        }
+        var colour = Controls()
+        let asItIs = try await render(colour)
+        (colour.filmDevelopmentTime, colour.paperDevelopmentTime) = (9, 7)
+        let developed = try await render(colour)
+        #expect(developed == asItIs)
     }
 
     /// Each control in ``Controls/ranges`` at each end, then every one at its lower end at once and

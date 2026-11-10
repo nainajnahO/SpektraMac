@@ -34,6 +34,7 @@ struct SettingsPanel: View {
                 case .film:
                     ChoiceRow(title: "Film", sections: stockSections(model.films), selection: $model.film,
                               controls: $model.controls, choosing: model.controls(choosing:))
+                    DevelopmentRow(stock: model.controls.film, minutes: \.filmDevelopmentTime)
                     AdjustmentGroup("Halation", systemImage: "sun.haze", adjustment: .halation,
                                     isOn: $model.controls.halation) {
                         ValueSlider("Strength", value: $model.controls.halationAmount, in: Controls.range(\.halationAmount), step: 0.05, neutral: 1,
@@ -50,20 +51,30 @@ struct SettingsPanel: View {
                                     format: .number.precision(.fractionLength(2)))
                             .help("How far light spreads inside the emulsion, over the film's own.")
                     }
-                    AdjustmentGroup("Couplers", systemImage: "drop.halffull", adjustment: .couplers,
-                                    isOn: $model.controls.couplers) {
-                        ThumbnailStrip("Saturation", value: $model.controls.couplerSaturation,
-                                       in: model.range(of: .couplerSaturation), step: 0.05,
-                                       format: .number.precision(.fractionLength(2)), frames: model.strips[.couplerSaturation])
-                            .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
-                    } options: {
-                        ValueSlider("Saturation", value: $model.controls.couplerSaturation,
-                                    in: model.range(of: .couplerSaturation), step: 0.05, neutral: 1,
-                                    format: .number.precision(.fractionLength(2)))
-                            .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
-                        ValueSlider("Edge contrast", value: $model.controls.couplerEdgeContrast, in: Controls.range(\.couplerEdgeContrast), step: 0.05, neutral: 1,
-                                    format: .number.precision(.fractionLength(2)))
-                            .help("How strongly each layer holds back its own development nearby: more gives crisper edges in fine detail. The overall contrast stays the film's.")
+                    let edgeContrast = ValueSlider("Edge contrast", value: $model.controls.couplerEdgeContrast,
+                                                   in: Controls.range(\.couplerEdgeContrast), step: 0.05, neutral: 1,
+                                                   format: .number.precision(.fractionLength(2)))
+                        .help("How strongly each layer holds back its own development nearby: more gives crisper edges in fine detail. The overall contrast stays the film's.")
+                    if model.isBlackAndWhiteFilm {
+                        // One layer: no others to hold back, so no saturation to set.
+                        AdjustmentGroup("Couplers", systemImage: "drop.halffull", adjustment: .couplers,
+                                        isOn: $model.controls.couplers) {
+                            edgeContrast
+                        }
+                    } else {
+                        AdjustmentGroup("Couplers", systemImage: "drop.halffull", adjustment: .couplers,
+                                        isOn: $model.controls.couplers) {
+                            ThumbnailStrip("Saturation", value: $model.controls.couplerSaturation,
+                                           in: model.range(of: .couplerSaturation), step: 0.05,
+                                           format: .number.precision(.fractionLength(2)), frames: model.strips[.couplerSaturation])
+                                .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
+                        } options: {
+                            ValueSlider("Saturation", value: $model.controls.couplerSaturation,
+                                        in: model.range(of: .couplerSaturation), step: 0.05, neutral: 1,
+                                        format: .number.precision(.fractionLength(2)))
+                                .help("How strongly each colour layer holds back the others as it develops: more gives purer colours.")
+                            edgeContrast
+                        }
                     }
                     AdjustmentGroup("Grain", systemImage: "aqi.medium", adjustment: .grain, isOn: $model.controls.grain) {
                         ValueSlider("Size", value: $model.controls.grainSize, in: Controls.range(\.grainSize), step: 0.05,
@@ -82,12 +93,11 @@ struct SettingsPanel: View {
                             .foregroundStyle(.secondary)
                     }
                     Group {
-                        ChoiceRow(title: "Paper", sections: stockSections(model.papers), selection: $model.controls.paper,
-                                  controls: $model.controls) { paper in
-                            var controls = model.controls
-                            controls.paper = paper
-                            return controls
-                        }
+                        ChoiceRow(title: "Paper", sections: stockSections(model.papers),
+                                  selection: Binding(get: { model.controls.paper },
+                                                     set: { model.controls = model.controls.choosing(paper: $0) }),
+                                  controls: $model.controls) { model.controls.choosing(paper: $0) }
+                        DevelopmentRow(stock: model.controls.paper, minutes: \.paperDevelopmentTime)
                         AdjustmentGroup("Contrast", systemImage: "circle.lefthalf.filled", adjustment: .contrast) {
                             ToneGraphView()
                         } options: {
@@ -110,12 +120,17 @@ struct SettingsPanel: View {
                         } options: {
                             ValueSlider("Print exposure", value: $model.controls.printExposure, in: model.range(of: .printExposure),
                                         step: 0.02, neutral: 1, format: .number.precision(.fractionLength(2)))
-                            ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: Controls.range(\.yFilterShift), step: 1, neutral: 0,
-                                        format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
-                                        unit: "CC")
-                            ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: Controls.range(\.mFilterShift), step: 1, neutral: 0,
-                                        format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
-                                        unit: "CC")
+                            // The filters balance the print's colour. A black-and-white film on a
+                            // black-and-white paper has none: there they'd only change how much
+                            // light the paper gets, as the print exposure does.
+                            if !(model.isBlackAndWhiteFilm && model.isBlackAndWhitePaper) {
+                                ValueSlider("Y filter shift", value: $model.controls.yFilterShift, in: Controls.range(\.yFilterShift), step: 1, neutral: 0,
+                                            format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
+                                            unit: "CC")
+                                ValueSlider("M filter shift", value: $model.controls.mFilterShift, in: Controls.range(\.mFilterShift), step: 1, neutral: 0,
+                                            format: .number.precision(.fractionLength(0)).sign(strategy: .always(includingZero: false)),
+                                            unit: "CC")
+                            }
                             ValueSlider("Preflash", value: $model.controls.preflash, in: Controls.range(\.preflash), step: 0.001,
                                         format: .number.precision(.fractionLength(3)))
                                 .help("A flash of plain light on the paper before the print, so light tones such as a bright sky gain some tone. It darkens the whole print: lower the print exposure to bring the mid-tones back.")
@@ -125,7 +140,7 @@ struct SettingsPanel: View {
                                         format: .number.precision(.fractionLength(1)), unit: "EV") {
                                 model.isAdjustingBurn = $0
                             }
-                            .help("Extra enlarger exposure where the photo is bright, as a darkroom printer burns in a sky: a pale sky darkens and gets its colour back, and the rest of the print stays as it is.")
+                            .help("Extra enlarger exposure where the photo is bright, as a darkroom printer burns in a sky: a pale sky darkens and gets its \(model.isBlackAndWhiteFilm ? "tone" : "colour") back, and the rest of the print stays as it is.")
                             ValueSlider("Threshold", value: $model.controls.burnThreshold, in: Controls.range(\.burnThreshold),
                                         step: 0.1, format: ExposureStrip.stops, unit: "EV") {
                                 model.isAdjustingBurn = $0
@@ -341,14 +356,45 @@ private struct ChoiceRow<Value: Hashable>: View {
     }
 }
 
-/// Stocks under headings, from their profiles: slides, still negatives or papers, then cine stocks.
+/// The Development row under a black-and-white film or print film with a choice of development
+/// times: those its curves were measured at, in minutes. Choosing the standard one sets none, as
+/// the controls are before a choice. Under any other stock, nothing.
+private struct DevelopmentRow: View {
+    @Environment(PhotoModel.self) private var model
+    let stock: String
+    let minutes: WritableKeyPath<Controls, Double?>
+
+    var body: some View {
+        @Bindable var model = model
+        if let times = model.developmentTimes(of: stock, asking: model.controls[keyPath: minutes]) {
+            let developing = { (time: Double) -> Controls in
+                var controls = model.controls
+                controls[keyPath: minutes] = time == times.standard ? nil : time
+                return controls
+            }
+            let choices = times.measured.map { time in
+                let name = Measurement(value: time, unit: UnitDuration.minutes)
+                    .formatted(.measurement(width: .abbreviated, usage: .asProvided))
+                return (name: time == times.standard ? "\(name) (standard)" : name, value: time)
+            }
+            ChoiceRow(title: "Development", sections: [.init(heading: nil, choices: choices)],
+                      selection: Binding(get: { times.developed }, set: { model.controls = developing($0) }),
+                      controls: $model.controls, choosing: developing)
+                .help("How long it's developed for, from the times its curves were measured at. Longer gives more contrast.")
+        }
+    }
+}
+
+/// Stocks under headings, from their profiles: slides, still negatives or papers, cine stocks,
+/// then the black-and-white ones, whatever else they are.
 private func stockSections(_ stocks: [ProfileInfo]) -> [ChoiceMenu<String>.Section] {
     let groups = Dictionary(grouping: stocks) { stock -> String in
+        if stock.channelModel == .blackAndWhite { return "Black & White" }
         if stock.type == .positive { return "Slide" }
         if stock.use == .cine { return "Cine" }
         return stock.stage == .filming ? "Negative" : "Still"
     }
-    return ["Slide", "Negative", "Still", "Cine"].compactMap { heading in
+    return ["Slide", "Negative", "Still", "Cine", "Black & White"].compactMap { heading in
         groups[heading].map { ChoiceMenu.Section(heading: heading, choices: $0.map { ($0.name, $0.stock) }) }
     }
 }

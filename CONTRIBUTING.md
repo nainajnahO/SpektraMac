@@ -117,7 +117,7 @@ xcodebuild test -project SpektraMac.xcodeproj -scheme SpektraMac -destination 'p
 
 The parity tests compare every stage against dumps from the original Python Spektrafilm, at commit `3bb2c2d`, in
 `golden/<case>/`: one float32 `.npy` per pipeline tap, the film's spectral lookup table and the parameters used.
-The dumps (about 550 MB) aren't in the repository; make them with that Spektrafilm, installed as the README's
+The dumps (about 580 MB) aren't in the repository; make them with that Spektrafilm, installed as the README's
 [Faithful to Spektrafilm](README.md#faithful-to-spektrafilm) says:
 
 ```sh
@@ -127,6 +127,17 @@ The dumps (about 550 MB) aren't in the repository; make them with that Spektrafi
 Without `golden/`, those tests are skipped. `golden/manifest.json` (committed) names the commit and holds a checksum of
 every file, so `git diff` shows whether a regeneration changed anything. `tools/export_tables.py` exported the engine's
 bundled data in `Engine/Sources/SpektraEngine/Resources/` the same way. The top of each script says what it writes.
+
+The black-and-white stocks aren't in that commit. Their bundled data and their reference cases are from Spektrafilm's
+`dev` branch at `6cd00c8` ([docs/porting.md](docs/porting.md#black-and-white-film)), which
+[uv](https://docs.astral.sh/uv/) installs for this one script, leaving the other install alone:
+
+```sh
+uv run tools/black_and_white.py
+```
+
+Run it after the other two: `export_tables.py` writes the neutral print filters without the black-and-white stocks'
+entries, and the script reads `golden.py`'s Portra 400 cases. Its manifest is `golden/manifest-bw.json`.
 
 So unless you've made `golden/`, the parity tests won't run for you. Say so in the pull request, and the maintainer
 runs them.
@@ -143,7 +154,8 @@ To see how far SpektraMac is from another Spektrafilm commit, a branch such as `
 `tools/check-upstream.sh <ref>`. It needs [uv](https://docs.astral.sh/uv/) and leaves your own install alone: it makes
 the bundled data and the reference data from that commit in a temporary folder, diffs the data against
 `Resources/` (`parameters.json` lists every parameter and its default), runs the tests against that reference data
-and prints each parity check's worst case against its tolerance.
+and prints each parity check's worst case against its tolerance. The black-and-white stocks stay as bundled, and
+their parity tests are skipped.
 
 Every Monday, a workflow ([`upstream.yml`](.github/workflows/upstream.yml), `tools/upstream-moved.sh`) checks whether
 Spektrafilm's `main` has moved past that commit, and if it has, opens or updates one issue, "Upstream Spektrafilm has
@@ -151,7 +163,8 @@ moved", listing the new commits and flagging those that touch the profiles, the 
 
 ## Changing the simulation
 
-The engine ports Spektrafilm at commit `3bb2c2d` stage by stage, and the parity tests hold it to that. A change to a
+The engine ports Spektrafilm at commit `3bb2c2d` stage by stage, with the black-and-white stocks of `6cd00c8`, and
+the parity tests hold it to both. A change to a
 ported stage should still match, or differ only by what the tests measure and allow (see [Native first](#native-first)):
 say by how much in the pull request. If it changes a step's speed or result, regenerate
 [docs/porting.md](docs/porting.md)'s table and images with `tools/port_report.py`, and say why in its text if the step

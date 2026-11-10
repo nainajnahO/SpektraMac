@@ -12,6 +12,7 @@ public struct Simulation {
     static let seed: UInt32 = 20260515
 
     public let parameters: Parameters
+    /// The film, developed for the parameters' time where it has several (as the paper is).
     public let film: Profile
     /// The paper (or print film). Required like in Python, unused when scanning the film directly.
     public let print: Profile
@@ -72,6 +73,8 @@ public struct Simulation {
         guard let inputColourSpace = tables.colourSpaces[parameters.io.inputColorSpace] else {
             throw UnknownColourSpace(name: parameters.io.inputColorSpace)
         }
+        let film = film.developed(minutes: parameters.filmRender.developmentTime)
+        let print = print.developed(minutes: parameters.printRender.developmentTime)
         self.parameters = parameters
         self.film = film
         self.print = print

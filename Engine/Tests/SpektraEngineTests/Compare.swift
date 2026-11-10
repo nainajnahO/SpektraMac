@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import SpektraEngine
 
-/// `golden/` at the repository root, written by `tools/golden.py` and not in the repository (about
-/// 550 MB): without it, the parity tests don't run. `SPEKTRA_GOLDEN` names another folder, such as
+/// `golden/` at the repository root, written by `tools/golden.py` and `tools/black_and_white.py`
+/// and not in the repository (about 580 MB): without it, the parity tests don't run. `SPEKTRA_GOLDEN` names another folder, such as
 /// the reference data `tools/check-upstream.sh` makes from another Spektrafilm commit.
 let goldenDirectory = ProcessInfo.processInfo.environment["SPEKTRA_GOLDEN"].map { URL(filePath: $0) }
     ?? URL(filePath: #filePath)

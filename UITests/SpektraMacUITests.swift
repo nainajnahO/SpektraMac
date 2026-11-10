@@ -60,6 +60,26 @@ final class SpektraMacUITests: XCTestCase {
         XCTAssertTrue(showSwitch.isEnabled, "the Print | Film switch on a negative")
     }
 
+    // MARK: Black-and-white film
+
+    /// A black-and-white film has a Development menu, as the print film it's printed on has, and
+    /// no Saturation, which is between a colour film's layers; a colour film, the reverse (#350).
+    @MainActor func testBlackAndWhiteFilmHasDevelopmentAndNoSaturation() throws {
+        try launch()
+        defer { quit() }
+        showTab(.film)
+        choose(film: "Kodak Double-X Negative Film 5222")
+        XCTAssert(app.popUpButtons["Development"].waitForExistence(timeout: 5), "Development on Double-X")
+        XCTAssertFalse(panel.sliders["Saturation"].exists, "Saturation on Double-X")
+        showTab(.print)
+        XCTAssertEqual(app.popUpButtons["Paper"].value as? String, "Kodak Print Film 2302")
+        XCTAssert(app.popUpButtons["Development"].waitForExistence(timeout: 5), "Development on 2302")
+        showTab(.film)
+        choose(film: "Kodak Portra 400")
+        XCTAssert(panel.sliders["Saturation"].waitForExistence(timeout: 5), "Saturation on Portra 400")
+        XCTAssertFalse(app.popUpButtons["Development"].exists, "Development on Portra 400")
+    }
+
     // MARK: Undo
 
     /// Edit › Undo names the change, and is greyed out once there's nothing left to undo.

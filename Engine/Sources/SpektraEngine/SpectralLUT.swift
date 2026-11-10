@@ -7,9 +7,11 @@ import simd
 /// parameters it reads only those in ``SimulationCache/FilmingLUTKey``, which caches it.
 func filmingTCLUT(film: Profile, parameters: Parameters, tables: Tables, spectra: NPYArray) -> [SIMD3<Double>] {
     let referenceIlluminant = tables.illuminants[film.info.referenceIlluminant]!
+    // A black-and-white film's profile has no window: its sensitivity is used as measured.
+    let window = film.data.hanatos2025AdaptationWindowParams
     let raw = hanatos2025RawLUT(
         spectra: spectra, sensitivity: film.data.sensitivity,
-        windowParams: parameters.settings.applyHanatos2025AdaptationWindow ? film.data.hanatos2025AdaptationWindowParams : nil,
+        windowParams: parameters.settings.applyHanatos2025AdaptationWindow && !window.isEmpty ? window : nil,
         referenceIlluminant: referenceIlluminant, wavelengths: tables.wavelengths)
     return InputGamutCompression.remap(raw, size: spectra.shape[0], white: tables.chromaticity(of: referenceIlluminant),
                                        spec: parameters.io.inputGamutCompress, locus: tables.spectralLocus)

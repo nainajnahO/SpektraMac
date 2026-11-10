@@ -47,13 +47,13 @@ film itself) and its scan.
 
 ## Features
 
-- **20 films, 8 papers.** Colour negatives (Portra, Ektar, Gold, Ultramax, Fujifilm Pro 400H, C200, X-Tra), slides
-  (Velvia, Provia, Ektachrome, Kodachrome) and motion picture film (Vision3 50D to 500T), printed on Kodak and Fujifilm
-  papers or Kodak's cinema print films, or viewed as film.
+- **22 films, 9 papers.** Colour negatives (Portra, Ektar, Gold, Ultramax, Fujifilm Pro 400H, C200, X-Tra), slides
+  (Velvia, Provia, Ektachrome, Kodachrome), motion picture film (Vision3 50D to 500T) and black-and-white film
+  (Double-X, Tri-X Reversal), printed on Kodak and Fujifilm papers or Kodak's cinema print films, or viewed as film.
 - **The camera.** Exposure metered on the whole frame, or on the faces, people or objects it finds, and remembered
   from photo to photo; highlight recovery; diffusion filters (Glimmerglass, Black Pro-Mist, Pro-Mist, CineBloom).
 - **The film.** Halation and light scattering in the emulsion, the DIR couplers behind film's saturation and edge
-  contrast, and grain from silver halide particles.
+  contrast, grain from silver halide particles, and for black-and-white film the development time.
 - **The print.** Enlarger exposure and colour filters, preflash, paper contrast, a darkroom burn for bright skies,
   a diffusion filter on the enlarger and glare, with the print's tone curve on a graph you can drag.
 - **Live.** A preview in about 20 ms while you drag, and the full look when you let go. Point at a film or paper in
@@ -108,6 +108,13 @@ route, such as Apple's blurs, the difference is measured and kept small. [How Sp
 Spektrafilm](docs/porting.md) lists every ported step with its speed and accuracy against Python,
 [every film and paper](docs/porting.md#every-film-and-paper) with its own, and shows each place it does something
 differently.
+
+The black-and-white stocks (Double-X, Tri-X Reversal and the print film 2302) aren't in that commit. Their data, and
+the rules for a film of one layer, are from Spektrafilm's `dev` branch at
+[`6cd00c8`](https://github.com/andreavolpato/spektrafilm/commit/6cd00c8d4f30b5b550f50f4bbd3753c9f2a48507), and they
+match it stage by stage as closely, with `dev`'s newer steps set to the ones ported here.
+[Black-and-white film](docs/porting.md#black-and-white-film) says what that leaves out, the coarser grain `dev` gives
+these films above all.
 
 To install the same Spektrafilm:
 

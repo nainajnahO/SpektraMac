@@ -22,10 +22,14 @@ struct ToneGraphView: View {
     /// The tones the graph shows: the print is black or white past them.
     static let tones: ClosedRange<Float> = -6...6
 
+    /// The curve the graph shows: the menu's choice, but for a black-and-white paper, whose three
+    /// curves are one, so the neutral shows and there's no menu.
+    private var shownChannel: ToneGraph.Channel { model.isBlackAndWhitePaper ? .neutral : channel }
+
     var body: some View {
         if let toneGraph = model.toneGraph {
-            ToneChart(bins: histogram(toneGraph.graph), channel: channel) { proxy in
-                ToneCurveLayer(proxy: proxy, channel: channel)
+            ToneChart(bins: histogram(toneGraph.graph), channel: shownChannel) { proxy in
+                ToneCurveLayer(proxy: proxy, channel: shownChannel)
             }
             .equatable()
             .opacity(isEnabled ? 1 : 0.5)
@@ -35,11 +39,13 @@ struct ToneGraphView: View {
             .accessibilityLabel("Tone curve")
             .accessibilityValue(description(of: toneGraph))
             .overlay(alignment: .topLeading) {
-                // Where the curve is darkest, so it's clear of the menu.
-                CurveMenu(channel: $channel)
-                    .fixedSize()
-                    .controlSize(.small)
-                    .padding(4)
+                if !model.isBlackAndWhitePaper {
+                    // Where the curve is darkest, so it's clear of the menu.
+                    CurveMenu(channel: $channel)
+                        .fixedSize()
+                        .controlSize(.small)
+                        .padding(4)
+                }
             }
             .frame(height: 130)
             .help("Drag the middle point sideways to set the print exposure, the side points up or down for the shadow and highlight contrast, or the curve elsewhere for the contrast. With the burn on, the shading is what it takes and the dashed line where those tones print: drag its line sideways for the threshold, or up or down for the strength.")
@@ -53,9 +59,9 @@ struct ToneGraphView: View {
     /// the burn starts while it's on.
     private func description(of toneGraph: (graph: ToneGraph, controls: Controls)) -> String {
         let controls = model.controls
-        let curve = ToneGraph.Curve(toneGraph.graph, channel: channel).predicted(for: controls, from: toneGraph.controls)
+        let curve = ToneGraph.Curve(toneGraph.graph, channel: shownChannel).predicted(for: controls, from: toneGraph.controls)
         let handles = curve.handles(sideDistance: ToneCurveLayer.sideDistance)
-        var text = "\(channel.name) curve."
+        var text = "\(shownChannel.name) curve."
         if handles.count == 3 {
             let bright = handles.map { Double($0.print).formatted(.percent.precision(.fractionLength(0))) }
             let side = ToneCurveLayer.sideDistance.formatted()
@@ -75,7 +81,7 @@ struct ToneGraphView: View {
         let stops = ToneGraph.stops
         let width = (stops.upperBound - stops.lowerBound) / Float(graph.histogram.count)
         let tones = graph.histogram.indices.map { stops.lowerBound + (Float($0) + 0.5) * width }
-        let shares = graph.histogram.map { share in channel.index.map { share[$0] } ?? share.sum() / 3 }
+        let shares = graph.histogram.map { share in shownChannel.index.map { share[$0] } ?? share.sum() / 3 }
         let inside = tones.indices.filter { Self.tones.contains(tones[$0]) }
         guard let first = inside.first, let last = inside.last else { return [] }
         var shown = inside.map { shares[$0] }

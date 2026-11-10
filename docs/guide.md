@@ -152,10 +152,17 @@ The film stock (see [Films and papers](#films-and-papers)). Choosing a film also
 
 - **Paper:** switches to the paper the film is made for, if it has one.
 - **Show:** switches to **Film** for a slide, and to **Print** for a negative.
+- **Development:** goes back to the film's standard time (see below).
 - **Saved defaults:** if you've saved defaults for the film (see
   [Presets and film defaults](#presets-and-film-defaults)), every setting becomes those defaults.
 
 Otherwise the settings stay as they are.
+
+### Development
+
+Under Kodak Double-X, how long the film is developed for: 4, 5, 6.5 (the standard), 9 or 12 minutes, the times its
+curves were measured at. Longer gives a more contrasty negative, as in a darkroom. Colour films, and Tri-X Reversal,
+are developed one way, and have no such menu.
 
 <table>
   <tr>
@@ -167,9 +174,9 @@ Otherwise the settings stay as they are.
 
 ### Halation
 
-A red glow around bright lights. Light passes through the film, bounces off its base and comes back into the
-emulsion. How much depends on the film's antihalation layer, which absorbs most of it: strong in films such as
-Portra, weaker in films such as Gold 200. On by default.
+A red glow around bright lights (a grey one on black-and-white film). Light passes through the film, bounces off its
+base and comes back into the emulsion. How much depends on the film's antihalation layer, which absorbs most of it:
+strong in films such as Portra, weaker in films such as Gold 200. On by default.
 
 - **Strength:** the glow, as a multiple of the film's own.
 - **Options:**
@@ -188,6 +195,8 @@ nearby in the same one. This gives film its colour separation and the crisp edge
   - **Edge contrast** (0–1.5): how strongly each layer holds back its own development nearby. More gives crisper
     edges in fine detail. The overall contrast stays the film's.
 
+A black-and-white film has one layer, so it has no Saturation, only **Edge contrast**.
+
 ### Grain
 
 Grain from the film's silver halide particles. On by default.
@@ -203,7 +212,13 @@ The Print tab applies when the toolbar shows **Print**. With **Film** showing, i
 ### Paper
 
 The paper the negative is printed on, or a print film for motion picture negatives (see
-[Films and papers](#films-and-papers)).
+[Films and papers](#films-and-papers)). Any film prints on any of them: a black-and-white negative on a colour
+paper takes a tint from the enlarger's filters, and a colour negative on the black-and-white print film prints grey.
+
+### Development
+
+Under Kodak Print Film 2302, the black-and-white print film, how long it's developed for: 2, 3.5, 5 (the standard),
+7 or 9 minutes. Longer gives a more contrasty print. Choosing another paper goes back to the standard time.
 
 ### Contrast
 
@@ -211,7 +226,8 @@ The **tone graph** shows how the photo's tones print.
 
 - **Histogram:** across the bottom, how much of the photo is at each tone, from 6 stops under mid-grey to 6 over.
 - **Curve:** how bright each tone prints, from the film through the paper.
-- **Curve menu:** shows the neutral curve, or each colour's with the other two faint.
+- **Curve menu:** shows the neutral curve, or each colour's with the other two faint. The black-and-white print
+  film has one curve, and no menu.
 
 ![The tone graph](images/tone-graph.webp)
 
@@ -233,7 +249,8 @@ Drag on the graph to change the print:
   More is darker, as on paper.
 - **Options:**
   - **Y filter shift** and **M filter shift** (−100 to 100 CC): the enlarger's yellow and magenta filters, in Kodak
-    colour-correction units, away from the neutral filtration for this film and paper.
+    colour-correction units, away from the neutral filtration for this film and paper. Not shown for a
+    black-and-white film on the black-and-white print film, which has no colour to balance.
   - **Preflash** (0–0.05): a flash of plain light on the paper before the print, so light tones such as a bright sky
     gain some tone. It darkens the whole print, so lower the print exposure to bring the mid-tones back.
 
@@ -368,9 +385,13 @@ The menus group the films and papers by kind.
 **Motion picture negatives** (printed on Kodak Vision 2383): Kodak Vision3 50D, 200T, 250D and 500T, and Kodak
 Verita 200D. D films are balanced for daylight, and T films for tungsten light.
 
+**Black & White:** Kodak Double-X 5222, a motion picture negative, printed on Kodak Print Film 2302; and Kodak Tri-X
+Reversal 7266, a slide, viewed directly. Each has one layer of silver in place of a colour film's three of dye.
+
 **Papers:** Fujifilm Crystal Archive Type II, Kodak Ektacolor Edge, Kodak Professional Endura Premier, Portra Endura,
 Supra Endura and Ultra Endura.
 
-**Print films** (for motion picture negatives): Kodak Vision 2383 and Kodak Vision Premier 2393.
+**Print films** (for motion picture negatives): Kodak Vision 2383 and Kodak Vision Premier 2393, and for
+black-and-white ones Kodak Print Film 2302.
 
 The film and paper data are by Andrea Volpato, from Spektrafilm, under CC BY-SA 4.0.

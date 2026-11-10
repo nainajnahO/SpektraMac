@@ -3,7 +3,8 @@
 SpektraMac follows [Spektrafilm](https://github.com/andreavolpato/spektrafilm)'s model, not its code. Each step
 computes what Spektrafilm's does, and an Apple framework does the work wherever one can
 ([CONTRIBUTING: Native first](../CONTRIBUTING.md#native-first)). The parity tests hold every stage to Spektrafilm at
-commit `3bb2c2d` on small reference cases. This page goes further: it measures each ported step at a working size,
+commit `3bb2c2d` on small reference cases, and the black-and-white stocks to a later one
+([Black-and-white film](#black-and-white-film)). This page goes further: it measures each ported step at a working size,
 Python against the Mac, for speed and for how far apart the results are. It also explains each place SpektraMac does
 something differently, with pictures where they help.
 
@@ -63,7 +64,7 @@ as the app runs it.
 ## Every film and paper
 
 The table above measures one pair, Portra 400 printed on Portra Endura. The parity tests check every film and every
-paper Spektrafilm has, through the whole pipeline, against the Python code. Each film printed on its own paper, and
+paper Spektrafilm has at `3bb2c2d`, through the whole pipeline, against the Python code. Each film printed on its own paper, and
 Portra 400 on every other paper, goes through the QA oracle of Spektrafilm's LUT tool: 50,000 random colours, rendered
 by both, compared as ΔE2000. A ΔE2000 of about 1 is the smallest difference the eye notices, so each of these is well
 below anything you could see. Slides are scanned rather than printed, so the QA oracle, which measures prints, leaves
@@ -107,6 +108,65 @@ Each slide, scanned rather than printed, on the test chart: the largest differen
 | Kodak Ektachrome 100 | 1.07e-06 | 7.15e-07 | 8.94e-07 | 6.39e-06 | max 1 level, 99.998 % identical |
 | Kodak Kodachrome 64 | 1.01e-06 | 5.96e-07 | 8.34e-07 | 5.39e-06 | max 1 level, 99.998 % identical |
 <!-- port_report:films:end -->
+
+## Black-and-white film
+
+Spektrafilm at `3bb2c2d` has no black-and-white film. Its `dev` branch, at commit
+[`6cd00c8`](https://github.com/andreavolpato/spektrafilm/commit/6cd00c8d4f30b5b550f50f4bbd3753c9f2a48507), has three
+stocks of one layer of silver each: Kodak Double-X 5222, a negative; Tri-X Reversal 7266, viewed as a slide; and the
+print film 2302. SpektraMac bundles those three and ports nothing else of `dev`
+([#351](https://github.com/nainajnahO/SpektraMac/pull/351)). `tools/black_and_white.py` copies their profiles and
+their neutral print filters from that commit, and makes their reference data with it.
+
+**One layer in three channels.** A one-layer stock is read with its sensitivity and its curves repeated in all three
+channels, and its silver's density in the first alone. Every step after the film turns densities into light by
+summing each channel's density times its dye, so only the first channel shows, and no stage or shader has code for
+black and white. A setting with a value per channel gives the layer its first, as `dev`'s `match_channels` does, and
+the DIR couplers act within the layer only. A black-and-white negative on a colour paper, and a colour negative on
+2302, need nothing more.
+
+**Development time.** Double-X is measured at 4, 5, 6.5, 9 and 12 minutes of development, and 2302 at 2, 3.5, 5, 7
+and 9. The engine develops for the measured time nearest the one asked for, and for the middle one, the standard,
+when none is. Like `dev`, it doesn't interpolate between them.
+
+**Reference data.** `dev` renders through newer steps than SpektraMac ports: it meters the film's raw exposure, its
+DIR couplers saturate and have refitted strengths, it compresses the output gamut in OkLCh, it has a chemistry morph
+and refitted print filters, and it samples a film's density curves from their fitted model. The script sets each to
+the step ported here before it renders. Then it checks that it missed none: Portra 400 on Portra Endura, rendered
+that way, must come out as `3bb2c2d`'s own reference data, at every stage, to the float32 the data is stored as
+(2.0e-7 on the chart, 4.9e-7 on the photo). Otherwise it stops.
+
+<!-- port_report:bw:begin -->
+Measured 2026-11-09 by `tools/port_report.py`, from the parity tests against Spektrafilm `6cd00c8`'s reference data, on the test chart but for the last row: the largest difference at each stage, in the stage's own units, and the output as 8-bit values.
+
+| Film | Exposure (log₁₀) | Density | Print exposure (log₁₀) | Print density | Output RGB | 8-bit |
+|---|---|---|---|---|---|---|
+| Kodak Double-X Negative Film 5222 on Kodak Print Film 2302 | 2.38e-07 | 1.19e-07 | 3.28e-07 | 2.38e-07 | 2.86e-06 | max 1 level, 99.998 % identical |
+| Kodak Double-X Negative Film 5222 on Kodak Print Film 2302, asked for 8 and 2.5 minutes | 2.38e-07 | 1.19e-07 | 2.98e-07 | 2.38e-07 | 2.56e-06 | max 1 level, 99.997 % identical |
+| Kodak Double-X Negative Film 5222 on Kodak Professional Portra Endura | 2.38e-07 | 1.19e-07 | 3.87e-07 | 2.38e-07 | 2.32e-06 | max 1 level, 99.911 % identical |
+| Kodak Double-X Negative Film 5222, viewed | 2.38e-07 | 1.19e-07 |  |  | 1.25e-06 | max 1 level, 100.000 % identical |
+| Kodak Portra 400 on Kodak Print Film 2302 | 1.07e-06 | 3.58e-07 | 2.09e-07 | 2.38e-07 | 2.44e-06 | max 1 level, 99.999 % identical |
+| Kodak Tri-X Reversal Film 7266, viewed | 9.24e-07 | 2.38e-07 |  |  | 2.5e-06 | max 1 level, 99.998 % identical |
+| Kodak Double-X Negative Film 5222 on Kodak Print Film 2302, the photo | 9.54e-07 | 0.0029 | 2.91e-07 | 2.38e-07 | 0.00282 | max 1 level, 99.325 % identical |
+<!-- port_report:bw:end -->
+
+The chart's differences are float rounding. The photo, the one case with halation and the couplers' diffusion,
+differs by [Apple's Gaussian blur](#apples-gaussian-blur), as the colour photo does.
+
+What doesn't match `dev`:
+
+- **Grain.** `dev` has a new grain model with settings for each film, and gives these films much coarser grain than
+  a colour film: an RMS granularity of 14 for Double-X and 44 for Tri-X, where most colour films have 4 to 12. Here
+  they get the grain ported from `3bb2c2d`, which is the same for every film, on its first layer's settings.
+- **Edge contrast.** The couplers within the layer are `3bb2c2d`'s linear ones at its strengths, not `dev`'s.
+- **Loose ends that come with `dev`'s data.** Black-and-white is new there. Its coupler strengths for these films are
+  the colour films' defaults, Tri-X's print filters are placeholders, Double-X's and 2302's base fog doesn't rise
+  steadily with development time, and `dev`'s own regression baselines cover none of the three.
+
+Black and white isn't grey to the last bit, in `dev` or here: the image goes through the same colour steps as a
+colour film's, and its red, green and blue come out up to 0.0006 apart on the test chart printed on 2302, a sixth of
+an 8-bit level. Double-X on a colour paper is as neutral as that paper's filters make it, and takes a tint from the
+Y and M filters.
 
 ## Where SpektraMac does it differently
 
@@ -233,6 +293,7 @@ row).
 - **Spectral options:** the adaptation surface, the spectral LUT blur, the UV and IR filters.
 - **Enlarger and scanner:** the LUTs, and the scanner's black and white correction.
 - **Other:** single-layer grain, the diffusion filter's per-group fine-tuning, and the channel swap.
+- **Spektrafilm's `dev` branch:** all but its black-and-white stocks ([Black-and-white film](#black-and-white-film)).
 
 ## Images
 

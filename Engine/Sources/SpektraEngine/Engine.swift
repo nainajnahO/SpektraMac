@@ -14,6 +14,11 @@ public struct Controls: Codable, Sendable, Hashable {
     public var paper = "kodak_portra_endura"
     /// Scan the developed film itself instead of a print of it (`io.scan_film`).
     public var scanFilm = false
+    /// The minutes a black-and-white film, and print film, are developed for: the nearest their
+    /// profiles were measured at, and with `nil` their standard ones (``Engine/developmentTimes(of:asking:)``).
+    /// Longer gives more contrast. A colour stock is developed one way, whatever these say.
+    public var filmDevelopmentTime: Double?
+    public var paperDevelopmentTime: Double?
     /// The exposure: `exposureMark`'s reading for the photo (``MeteringReadings``) plus
     /// `exposureOffsetEV` stops. A new photo opens at the same mark's own reading.
     public var exposureMark = MeteringMark.centreWeighted
@@ -218,6 +223,7 @@ extension Controls {
         case "film": "Film"
         case "paper": "Paper"
         case "scanFilm": "Print or Film"
+        case "filmDevelopmentTime", "paperDevelopmentTime": "Development"
         case "exposureMark", "exposureOffsetEV", "highlightBoost": "Exposure"
         case "printExposure", "yFilterShift", "mFilterShift", "preflash": "Enlarger"
         case "printContrast", "printHighlightContrast", "printShadowContrast": "Contrast"
@@ -233,16 +239,27 @@ extension Controls {
     }
 
     /// These controls with `film`, its target paper (if it has one) and slides viewed directly,
-    /// as Spektrafilm's GUI does: what choosing a film without saved defaults sets. `films` are
-    /// the films to choose from (``Engine/films``).
+    /// as Spektrafilm's GUI does, each stock it sets developed its standard way: what choosing a
+    /// film without saved defaults sets. `films` are the films to choose from (``Engine/films``).
     public func choosing(film: String, from films: [ProfileInfo]) -> Controls {
         var controls = self
         controls.film = film
+        controls.filmDevelopmentTime = nil
         guard let info = films.first(where: { $0.stock == film }) else { return controls }
-        if let paper = info.targetPrint {
-            controls.paper = paper
+        // Double-X's profile names no print: it's printed on Kodak's black-and-white print film,
+        // as the Vision3 negatives' profiles name 2383.
+        if let paper = info.targetPrint ?? (film == "kodak_doublex" ? "kodak_2302" : nil) {
+            controls = controls.choosing(paper: paper)
         }
         controls.scanFilm = info.type == .positive
+        return controls
+    }
+
+    /// These controls with `paper`, developed its standard way.
+    public func choosing(paper: String) -> Controls {
+        var controls = self
+        controls.paper = paper
+        controls.paperDevelopmentTime = nil
         return controls
     }
 
@@ -294,11 +311,14 @@ extension Controls {
     public enum Strip: CaseIterable, Sendable {
         case exposure, couplerSaturation, printExposure
 
-        /// Whether this strip's control changes what `controls` show.
-        public func applies(to controls: Controls) -> Bool {
+        /// Whether this strip's control changes what `controls` show. `films` are the films to
+        /// choose from (``Engine/films``): the saturation, which is between a film's layers,
+        /// changes nothing of a black-and-white film's one.
+        public func applies(to controls: Controls, films: [ProfileInfo]) -> Bool {
             switch self {
             case .exposure: true
-            case .couplerSaturation: controls.couplers
+            case .couplerSaturation:
+                controls.couplers && films.first { $0.stock == controls.film }?.channelModel != .blackAndWhite
             case .printExposure: !controls.scanFilm
             }
         }
@@ -456,6 +476,18 @@ public actor Engine {
             Task { await self?.releaseReservedMemory() }
         }
         memoryPressure.activate()
+    }
+
+    /// The times in minutes `stock` was measured developed for, shortest first, its standard one,
+    /// and the one that asking for `minutes` gives (``Controls/filmDevelopmentTime``): the
+    /// nearest, and for `nil` the standard. `nil` for a stock with no choice of them: every colour
+    /// stock, and Tri-X Reversal.
+    public nonisolated func developmentTimes(of stock: String, asking minutes: Double?)
+        -> (measured: [Double], standard: Double, developed: Double)? {
+        guard let developments = profiles[stock]?.data.developments, developments.count > 1,
+              let standard = ProfileData.Development.asked(nil, of: developments),
+              let developed = ProfileData.Development.asked(minutes, of: developments) else { return nil }
+        return (developments.map(\.minutes), standard.minutes, developed.minutes)
     }
 
     /// Lets the memory set aside for renders of the whole photo go, with the steps kept from the
@@ -962,6 +994,7 @@ public actor Engine {
     private static func exposureParameters(_ parameters: Parameters) -> Parameters {
         var key = filmParameters(parameters)
         let defaults = Parameters()
+        key.filmRender.developmentTime = defaults.filmRender.developmentTime
         key.filmRender.densityCurveGamma = defaults.filmRender.densityCurveGamma
         key.filmRender.dirCouplers = defaults.filmRender.dirCouplers
         key.filmRender.grain = defaults.filmRender.grain
@@ -983,6 +1016,8 @@ public actor Engine {
         parameters.io.outputColorSpace = outputSpace
         parameters.io.outputCctfEncoding = mode == .export  // the display is colour-managed: linear
         parameters.io.scanFilm = controls.scanFilm
+        parameters.filmRender.developmentTime = controls.filmDevelopmentTime
+        parameters.printRender.developmentTime = controls.paperDevelopmentTime
         parameters.enlarger.printExposure = controls.printExposure
         parameters.enlarger.yFilterShift = controls.yFilterShift
         parameters.enlarger.mFilterShift = controls.mFilterShift

@@ -126,6 +126,8 @@ extension Parameters {
     }
 
     public struct PrintRender: Codable, Sendable, Equatable {
+        /// As ``FilmRender/developmentTime``, for a black-and-white print film.
+        public var developmentTime: Double?
         public var densityCurvesMorph = PrintCurvesMorph()
         public var glare = Glare()
     }
@@ -210,6 +212,10 @@ extension Parameters {
 
 extension Parameters {
     public struct FilmRender: Codable, Sendable, Equatable {
+        /// The minutes a black-and-white film is developed for (`chemistry.development_time`, of
+        /// Spektrafilm's `dev`): the nearest its profile was measured at, or without a time its
+        /// standard one (``Profile/developed(minutes:)``). A colour film is developed one way.
+        public var developmentTime: Double?
         /// Scales the film's contrast: the exposure axis of its density curves is divided by it.
         public var densityCurveGamma = 1.0
         public var halation = Halation()
@@ -289,7 +295,8 @@ extension Parameters {
 
     /// The film-dependent settings `digest_params` applies (`_apply_film_specifics`): DIR coupler
     /// strengths for positive and negative films and two slide stocks, and the halation preset
-    /// keyed by the profile's use and antihalation layer.
+    /// keyed by the profile's use and antihalation layer. Then, for a black-and-white film, the
+    /// first layer's values in every channel.
     public mutating func applyFilmSpecifics(_ film: Profile) {
         func setCouplers(_ same: [Double], _ r: [Double], _ g: [Double], _ b: [Double]) {
             filmRender.dirCouplers.gammaSamelayerRgb = same
@@ -306,6 +313,19 @@ extension Parameters {
         case "fujifilm_velvia_100": setCouplers([0.108, 0.072, 0.054], [0.108, 0.054], [0.072, 0.054], [0.054, 0.054])
         case "fujifilm_provia_100f": setCouplers([0.156, 0.104, 0.078], [0.156, 0.078], [0.104, 0.078], [0.078, 0.078])
         default: break
+        }
+        if film.info.channelModel == .blackAndWhite {
+            // One layer, read into three channels (``Profile``): it takes the first of each
+            // per-channel setting (`match_channels`) and inhibits only itself
+            // (`compute_dir_couplers_matrix` with one channel). Without this, each copy would be
+            // inhibited by the other two as well.
+            func first(_ values: [Double]) -> [Double] { [Double](repeating: values[0], count: values.count) }
+            setCouplers(first(filmRender.dirCouplers.gammaSamelayerRgb), [0, 0], [0, 0], [0, 0])
+            filmRender.halation.scatterCoreUm = first(filmRender.halation.scatterCoreUm)
+            filmRender.halation.scatterTailUm = first(filmRender.halation.scatterTailUm)
+            filmRender.halation.scatterTailWeight = first(filmRender.halation.scatterTailWeight)
+            filmRender.halation.halationStrength = first(filmRender.halation.halationStrength)
+            filmRender.halation.halationFirstSigmaUm = first(filmRender.halation.halationFirstSigmaUm)
         }
     }
 
