@@ -543,10 +543,9 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
 
 /// The exposure, in stops over the photo as shot. Its dots are where each way of metering puts
 /// it for this photo (``MeteringMark``): a click on one puts the exposure on its mark, and a drag
-/// moves it from there, keeping that mark however near another it goes. The dot of the mark the
-/// exposure counts from is in the accent colour. With the pointer on a dot, a bubble says what its
-/// mark meters. As a drag passes a mark,
-/// the canvas tints what it meters, and the trackpad clicks.
+/// moves it from there, keeping that mark however near another it goes. A dot is in the accent
+/// colour while the exposure is on it. With the pointer on a dot, a bubble says what its mark
+/// meters. As a drag passes a mark, the canvas tints what it meters, and the trackpad clicks.
 struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
 
@@ -564,14 +563,13 @@ struct ExposureStrip: View {
         let marks = Dictionary(grouping: readings) { $0.ev }
             .map { ev, readings in
                 let marks = readings.map(\.mark)
-                let isCounted = ev == counted?.ev
-                let note = if isCounted, let counted, counted.mark != model.controls.exposureMark {
+                let note = if ev == counted?.ev, let counted, counted.mark != model.controls.exposureMark {
                     "No \(model.controls.exposureMark.name.lowercased()) found in this photo, so the exposure counts from \(counted.mark.name)."
                 } else {
                     String?.none
                 }
                 return ThumbnailStrip.Mark(items: marks.map { (systemImage: $0.systemImage, name: $0.name, about: $0.about) },
-                                           value: ev, isChosen: isCounted, note: note) {
+                                           value: ev, isOn: marks.contains { here.contains($0) }, note: note) {
                     model.putExposure(on: marks.contains(model.controls.exposureMark) ? model.controls.exposureMark : marks[0])
                 }
             }
@@ -975,8 +973,8 @@ private struct ThumbnailStrip: View {
         /// What it stands for, which its bubble shows: a symbol, a name and what it is, for each.
         let items: [(systemImage: String, name: String, about: String)]
         let value: Double
-        /// Whether the value counts from it: it's then in the accent colour.
-        let isChosen: Bool
+        /// Whether the value is on it: it's then in the accent colour.
+        let isOn: Bool
         /// More for its bubble, under what it stands for.
         let note: String?
         /// What a click on its dot does.
@@ -1068,7 +1066,7 @@ private struct ThumbnailStrip: View {
                 ZStack {
                     ForEach(marks, id: \.value) { mark in
                         let size: CGFloat = mark.value == hoveredMark ? 6 : 4
-                        Circle().fill(mark.isChosen ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        Circle().fill(mark.isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                             .frame(width: size, height: size)
                             // The row's height, so the bubble hangs from the row's foot, clear of the
                             // pointer in the row: under the pointer, it would take the hover away

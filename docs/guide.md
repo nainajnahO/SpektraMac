@@ -106,11 +106,11 @@ exposure as shot.
 
 The dots under the strip are **metering marks**: the exposure each way of metering gives this photo. Point at a dot
 and a bubble opens under it with the mark's symbol, its name and what it meters, and the area it meters is tinted
-pink. Click the dot to put the exposure on that mark: its dot is then in the accent colour. Apple's Vision finds the
-faces, people and objects when the photo opens.
+pink. Click the dot to put the exposure on that mark. A dot is in the accent colour while the exposure is on it.
+Apple's Vision finds the faces, people and objects when the photo opens.
 
-Dragging the strip moves the exposure from the mark you clicked, and doesn't stop at the other dots: its dot stays
-in the accent colour. As a drag passes a dot, the area its mark meters is tinted pink, and the trackpad clicks.
+Dragging the strip moves the exposure from the mark you clicked, and doesn't stop at the other dots. As a drag passes
+a dot, the area its mark meters is tinted pink, and the trackpad clicks.
 
 ![The Exposure strip held at the Objects mark: the rocket and its tower are tinted pink](images/metering.webp)
 
