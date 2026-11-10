@@ -545,7 +545,7 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
 /// it for this photo (``MeteringMark``): a click on one puts the exposure on its mark, and a drag
 /// moves it from there, keeping that mark however near another it goes. A dot is in the accent
 /// colour while the exposure is on it. With the pointer on a dot, a bubble says what its mark
-/// meters. As a drag passes a mark, the canvas tints what it meters, and the trackpad clicks.
+/// meters, and the canvas tints the region it meters. As a drag passes a mark, the trackpad clicks.
 struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
 
@@ -584,7 +584,11 @@ struct ExposureStrip: View {
                        unit: "EV", frames: model.strips[.exposure], marks: marks, hoveredMark: hoveredDot) {
             model.isAdjustingExposure = $0
         }
-        .sensoryFeedback(.alignment, trigger: here) { _, new in model.isAdjustingExposure && !new.isEmpty }
+        // A click as a drag passes a mark: a fast one jumps over the step nearest it between two of
+        // the pointer's moves, so a click on landing there would miss it.
+        .sensoryFeedback(.alignment, trigger: model.exposureEV) { old, new in
+            model.isAdjustingExposure && readings.contains { (old < $0.ev && $0.ev <= new) || (new <= $0.ev && $0.ev < old) }
+        }
         .disabled(model.photo == nil)
         // The pointer may be on a dot as the tab changes: no longer.
         .onDisappear { model.hoveredMarks = [] }

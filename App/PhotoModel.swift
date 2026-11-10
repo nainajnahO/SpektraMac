@@ -127,10 +127,10 @@ final class PhotoModel {
             photo.metering.ev[mark.rawValue].map { abs($0 - exposure) < 0.05 } ?? false
         }
     }
-    /// While the Exposure slider is held: the canvas then tints the region the mark it's on meters.
+    /// While the Exposure strip is held: the trackpad then clicks as it passes a mark.
     var isAdjustingExposure = false
     /// The marks of the dot under the pointer, under the Exposure strip: the canvas then tints the
-    /// regions they meter, as it does while the strip is held on them.
+    /// regions they meter.
     var hoveredMarks: [MeteringMark] = []
     /// While a Burn slider is held: the canvas then shows what burns (``burnMask``).
     var isAdjustingBurn = false {

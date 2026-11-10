@@ -40,8 +40,8 @@ This is new, so reports are especially welcome.
 
 ## Known limitations
 
-- Holding a Burn slider to see what burns, and holding the Exposure strip or pointing at a mark's dot to see what a
-  mark meters, need a pointer: VoiceOver, Full Keyboard Access and Switch Control can't hold or point at a control.
+- Holding a Burn slider to see what burns, and pointing at a metering mark's dot to see what it meters, need a
+  pointer: VoiceOver, Full Keyboard Access and Switch Control can't hold or point at a control.
   The settings themselves work; only those previews are out of reach.
 - With Full Keyboard Access, the arrow keys step the Exposure strip a tenth of a stop at a time and don't stop on a
   metering mark: putting the exposure on a mark takes a click on its dot, or VoiceOver's actions.

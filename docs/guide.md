@@ -110,7 +110,7 @@ pink. Click the dot to put the exposure on that mark. A dot is in the accent col
 Apple's Vision finds the faces, people and objects when the photo opens.
 
 Dragging the strip moves the exposure from the mark you clicked, and doesn't stop at the other dots. As a drag passes
-a dot, the area its mark meters is tinted pink, and the trackpad clicks.
+a dot, the trackpad clicks.
 
 ![The Exposure strip held at the Objects mark: the rocket and its tower are tinted pink](images/metering.webp)
 
