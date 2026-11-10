@@ -120,6 +120,9 @@ final class PhotoModel {
     }
     /// While the Exposure slider is held: the canvas then tints the region the mark it's on meters.
     var isAdjustingExposure = false
+    /// The marks of the dot or the shortcut under the pointer, on the Exposure strip or under it:
+    /// the canvas then tints the regions they meter, as it does while the strip is held.
+    var hoveredMarks: [MeteringMark] = []
     /// While a Burn slider is held: the canvas then shows what burns (``burnMask``).
     var isAdjustingBurn = false {
         didSet {

@@ -76,7 +76,8 @@ look through films before choosing one. Closing the menu without choosing puts t
 
 **VoiceOver and Increase Contrast.** VoiceOver reads each group's name and whether it's open, and each slider's and
 strip's value with its unit. It describes the photo and the tone graph, each as one item. On the Exposure strip,
-VoiceOver's actions (VO-Command-Space) go to each metering mark. With **Increase Contrast** (System Settings ›
+VoiceOver's actions (VO-Command-Space) go to each metering mark, as do the buttons under it, which VoiceOver reads by
+the mark's name and as on while the exposure is on it. With **Increase Contrast** (System Settings ›
 Accessibility › Display), the sliders' fill and value line are stronger.
 
 **Undo.** **Edit › Undo** (⌘Z) takes back the last change to the settings, and **Edit › Redo** (⇧⌘Z) makes it again. A
@@ -107,6 +108,11 @@ exposure as shot.
 The dots under the strip are **metering marks**: the exposure each way of metering gives this photo. Drag onto a dot
 and it snaps there; its name shows under it, and the trackpad clicks. While you drag the strip, the area the
 nearest mark meters is tinted pink. Apple's Vision finds the faces, people and objects when the photo opens.
+
+To go straight to a mark, click its dot, or its button under the strip: the exposure is then on the mark, and the
+strip fine-tunes it from there. The buttons the exposure is on are lit, and a mark this photo has no reading for is
+greyed out. With the pointer on a dot or a button, the mark's name shows under its dot and the area it meters is
+tinted pink.
 
 ![The Exposure strip held at the Objects mark: the rocket and its tower are tinted pink](images/metering.webp)
 

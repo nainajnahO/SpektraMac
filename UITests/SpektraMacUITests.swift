@@ -80,6 +80,41 @@ final class SpektraMacUITests: XCTestCase {
         XCTAssertFalse(app.popUpButtons["Development"].exists, "Development on Portra 400")
     }
 
+    // MARK: Metering shortcuts
+
+    /// A mark's shortcut under the Exposure strip puts the exposure on the mark from off it, and
+    /// Undo takes that back in one step; a click on the mark's dot puts it there too. A mark the
+    /// photo has no reading for is greyed out (#353).
+    @MainActor func testMeteringShortcutsPutTheExposureOnTheirMark() throws {
+        try launch()
+        defer { quit() }
+        showTab(.camera)
+        // The test's photo is a gradient, with no face in it.
+        XCTAssert(shortcut("Faces").waitForExistence(timeout: 5), "the Faces shortcut")
+        XCTAssertFalse(shortcut("Faces").isEnabled, "Faces on a photo with no face")
+        let strip = panel.sliders["Exposure"]
+        strip.adjust(toNormalizedSliderPosition: 0.9)
+        let offAMark = text(containing: " EV from ")
+        XCTAssert(offAMark.waitForExistence(timeout: 5), "the exposure off a mark")
+        let offset = offAMark.value as? String
+        XCTAssertEqual(shortcut("As shot").value as? Int, 0, "As shot's shortcut off the mark")
+        shortcut("As shot").click()
+        XCTAssert(text(beginning: "As shot:").waitForExistence(timeout: 5), "the exposure on As shot")
+        XCTAssertEqual(shortcut("As shot").value as? Int, 1, "As shot's shortcut on the mark")
+        let asShot = strip.normalizedSliderPosition
+        let undo = undoItem()
+        XCTAssert(undo.title.contains("Undo Exposure"), "Edit › Undo shows “\(undo.title)”")
+        // The mark and the offset back as they were, in one step.
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssert(offAMark.waitForExistence(timeout: 5), "the exposure off a mark after Undo")
+        XCTAssertEqual(offAMark.value as? String, offset, "the offset after Undo")
+        // A click on As shot's dot, in the row under the strip's frames. Centre-weighted reads this
+        // photo a fraction of a point away, so the click may land on either: on a mark either way.
+        strip.coordinate(withNormalizedOffset: CGVector(dx: asShot, dy: 1)).withOffset(CGVector(dx: 0, dy: -6)).click()
+        XCTAssert(offAMark.waitForNonExistence(timeout: 5), "the exposure on a mark after a click on its dot")
+        XCTAssertEqual(shortcut("As shot").value as? Int, 1, "As shot's shortcut after a click on its dot")
+    }
+
     // MARK: Undo
 
     /// Edit › Undo names the change, and is greyed out once there's nothing left to undo.
@@ -256,6 +291,21 @@ final class SpektraMacUITests: XCTestCase {
     /// The settings panel.
     @MainActor private var panel: XCUIElement {
         app.windows["main"].scrollViews.firstMatch
+    }
+
+    /// A metering mark's shortcut under the Exposure strip.
+    @MainActor private func shortcut(_ mark: String) -> XCUIElement {
+        panel.checkBoxes[mark]
+    }
+
+    /// The settings panel's text that contains `part`, such as the line under the Exposure strip.
+    @MainActor private func text(containing part: String) -> XCUIElement {
+        panel.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", part)).firstMatch
+    }
+
+    /// The settings panel's text that begins with `start`.
+    @MainActor private func text(beginning start: String) -> XCUIElement {
+        panel.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", start)).firstMatch
     }
 
     /// The Reset arrows of the settings tab showing, top to bottom: buttons, not part of their
