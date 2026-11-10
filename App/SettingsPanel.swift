@@ -545,9 +545,9 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
 /// it for this photo (``MeteringMark``): a click on one puts the exposure on its mark, and a drag
 /// moves it from there, keeping that mark however near another it goes. The dot of the mark the
 /// exposure counts from is in the accent colour. With the pointer on a dot, a bubble says what its
-/// mark meters, and on that mark's dot how far from it the exposure is. A mark's name shows under
-/// the strip only while the exposure is on it, so marks a fraction of a stop apart don't crowd,
-/// and the trackpad clicks as a drag passes one.
+/// mark meters, and on that mark's dot how far from it the exposure is. As a drag passes a mark,
+/// its name shows under the strip, only then, so marks a fraction of a stop apart don't crowd, and
+/// the trackpad clicks.
 struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
 
@@ -592,7 +592,10 @@ struct ExposureStrip: View {
                 model.isAdjustingExposure = $0
             }
             .sensoryFeedback(.alignment, trigger: here) { _, new in model.isAdjustingExposure && !new.isEmpty }
-            MarkName(name: here.map(\.name).formatted(.list(type: .and)), fraction: range.fraction(of: model.exposureEV))
+            // Only while the strip is held: at rest, the bubbles say it, and the name would show from
+            // under one.
+            MarkName(name: model.isAdjustingExposure ? here.map(\.name).formatted(.list(type: .and)) : "",
+                     fraction: range.fraction(of: model.exposureEV))
         }
         .disabled(model.photo == nil)
         // The pointer may be on a dot as the tab changes: no longer.
@@ -603,8 +606,7 @@ struct ExposureStrip: View {
         .sign(strategy: .always(includingZero: false))
 }
 
-/// The name of the mark the exposure is on, under its dot on the strip, kept inside the row at
-/// the ends.
+/// The name of the mark a drag of the strip is on, under its dot, kept inside the row at the ends.
 private struct MarkName: View {
     let name: String
     /// Where the dot is along the strip, 0 at its minimum.
@@ -1110,7 +1112,7 @@ private struct ThumbnailStrip: View {
                                 if !isPresented, hoveredMark == mark.value {
                                     hoveredMark = nil
                                 }
-                            }, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+                            }, attachmentAnchor: .point(.bottom), arrowEdge: .bottom) {
                                 bubble(for: mark)
                                     // It follows the pointer: a click outside it is for the strip.
                                     .interactiveDismissDisabled()
