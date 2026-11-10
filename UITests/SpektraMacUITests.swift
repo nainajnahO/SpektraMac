@@ -108,9 +108,11 @@ final class SpektraMacUITests: XCTestCase {
         app.typeKey("z", modifierFlags: .command)
         XCTAssert(offAMark.waitForExistence(timeout: 5), "the exposure off a mark after Undo")
         XCTAssertEqual(offAMark.value as? String, offset, "the offset after Undo")
-        // A click on As shot's dot, in the row under the strip's frames. Centre-weighted reads this
-        // photo a fraction of a point away, so the click may land on either: on a mark either way.
-        strip.coordinate(withNormalizedOffset: CGVector(dx: asShot, dy: 1)).withOffset(CGVector(dx: 0, dy: -6)).click()
+        // A click beside As shot's dot, in the row under the strip's frames: 6 points to its right,
+        // within a dot's reach, where a click on the frames would land 0.3 stops off the mark.
+        // Centre-weighted reads this photo a fraction of a point away, so the click may land on
+        // either: on a mark either way.
+        strip.coordinate(withNormalizedOffset: CGVector(dx: asShot, dy: 1)).withOffset(CGVector(dx: 6, dy: -6)).click()
         XCTAssert(offAMark.waitForNonExistence(timeout: 5), "the exposure on a mark after a click on its dot")
         XCTAssertEqual(shortcut("As shot").value as? Int, 1, "As shot's shortcut after a click on its dot")
     }
