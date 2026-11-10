@@ -82,40 +82,43 @@ final class SpektraMacUITests: XCTestCase {
 
     // MARK: Metering marks
 
-    /// The Exposure strip set beside a mark stays off it, counting from the mark it was on; the
-    /// pointer on a mark's dot shows the mark's name, and a click there puts the exposure on the
-    /// mark, in one step to undo, for the strip to count from after (#353).
+    /// The Exposure strip set a tenth of a stop from a mark stays there, not snapping to it; the
+    /// pointer on a mark's dot opens a bubble under it saying what the mark meters, each mark's
+    /// on a dot marks share, and a click there puts the exposure on the mark, in one step to undo.
+    /// The bubble closes as the pointer leaves the dots (#353).
     @MainActor func testClickingADotPutsTheExposureOnItsMark() throws {
         try launch()
         defer { quit() }
         showTab(.camera)
         // The test's photo is a gradient: As shot reads it at 0 and Centre-weighted, the film's
-        // default, 0.016 stops over, a third of a point to its right on the strip. Its range is
-        // −4…+8 stops.
+        // default, 0.016 stops over, a third of a point to its right on the strip, so they share a
+        // dot. Its range is −4…+8 stops. The strip's value is the exposure, in stops.
         let strip = panel.sliders["Exposure"]
         XCTAssert(strip.waitForExistence(timeout: 5), "the Exposure strip")
-        let centreWeighted = strip.normalizedSliderPosition
+        let marks = strip.normalizedSliderPosition
         strip.adjust(toNormalizedSliderPosition: 4.1 / 12)
-        let besideTheMarks = text(beginning: "+0.1 EV from Centre-weighted")
-        XCTAssert(besideTheMarks.waitForExistence(timeout: 5), "the exposure a tenth of a stop off the marks")
-        // In the row under the strip's frames, 6 points left of the dots: within As shot's reach,
-        // where a click on the frames would land 0.3 stops under.
-        let besideAsShot = strip.coordinate(withNormalizedOffset: CGVector(dx: centreWeighted, dy: 1))
-            .withOffset(CGVector(dx: -6, dy: -7))
-        besideAsShot.hover()
-        XCTAssert(text("As shot").waitForExistence(timeout: 5), "As shot's name with the pointer on its dot")
-        besideAsShot.click()
-        XCTAssert(text(beginning: "As shot:").waitForExistence(timeout: 5), "the exposure on As shot")
+        XCTAssert(waitFor(exposure: 0.1, on: strip), "the exposure a tenth of a stop over the marks, at \(strip.value ?? "none")")
+        // On the dots' row, 2 points above the strip's foot, and 6 points left of the dot: within
+        // its reach, where a click on the frames would land 0.3 stops under.
+        let besideTheDot = strip.coordinate(withNormalizedOffset: CGVector(dx: marks, dy: 1))
+            .withOffset(CGVector(dx: -6, dy: -2))
+        besideTheDot.hover()
+        let bubble = app.popovers.firstMatch
+        XCTAssert(bubble.waitForExistence(timeout: 5), "a bubble with the pointer on the dot")
+        for name in ["As shot", "Centre-weighted"] {
+            XCTAssert(bubble.staticTexts.matching(NSPredicate(format: "value == %@", name)).firstMatch.exists, "\(name) in the bubble")
+        }
+        XCTAssertGreaterThanOrEqual(bubble.frame.minY, strip.frame.maxY, "the bubble under the strip")
+        // Of the dot's two marks, the one the exposure counts from.
+        besideTheDot.click()
+        XCTAssert(waitFor(exposure: 0.016, on: strip), "the exposure on Centre-weighted, at \(strip.value ?? "none")")
         let undo = undoItem()
         XCTAssert(undo.title.contains("Undo Exposure"), "Edit › Undo shows “\(undo.title)”")
-        // Nearer Centre-weighted's reading than As shot's, but counting from As shot.
-        strip.adjust(toNormalizedSliderPosition: 0.9)
-        XCTAssert(text(containing: " EV from As shot").waitForExistence(timeout: 5), "the exposure from As shot")
         // The click's mark and offset back as they were, in one step.
         app.typeKey("z", modifierFlags: .command)
-        XCTAssert(text(beginning: "As shot:").waitForExistence(timeout: 5), "the exposure on As shot after Undo")
-        app.typeKey("z", modifierFlags: .command)
-        XCTAssert(besideTheMarks.waitForExistence(timeout: 5), "the exposure off the marks after a second Undo")
+        XCTAssert(waitFor(exposure: 0.1, on: strip), "the exposure back after Undo, at \(strip.value ?? "none")")
+        strip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
+        XCTAssert(bubble.waitForNonExistence(timeout: 5), "the bubble with the pointer on the frames")
     }
 
     // MARK: Undo
@@ -296,19 +299,17 @@ final class SpektraMacUITests: XCTestCase {
         app.windows["main"].scrollViews.firstMatch
     }
 
-    /// The settings panel's text that is `whole`, such as a mark's name under the Exposure strip.
-    @MainActor private func text(_ whole: String) -> XCUIElement {
-        panel.staticTexts.matching(NSPredicate(format: "value == %@", whole)).firstMatch
-    }
-
-    /// The settings panel's text that contains `part`, such as the line under the Exposure strip.
-    @MainActor private func text(containing part: String) -> XCUIElement {
-        panel.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", part)).firstMatch
-    }
-
-    /// The settings panel's text that begins with `start`.
-    @MainActor private func text(beginning start: String) -> XCUIElement {
-        panel.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", start)).firstMatch
+    /// Whether a strip's value, its exposure in stops, comes to `exposure`, to a hundredth of a
+    /// stop, within 5 seconds.
+    @MainActor private func waitFor(exposure: Double, on strip: XCUIElement) -> Bool {
+        let deadline = Date.now.addingTimeInterval(5)
+        repeat {
+            if let value = strip.value as? Double, abs(value - exposure) < 0.01 {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        } while Date.now < deadline
+        return false
     }
 
     /// The Reset arrows of the settings tab showing, top to bottom: buttons, not part of their

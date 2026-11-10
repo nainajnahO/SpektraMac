@@ -546,8 +546,11 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
 /// moves it from there, keeping that mark however near another it goes. A dot is in the accent
 /// colour while the exposure is on it. With the pointer on a dot, a bubble says what its mark
 /// meters, and the canvas tints the region it meters. As a drag passes a mark, the trackpad clicks.
+/// Marks whose dots would overlap share one, whose bubble has each.
 struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
+    /// The strip's width, for how near two readings put their dots.
+    @State private var width: CGFloat = 0
 
     var body: some View {
         @Bindable var model = model
@@ -555,35 +558,37 @@ struct ExposureStrip: View {
             MeteringMark.allCases.compactMap { mark in photo.metering.ev[mark.rawValue].map { (mark: mark, ev: $0) } }
         } ?? []
         let here = model.marksAtExposure
+        let range = model.exposureRange
         // The mark the exposure counts from: the one chosen, or the one it starts from on a photo
         // with no reading for it.
         let counted = model.photo.map { $0.metering.reading(resolving: model.controls.exposureMark) }
-        // One dot for marks that meter the same. A click on a dot two marks share keeps the one the
-        // exposure counts from, if it's one of them.
-        let marks = Dictionary(grouping: readings) { $0.ev }
-            .map { ev, readings in
-                let marks = readings.map(\.mark)
-                let note = if ev == counted?.ev, let counted, counted.mark != model.controls.exposureMark {
-                    "No \(model.controls.exposureMark.name.lowercased()) found in this photo, so the exposure counts from \(counted.mark.name)."
-                } else {
-                    String?.none
-                }
-                return ThumbnailStrip.Mark(items: marks.map { (systemImage: $0.systemImage, name: $0.name, about: $0.about) },
-                                           value: ev, isOn: marks.contains { here.contains($0) }, note: note) {
-                    model.putExposure(on: marks.contains(model.controls.exposureMark) ? model.controls.exposureMark : marks[0])
-                }
+        // A dot's width, in stops: readings nearer than that would draw overlapping dots. Before the
+        // strip is measured, only the same reading.
+        let overlap = width > 0 ? ThumbnailStrip.dotSize / width * (range.upperBound - range.lowerBound) : 0
+        let dots = Self.dots(of: readings, within: overlap)
+        let marks = dots.map { dot in
+            let note = if let counted, dot.marks.contains(counted.mark), counted.mark != model.controls.exposureMark {
+                "No \(model.controls.exposureMark.name.lowercased()) found in this photo, so the exposure counts from \(counted.mark.name)."
+            } else {
+                String?.none
             }
-            .sorted { $0.value < $1.value }
+            return ThumbnailStrip.Mark(items: dot.marks.map { (systemImage: $0.systemImage, name: $0.name, about: $0.about) },
+                                       value: dot.value, isOn: dot.marks.contains { here.contains($0) }, note: note) {
+                // On a dot several marks share, the one the exposure counts from, if it's one of them.
+                model.putExposure(on: dot.marks.contains(model.controls.exposureMark) ? model.controls.exposureMark : dot.marks[0])
+            }
+        }
         // The dot under the pointer.
         let hoveredDot = Binding<Double?> {
-            readings.first { model.hoveredMarks.contains($0.mark) }?.ev
+            dots.first { !Set($0.marks).isDisjoint(with: model.hoveredMarks) }?.value
         } set: { value in
-            model.hoveredMarks = readings.filter { $0.ev == value }.map(\.mark)
+            model.hoveredMarks = dots.first { $0.value == value }?.marks ?? []
         }
-        ThumbnailStrip("Exposure", value: $model.exposureEV, in: model.exposureRange, step: 0.1, format: Self.stops,
+        ThumbnailStrip("Exposure", value: $model.exposureEV, in: range, step: 0.1, format: Self.stops,
                        unit: "EV", frames: model.strips[.exposure], marks: marks, hoveredMark: hoveredDot) {
             model.isAdjustingExposure = $0
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         // A click as a drag passes a mark: a fast one jumps over the step nearest it between two of
         // the pointer's moves, so a click on landing there would miss it.
         .sensoryFeedback(.alignment, trigger: model.exposureEV) { old, new in
@@ -596,6 +601,23 @@ struct ExposureStrip: View {
 
     static let stops = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))
         .sign(strategy: .always(includingZero: false))
+
+    /// The dots of `readings`: one for each run of readings no more than `overlap` stops from the
+    /// one before, midway between its ends, with its marks in ``MeteringMark``'s order.
+    private static func dots(of readings: [(mark: MeteringMark, ev: Double)], within overlap: Double)
+        -> [(marks: [MeteringMark], value: Double)] {
+        var runs: [[(mark: MeteringMark, ev: Double)]] = []
+        for reading in readings.sorted(by: { $0.ev < $1.ev }) {
+            if let last = runs.last?.last, reading.ev - last.ev <= overlap {
+                runs[runs.count - 1].append(reading)
+            } else {
+                runs.append([reading])
+            }
+        }
+        return runs.map { run in
+            (marks: run.map(\.mark).sorted { $0.rawValue < $1.rawValue }, value: (run.first!.ev + run.last!.ev) / 2)
+        }
+    }
 }
 
 private extension MeteringMark {
@@ -1020,10 +1042,12 @@ private struct ThumbnailStrip: View {
         self.onEditingChanged = onEditingChanged
     }
 
+    /// A dot's width, in points: 6 under the pointer.
+    static let dotSize: CGFloat = 4
     /// How far from a dot, in points, a click still lands on it: about a third of a stop, where the
-    /// dots alone are 4 points across.
+    /// dots alone are ``dotSize`` across.
     private static let dotReach: CGFloat = 8
-    /// The height of the dots' row, the dots 4 points under the frames and 4 points across.
+    /// The height of the dots' row, the dots 4 points under the frames.
     private static let dotsHeight: CGFloat = 8
     /// How far under the dots' row a click or the pointer still reaches its dots: into the space
     /// above the next control, so the row is taller to point at than it is in the layout.
@@ -1072,7 +1096,7 @@ private struct ThumbnailStrip: View {
             if !marks.isEmpty {
                 ZStack {
                     ForEach(marks, id: \.value) { mark in
-                        let size: CGFloat = mark.value == hoveredMark ? 6 : 4
+                        let size = mark.value == hoveredMark ? Self.dotSize + 2 : Self.dotSize
                         Circle().fill(mark.isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                             .frame(width: size, height: size)
                             // As tall as the row reaches, so the bubble hangs from below where the
