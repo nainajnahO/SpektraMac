@@ -105,13 +105,13 @@ How much light reaches the film, in stops (EV). The strip shows the photo from 4
 exposure as shot.
 
 The dots under the strip are **metering marks**: the exposure each way of metering gives this photo. Point at a dot
-and it turns into its mark's symbol, the mark's name shows under it, and the area the mark meters is tinted pink.
-Click the dot to put the exposure on that mark. Apple's Vision finds the faces, people and objects when the photo
-opens.
+and a bubble opens under it with the mark's symbol, its name and what it meters, and the area it meters is tinted
+pink. Click the dot to put the exposure on that mark: its dot is then in the accent colour. Apple's Vision finds the
+faces, people and objects when the photo opens.
 
-Dragging the strip moves the exposure from the mark you clicked, and doesn't stop at the other dots: the line under
-the strip says how far you are from that mark, such as +0.5 EV from Faces, even on another mark's dot. As a drag
-passes a dot, its name shows under it, the area its mark meters is tinted pink, and the trackpad clicks.
+Dragging the strip moves the exposure from the mark you clicked, and doesn't stop at the other dots: its dot stays
+in the accent colour, and its bubble says how far from it you are, such as +0.5 EV. As a drag passes a dot, its name
+shows under it, the area its mark meters is tinted pink, and the trackpad clicks.
 
 ![The Exposure strip held at the Objects mark: the rocket and its tower are tinted pink](images/metering.webp)
 
@@ -125,8 +125,8 @@ passes a dot, its name shows under it, the area its mark meters is tinted pink, 
 
 SpektraMac remembers the mark and how far you are from it, not the exposure itself. Set +0.3 EV from Faces, and the
 next photo opens 0.3 stops over its own faces' reading. If a photo has no faces (or no people, or nothing that stands
-out), the mark falls back, from Faces to People, People to Objects and Objects to Centre-weighted, and the line
-under the strip says so.
+out), the mark falls back, from Faces to People, People to Objects and Objects to Centre-weighted, and the bubble of
+the mark it falls back to says so.
 
 **Options:**
 

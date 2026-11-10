@@ -45,6 +45,8 @@ This is new, so reports are especially welcome.
   The settings themselves work; only those previews are out of reach.
 - With Full Keyboard Access, the arrow keys step the Exposure strip a tenth of a stop at a time and don't stop on a
   metering mark: putting the exposure on a mark takes a click on its dot, or VoiceOver's actions.
+- What each metering mark meters, which mark the exposure counts from, and how far from it, show in the bubble of a
+  mark's dot, with the pointer on it. VoiceOver's actions on the Exposure strip name the marks, but don't say those.
 - In 1.3 and earlier, VoiceOver reads the settings poorly: a group's toggle without its name, and values without
   their units. The next release fixes it.
 - Voice Control, Switch Control, Zoom, Reduce Transparency, Reduce Motion and Differentiate Without Colour haven't
