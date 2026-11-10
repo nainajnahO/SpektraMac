@@ -620,9 +620,9 @@ private extension MeteringMark {
     var about: String {
         switch self {
         case .asShot: "the exposure the camera chose"
-        case .centreWeighted: "meters the whole frame, the centre counting most, as Spektrafilm and a film camera do"
+        case .centreWeighted: "meters the whole frame, the centre counting most"
         case .objects: "meters what stands out in the frame"
-        case .people: "meters the people in the frame, so a bright sky or background can't darken them"
+        case .people: "meters the people in the frame"
         case .faces: "meters the faces in the frame"
         }
     }
