@@ -110,8 +110,7 @@ pink. Click the dot to put the exposure on that mark: its dot is then in the acc
 faces, people and objects when the photo opens.
 
 Dragging the strip moves the exposure from the mark you clicked, and doesn't stop at the other dots: its dot stays
-in the accent colour, and its bubble says how far from it you are, such as +0.5 EV. As a drag passes a dot, the area
-its mark meters is tinted pink, and the trackpad clicks.
+in the accent colour. As a drag passes a dot, the area its mark meters is tinted pink, and the trackpad clicks.
 
 ![The Exposure strip held at the Objects mark: the rocket and its tower are tinted pink](images/metering.webp)
 

@@ -545,7 +545,7 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
 /// it for this photo (``MeteringMark``): a click on one puts the exposure on its mark, and a drag
 /// moves it from there, keeping that mark however near another it goes. The dot of the mark the
 /// exposure counts from is in the accent colour. With the pointer on a dot, a bubble says what its
-/// mark meters, and on that mark's dot how far from it the exposure is. As a drag passes a mark,
+/// mark meters. As a drag passes a mark,
 /// the canvas tints what it meters, and the trackpad clicks.
 struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
@@ -565,15 +565,13 @@ struct ExposureStrip: View {
             .map { ev, readings in
                 let marks = readings.map(\.mark)
                 let isCounted = ev == counted?.ev
-                var notes: [String] = []
-                if isCounted, let counted, !here.contains(counted.mark) {
-                    notes.append("The exposure is \(model.controls.exposureOffsetEV.formatted(Self.stops)) EV from this mark.")
-                }
-                if isCounted, let counted, counted.mark != model.controls.exposureMark {
-                    notes.append("No \(model.controls.exposureMark.name.lowercased()) found in this photo, so the exposure counts from \(counted.mark.name).")
+                let note = if isCounted, let counted, counted.mark != model.controls.exposureMark {
+                    "No \(model.controls.exposureMark.name.lowercased()) found in this photo, so the exposure counts from \(counted.mark.name)."
+                } else {
+                    String?.none
                 }
                 return ThumbnailStrip.Mark(items: marks.map { (systemImage: $0.systemImage, name: $0.name, about: $0.about) },
-                                           value: ev, isChosen: isCounted, note: notes.isEmpty ? nil : notes.joined(separator: " ")) {
+                                           value: ev, isChosen: isCounted, note: note) {
                     model.putExposure(on: marks.contains(model.controls.exposureMark) ? model.controls.exposureMark : marks[0])
                 }
             }
@@ -1134,14 +1132,15 @@ private struct ThumbnailStrip: View {
         value = range.stepped(value + (upward ? step : -step), by: step)
     }
 
-    /// What a dot's bubble shows: each thing it stands for, its symbol at a button's size, then
-    /// its note.
+    /// What a dot's bubble shows: each thing it stands for, its symbol beside its name and what it
+    /// is, then its note.
     private func bubble(for mark: Mark) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(mark.items, id: \.name) { item in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(spacing: 10) {
                     Image(systemName: item.systemImage)
-                        .frame(width: 20)
+                        .font(.title)
+                        .frame(width: 32)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.name)
                             .fontWeight(.semibold)
