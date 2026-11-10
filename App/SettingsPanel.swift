@@ -546,8 +546,7 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
 /// moves it from there, keeping that mark however near another it goes. The dot of the mark the
 /// exposure counts from is in the accent colour. With the pointer on a dot, a bubble says what its
 /// mark meters, and on that mark's dot how far from it the exposure is. As a drag passes a mark,
-/// its name shows under the strip, only then, so marks a fraction of a stop apart don't crowd, and
-/// the trackpad clicks.
+/// the canvas tints what it meters, and the trackpad clicks.
 struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
 
@@ -585,18 +584,11 @@ struct ExposureStrip: View {
         } set: { value in
             model.hoveredMarks = readings.filter { $0.ev == value }.map(\.mark)
         }
-        let range = model.exposureRange
-        VStack(alignment: .leading, spacing: 6) {
-            ThumbnailStrip("Exposure", value: $model.exposureEV, in: range, step: 0.1, format: Self.stops, unit: "EV",
-                           frames: model.strips[.exposure], marks: marks, hoveredMark: hoveredDot) {
-                model.isAdjustingExposure = $0
-            }
-            .sensoryFeedback(.alignment, trigger: here) { _, new in model.isAdjustingExposure && !new.isEmpty }
-            // Only while the strip is held: at rest, the bubbles say it, and the name would show from
-            // under one.
-            MarkName(name: model.isAdjustingExposure ? here.map(\.name).formatted(.list(type: .and)) : "",
-                     fraction: range.fraction(of: model.exposureEV))
+        ThumbnailStrip("Exposure", value: $model.exposureEV, in: model.exposureRange, step: 0.1, format: Self.stops,
+                       unit: "EV", frames: model.strips[.exposure], marks: marks, hoveredMark: hoveredDot) {
+            model.isAdjustingExposure = $0
         }
+        .sensoryFeedback(.alignment, trigger: here) { _, new in model.isAdjustingExposure && !new.isEmpty }
         .disabled(model.photo == nil)
         // The pointer may be on a dot as the tab changes: no longer.
         .onDisappear { model.hoveredMarks = [] }
@@ -604,28 +596,6 @@ struct ExposureStrip: View {
 
     static let stops = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))
         .sign(strategy: .always(includingZero: false))
-}
-
-/// The name of the mark a drag of the strip is on, under its dot, kept inside the row at the ends.
-private struct MarkName: View {
-    let name: String
-    /// Where the dot is along the strip, 0 at its minimum.
-    let fraction: Double
-    @State private var width: CGFloat = 0
-
-    var body: some View {
-        GeometryReader { geometry in
-            let x = fraction * geometry.size.width
-            // Primary and semibold: in the accent colour, at any weight up to 14-pt bold, it fell
-            // short of the accessibility audit's contrast over the inspector's glass (#312).
-            Text(name)
-                .fontWeight(.semibold)
-                .fixedSize()
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-                .position(x: min(max(x, width / 2), geometry.size.width - width / 2), y: geometry.size.height / 2)
-        }
-        .frame(height: 16)
-    }
 }
 
 private extension MeteringMark {
