@@ -66,7 +66,7 @@ film itself) and its scan.
   <tr>
     <td width="50%"><img src="docs/images/metering.webp" alt="The Exposure strip held at the Objects mark: the rocket and its tower are tinted pink"><br>
       <b>Metering.</b> Apple's Vision finds the faces, people and objects in a photo, and each gets a mark on the
-      Exposure strip. Hold the strip to see what a mark meters.</td>
+      Exposure strip. Point at a mark's dot to see what it meters.</td>
     <td width="50%"><img src="docs/images/burn.webp" alt="A Burn slider held: the rocket's white body shows white on black"><br>
       <b>Burn.</b> Extra print exposure where the photo is bright, as a darkroom printer burns in a sky. Hold a Burn
       slider to see what burns.</td>

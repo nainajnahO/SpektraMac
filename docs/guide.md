@@ -76,7 +76,7 @@ look through films before choosing one. Closing the menu without choosing puts t
 
 **VoiceOver and Increase Contrast.** VoiceOver reads each group's name and whether it's open, and each slider's and
 strip's value with its unit. It describes the photo and the tone graph, each as one item. On the Exposure strip,
-VoiceOver's actions (VO-Command-Space) go to each metering mark. With **Increase Contrast** (System Settings ›
+VoiceOver's actions (VO-Command-Space) go to each metering mark, as a click on its dot does. With **Increase Contrast** (System Settings ›
 Accessibility › Display), the sliders' fill and value line are stronger.
 
 **Undo.** **Edit › Undo** (⌘Z) takes back the last change to the settings, and **Edit › Redo** (⇧⌘Z) makes it again. A
@@ -104,9 +104,17 @@ photo, saving, exporting a LUT, a preset), an alert says what and why.
 How much light reaches the film, in stops (EV). The strip shows the photo from 4 stops under to 8 stops over the
 exposure as shot.
 
-The dots under the strip are **metering marks**: the exposure each way of metering gives this photo. Drag onto a dot
-and it snaps there; its name shows under it, and the trackpad clicks. While you drag the strip, the area the
-nearest mark meters is tinted pink. Apple's Vision finds the faces, people and objects when the photo opens.
+The dots under the strip are **metering marks**: the exposure each way of metering gives this photo. Point at a dot
+and a bubble opens under it with the mark's symbol, its name and what it meters, and the area it meters is tinted
+pink. Click the dot to put the exposure on that mark. A dot is in the accent colour while the exposure is on it.
+Apple's Vision finds the faces, people and objects when the photo opens.
+
+Marks that read the same, or so nearly that their dots would almost touch, share one dot. Its bubble lists each of
+them, and a click puts the exposure on the mark you last clicked, if it's one of them, or else on the first in the
+table below.
+
+Dragging the strip moves the exposure from the mark you clicked, and doesn't stop at the other dots. As a drag passes
+a dot, the trackpad clicks.
 
 ![The Exposure strip held at the Objects mark: the rocket and its tower are tinted pink](images/metering.webp)
 
@@ -120,8 +128,8 @@ nearest mark meters is tinted pink. Apple's Vision finds the faces, people and o
 
 SpektraMac remembers the mark and how far you are from it, not the exposure itself. Set +0.3 EV from Faces, and the
 next photo opens 0.3 stops over its own faces' reading. If a photo has no faces (or no people, or nothing that stands
-out), the mark falls back, from Faces to People, People to Objects and Objects to Centre-weighted, and the line
-under the strip says so.
+out), the mark falls back, from Faces to People, People to Objects and Objects to Centre-weighted, and the bubble of
+the mark it falls back to says so.
 
 **Options:**
 

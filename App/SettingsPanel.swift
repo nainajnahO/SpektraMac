@@ -542,92 +542,97 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
 }
 
 /// The exposure, in stops over the photo as shot. Its dots are where each way of metering puts
-/// it for this photo (``MeteringMark``); a mark's name shows only while the exposure is on it, so
-/// marks a fraction of a stop apart don't crowd, and the trackpad clicks as it lands on one.
+/// it for this photo (``MeteringMark``): a click on one puts the exposure on its mark, and a drag
+/// moves it from there, keeping that mark however near another it goes. A dot is in the accent
+/// colour while the exposure is on it. With the pointer on a dot, a bubble says what its mark
+/// meters, and the canvas tints the region it meters. As a drag passes a mark, the trackpad clicks.
+/// Marks whose dots would be less than a dot apart share one, whose bubble has each.
 struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
+    /// The strip's width, for how near two readings put their dots.
+    @State private var width: CGFloat = 0
 
     var body: some View {
         @Bindable var model = model
         let readings = model.photo.map { photo in
             MeteringMark.allCases.compactMap { mark in photo.metering.ev[mark.rawValue].map { (mark: mark, ev: $0) } }
         } ?? []
-        // One dot for marks that meter the same.
-        let marks = Dictionary(grouping: readings) { $0.ev }
-            .map { ev, readings in (name: readings.map(\.mark.name).formatted(.list(type: .and)), value: ev) }
-            .sorted { $0.value < $1.value }
         let here = model.marksAtExposure
         let range = model.exposureRange
-        VStack(alignment: .leading, spacing: 6) {
-            ThumbnailStrip("Exposure", value: $model.exposureEV, in: range, step: 0.1, format: Self.stops, unit: "EV",
-                           frames: model.strips[.exposure], marks: marks) {
-                model.isAdjustingExposure = $0
+        // The mark the exposure counts from: the one chosen, or the one it starts from on a photo
+        // with no reading for it.
+        let counted = model.photo.map { $0.metering.reading(resolving: model.controls.exposureMark) }
+        // Two dots' width, in stops: readings nearer than that would draw dots less than a dot apart,
+        // which read as one, and a click between them could be for either. Before the strip is
+        // measured, only the same reading.
+        let nearby = width > 0 ? 2 * ThumbnailStrip.dotSize / width * (range.upperBound - range.lowerBound) : 0
+        let dots = Self.dots(of: readings, within: nearby)
+        let marks = dots.map { dot in
+            let note = if let counted, dot.marks.contains(counted.mark), counted.mark != model.controls.exposureMark {
+                "No \(model.controls.exposureMark.name.lowercased()) found in this photo, so the exposure counts from \(counted.mark.name)."
+            } else {
+                String?.none
             }
-            .sensoryFeedback(.alignment, trigger: here) { _, new in model.isAdjustingExposure && !new.isEmpty }
-            MarkName(name: here.map(\.name).formatted(.list(type: .and)),
-                     fraction: (model.exposureEV - range.lowerBound) / (range.upperBound - range.lowerBound))
-            // Primary at the body's size, medium: secondary, or primary at the caption's or callout's
-            // size over several lines, failed the accessibility audit's contrast over the inspector's
-            // glass, where it takes the colour of the photo beside it (#312), and so did regular weight
-            // in dark mode, in a large window, with the exposure brighter than a mark (#336). Over two
-            // or three lines it failed even so, in light mode and in a large window in dark mode. Bold,
-            // an inset from the glass's edge and a material behind it each failed somewhere; only an
-            // opaque backing passed everywhere (#346).
-            Text(description(here: here))
-                .fontWeight(.medium)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
-                .background(.background, in: .rect(cornerRadius: 4))
-                .fixedSize(horizontal: false, vertical: true)
+            return ThumbnailStrip.Mark(items: dot.marks.map { (systemImage: $0.systemImage, name: $0.name, about: $0.about) },
+                                       value: dot.value, isOn: dot.marks.contains { here.contains($0) }, note: note) {
+                // On a dot several marks share, the one the exposure counts from, if it's one of them.
+                model.putExposure(on: dot.marks.contains(model.controls.exposureMark) ? model.controls.exposureMark : dot.marks[0])
+            }
+        }
+        // The dot under the pointer.
+        let hoveredDot = Binding<Double?> {
+            dots.first { !Set($0.marks).isDisjoint(with: model.hoveredMarks) }?.value
+        } set: { value in
+            model.hoveredMarks = dots.first { $0.value == value }?.marks ?? []
+        }
+        ThumbnailStrip("Exposure", value: $model.exposureEV, in: range, step: 0.1, format: Self.stops,
+                       unit: "EV", frames: model.strips[.exposure], marks: marks, hoveredMark: hoveredDot) {
+            model.isAdjustingExposure = $0
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        // A click as a drag passes a mark: a fast one jumps over the step nearest it between two of
+        // the pointer's moves, so a click on landing there would miss it.
+        .sensoryFeedback(.alignment, trigger: model.exposureEV) { old, new in
+            model.isAdjustingExposure && readings.contains { (old < $0.ev && $0.ev <= new) || (new <= $0.ev && $0.ev < old) }
         }
         .disabled(model.photo == nil)
+        // The pointer may be on a dot as the tab changes: no longer.
+        .onDisappear { model.hoveredMarks = [] }
     }
 
     static let stops = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))
         .sign(strategy: .always(includingZero: false))
 
-    /// What the mark the exposure is on meters, or how far it is from the nearest one.
-    private func description(here: [MeteringMark]) -> String {
-        guard let photo = model.photo else {
-            return "\(model.controls.exposureMark.name): \(model.controls.exposureMark.about)."
+    /// The dots of `readings`: one for each run of readings no more than `nearby` stops from the
+    /// one before, midway between its ends, with its marks in ``MeteringMark``'s order.
+    private static func dots(of readings: [(mark: MeteringMark, ev: Double)], within nearby: Double)
+        -> [(marks: [MeteringMark], value: Double)] {
+        var runs: [[(mark: MeteringMark, ev: Double)]] = []
+        for reading in readings.sorted(by: { $0.ev < $1.ev }) {
+            if let last = runs.last?.last, reading.ev - last.ev <= nearby {
+                runs[runs.count - 1].append(reading)
+            } else {
+                runs.append([reading])
+            }
         }
-        let resolved = photo.metering.reading(resolving: model.controls.exposureMark).mark
-        var text = if let mark = here.first(where: { $0 == resolved }) ?? here.first {
-            "\(mark.name): \(mark.about)."
-        } else {
-            "\(model.controls.exposureOffsetEV.formatted(Self.stops)) EV from \(resolved.name)."
+        return runs.map { run in
+            (marks: run.map(\.mark).sorted { $0.rawValue < $1.rawValue }, value: (run.first!.ev + run.last!.ev) / 2)
         }
-        if resolved != model.controls.exposureMark {
-            text += " No \(model.controls.exposureMark.name.lowercased()) found in this photo, so it starts from \(resolved.name)."
-        }
-        return text
-    }
-}
-
-/// The name of the mark the exposure is on, under its dot on the strip, kept inside the row at
-/// the ends.
-private struct MarkName: View {
-    let name: String
-    /// Where the dot is along the strip, 0 at its minimum.
-    let fraction: Double
-    @State private var width: CGFloat = 0
-
-    var body: some View {
-        GeometryReader { geometry in
-            let x = fraction * geometry.size.width
-            // Primary and semibold: in the accent colour, at any weight up to 14-pt bold, it fell
-            // short of the accessibility audit's contrast over the inspector's glass (#312).
-            Text(name)
-                .fontWeight(.semibold)
-                .fixedSize()
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-                .position(x: min(max(x, width / 2), geometry.size.width - width / 2), y: geometry.size.height / 2)
-        }
-        .frame(height: 16)
     }
 }
 
 private extension MeteringMark {
+    /// Its symbol, in its dot's bubble.
+    var systemImage: String {
+        switch self {
+        case .asShot: "camera"
+        case .centreWeighted: "camera.metering.center.weighted"
+        case .objects: "viewfinder"
+        case .people: "person.2"
+        case .faces: "face.smiling"
+        }
+    }
+
     var name: String {
         switch self {
         case .asShot: "As shot"
@@ -642,9 +647,9 @@ private extension MeteringMark {
     var about: String {
         switch self {
         case .asShot: "the exposure the camera chose"
-        case .centreWeighted: "meters the whole frame, the centre counting most, as Spektrafilm and a film camera do"
+        case .centreWeighted: "meters the whole frame, the centre counting most"
         case .objects: "meters what stands out in the frame"
-        case .people: "meters the people in the frame, so a bright sky or background can't darken them"
+        case .people: "meters the people in the frame"
         case .faces: "meters the faces in the frame"
         }
     }
@@ -982,13 +987,29 @@ private struct SliderElement: NSViewRepresentable {
 }
 
 /// A control as Photos shows its main adjustments: frames of the photo across its range
-/// (``Controls/Strip``), with a line at the value; `marks` are dots under it. As in Photos, the
-/// value itself shows on the control's bar under Options. Clicking or dragging along it sets the
-/// value there; with Full Keyboard Access the arrow keys step it. Accessibility finds an AppKit
-/// slider in its place (``SliderElement``), reading the value in `format` and `unit`, with an
-/// action to go to each mark. Drawn here, as Photos' strip isn't one of SwiftUI's or AppKit's
-/// controls.
+/// (``Controls/Strip``), with a line at the value; `marks` are dots under it, each with a bubble
+/// (a popover) under the pointer. As in Photos, the value itself shows on the control's bar under
+/// Options. Clicking or dragging along it sets the value there, and clicking a dot chooses its
+/// mark; with Full Keyboard Access the arrow keys step it. Accessibility finds an AppKit slider in
+/// its place (``SliderElement``), reading the value in `format` and `unit`, with an action to choose
+/// each mark, as a click on its dot does. Drawn here, as Photos' strip isn't one of SwiftUI's or
+/// AppKit's controls.
 private struct ThumbnailStrip: View {
+    /// A dot under the strip, at `value`.
+    struct Mark {
+        /// What it stands for, which its bubble shows: a symbol, a name and what it is, for each.
+        let items: [(systemImage: String, name: String, about: String)]
+        let value: Double
+        /// Whether the value is on it: it's then in the accent colour.
+        let isOn: Bool
+        /// More for its bubble, under what it stands for.
+        let note: String?
+        /// What a click on its dot does.
+        let choose: () -> Void
+
+        var name: String { items.map(\.name).formatted(.list(type: .and)) }
+    }
+
     let title: String
     @Binding var value: Double
     let range: ClosedRange<Double>
@@ -997,7 +1018,9 @@ private struct ThumbnailStrip: View {
     let unit: String
     /// None until the model has made them.
     let frames: [CGImage]?
-    let marks: [(name: String, value: Double)]
+    let marks: [Mark]
+    /// The value of the mark whose dot the pointer is on.
+    @Binding var hoveredMark: Double?
     let onEditingChanged: (Bool) -> Void
     @State private var width: CGFloat = 0
     @State private var isDragging = false
@@ -1006,7 +1029,8 @@ private struct ThumbnailStrip: View {
 
     init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double,
          format: FloatingPointFormatStyle<Double>, unit: String = "", frames: [CGImage]?,
-         marks: [(name: String, value: Double)] = [], onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+         marks: [Mark] = [], hoveredMark: Binding<Double?> = .constant(nil),
+         onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
         self.title = title
         _value = value
         self.range = range
@@ -1015,11 +1039,23 @@ private struct ThumbnailStrip: View {
         self.unit = unit
         self.frames = frames
         self.marks = marks
+        _hoveredMark = hoveredMark
         self.onEditingChanged = onEditingChanged
     }
 
+    /// A dot's width, in points: 6 under the pointer.
+    static let dotSize: CGFloat = 4
+    /// How far from a dot, in points, a click still lands on it: about a third of a stop, where the
+    /// dots alone are ``dotSize`` across.
+    private static let dotReach: CGFloat = 8
+    /// The height of the dots' row, the dots 4 points under the frames.
+    private static let dotsHeight: CGFloat = 8
+    /// How far under the dots' row a click or the pointer still reaches its dots: into the space
+    /// above the next control, so the row is taller to point at than it is in the layout.
+    private static let dotsReachBelow: CGFloat = 4
+
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 0) {
             HStack(spacing: 0) {
                 if let frames {
                     ForEach(frames.indices, id: \.self) { index in
@@ -1059,14 +1095,48 @@ private struct ThumbnailStrip: View {
                 }
             }
             if !marks.isEmpty {
-                ZStack(alignment: .leading) {
+                ZStack {
                     ForEach(marks, id: \.value) { mark in
-                        Circle().fill(.secondary)
-                            .frame(width: 4, height: 4)
-                            .offset(x: range.fraction(of: mark.value) * width - 2)
+                        let size = mark.value == hoveredMark ? Self.dotSize + 2 : Self.dotSize
+                        Circle().fill(mark.isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                            .frame(width: size, height: size)
+                            // As tall as the row reaches, so the bubble hangs from below where the
+                            // pointer can be on the dot: under the pointer, it would take the hover
+                            // away from the dot, and close.
+                            .frame(height: Self.dotsHeight + Self.dotsReachBelow)
+                            .popover(isPresented: Binding {
+                                hoveredMark == mark.value
+                            } set: { isPresented in
+                                if !isPresented, hoveredMark == mark.value {
+                                    hoveredMark = nil
+                                }
+                            }, attachmentAnchor: .point(.bottom), arrowEdge: .bottom) {
+                                bubble(for: mark)
+                                    // It follows the pointer: a click outside it is for the strip.
+                                    .interactiveDismissDisabled()
+                            }
+                            .position(x: range.fraction(of: mark.value) * width,
+                                      y: (Self.dotsHeight + Self.dotsReachBelow) / 2)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 4, maxHeight: 4, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: Self.dotsHeight + Self.dotsReachBelow,
+                       maxHeight: Self.dotsHeight + Self.dotsReachBelow)
+                .contentShape(.rect)
+                .onContinuousHover { phase in
+                    var hovered: Double?
+                    if case .active(let location) = phase {
+                        hovered = dot(at: location.x)?.value
+                    }
+                    if hovered != hoveredMark {
+                        hoveredMark = hovered
+                    }
+                }
+                .onTapGesture { location in
+                    dot(at: location.x)?.choose()
+                }
+                // In the layout, only the row: what it reaches below lies in the space over the
+                // next control.
+                .padding(.bottom, -Self.dotsReachBelow)
             }
         }
         .opacity(isEnabled ? 1 : 0.5)
@@ -1087,7 +1157,7 @@ private struct ThumbnailStrip: View {
                           move: { moveOneStep(upward: $0) })
                 .accessibilityActions {
                     ForEach(marks, id: \.value) { mark in
-                        Button(mark.name) { value = mark.value }
+                        Button(mark.name, action: mark.choose)
                     }
                 }
         }
@@ -1095,6 +1165,37 @@ private struct ThumbnailStrip: View {
 
     private func moveOneStep(upward: Bool) {
         value = range.stepped(value + (upward ? step : -step), by: step)
+    }
+
+    /// What a dot's bubble shows: each thing it stands for, its symbol beside its name and what it
+    /// is, then its note.
+    private func bubble(for mark: Mark) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(mark.items, id: \.name) { item in
+                HStack(spacing: 10) {
+                    Image(systemName: item.systemImage)
+                        .font(.title)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name)
+                            .fontWeight(.semibold)
+                        Text("\(item.about.prefix(1).uppercased())\(item.about.dropFirst()).")
+                    }
+                }
+            }
+            if let note = mark.note {
+                Text(note)
+            }
+        }
+        .padding(12)
+        .frame(width: 240, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The mark whose dot is nearest `x`, within ``dotReach``.
+    private func dot(at x: CGFloat) -> Mark? {
+        func distance(_ mark: Mark) -> CGFloat { abs(range.fraction(of: mark.value) * width - x) }
+        return marks.filter { distance($0) <= Self.dotReach }.min { distance($0) < distance($1) }
     }
 
     private func endDrag() {

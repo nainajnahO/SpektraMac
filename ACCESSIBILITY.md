@@ -40,9 +40,13 @@ This is new, so reports are especially welcome.
 
 ## Known limitations
 
-- Holding a Burn slider to see what burns, and holding the Exposure strip to see what a mark meters, need a pointer:
-  VoiceOver, Full Keyboard Access and Switch Control can't hold a control. The settings themselves work; only those
-  previews are out of reach.
+- Holding a Burn slider to see what burns, and pointing at a metering mark's dot to see what it meters, need a
+  pointer: VoiceOver, Full Keyboard Access and Switch Control can't hold or point at a control.
+  The settings themselves work; only those previews are out of reach.
+- With Full Keyboard Access, the arrow keys step the Exposure strip a tenth of a stop at a time and don't stop on a
+  metering mark: putting the exposure on a mark takes a click on its dot, or VoiceOver's actions.
+- What each metering mark meters shows in the bubble of its dot, with the pointer on it, and whether the exposure is
+  on a mark only in its dot's colour. VoiceOver's actions on the Exposure strip name the marks, but don't say either.
 - In 1.3 and earlier, VoiceOver reads the settings poorly: a group's toggle without its name, and values without
   their units. The next release fixes it.
 - Voice Control, Switch Control, Zoom, Reduce Transparency, Reduce Motion and Differentiate Without Colour haven't

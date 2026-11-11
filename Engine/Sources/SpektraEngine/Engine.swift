@@ -277,25 +277,10 @@ extension Controls {
         return (checked, changed)
     }
 
-    /// How close to a mark, in stops, the exposure lands on it (``settingExposure(_:readings:)``).
-    public static let exposureSnap = 0.15
-
     /// The exposure these controls give a photo metered as `readings`, in stops over it as shot:
     /// their mark's reading plus their offset.
     public func exposureEV(readings: MeteringReadings) -> Double {
         readings.reading(resolving: exposureMark).ev + exposureOffsetEV
-    }
-
-    /// These controls with the exposure at `ev` stops over a photo metered as `readings`, as shot.
-    /// Within ``exposureSnap`` of a mark, it lands on the mark; elsewhere it keeps the nearest mark
-    /// and the offset from it, so the next photo opens as far from that mark's own reading.
-    public func settingExposure(_ ev: Double, readings: MeteringReadings) -> Controls {
-        let nearest = MeteringMark.allCases.compactMap { mark in readings.ev[mark.rawValue].map { (mark, $0) } }
-            .min { abs($0.1 - ev) < abs($1.1 - ev) }!
-        var controls = self
-        controls.exposureMark = nearest.0
-        controls.exposureOffsetEV = abs(ev - nearest.1) < Self.exposureSnap ? 0 : ev - nearest.1
-        return controls
     }
 
     /// The Exposure slider's range for a photo metered as `readings` (nil with none open): −4…+8
@@ -325,7 +310,8 @@ extension Controls {
     }
 
     /// These controls with `strip`'s control at `value`: for the exposure, `value` stops over the
-    /// photo as shot (metered as `readings`), from the controls' mark.
+    /// photo as shot (metered as `readings`), from the controls' mark, which it keeps however near
+    /// another mark it is, so the next photo opens as far from that mark's own reading.
     public func setting(_ strip: Strip, to value: Double, readings: MeteringReadings) -> Controls {
         var controls = self
         switch strip {

@@ -80,6 +80,48 @@ final class SpektraMacUITests: XCTestCase {
         XCTAssertFalse(app.popUpButtons["Development"].exists, "Development on Portra 400")
     }
 
+    // MARK: Metering marks
+
+    /// The pointer on a mark's dot opens a bubble under it saying what the mark meters, each mark's
+    /// on a dot marks share, and a click there puts the exposure on the mark, in one step to undo.
+    /// The bubble closes as the pointer leaves the dots (#353). That the strip doesn't snap to a
+    /// mark is the engine's `exposureKeepsItsMark`: a drag here lands only within a few tenths of
+    /// a stop of where it's aimed.
+    @MainActor func testClickingADotPutsTheExposureOnItsMark() throws {
+        try launch()
+        defer { quit() }
+        showTab(.camera)
+        // The test's photo is a gradient: As shot reads it at 0 and Centre-weighted, the film's
+        // default, 0.016 stops over, a third of a point to its right on the strip, so they share a
+        // dot. Its range is −4…+8 stops. The strip's value is the exposure, in stops.
+        let strip = panel.sliders["Exposure"]
+        XCTAssert(strip.waitForExistence(timeout: 5), "the Exposure strip")
+        let marks = strip.normalizedSliderPosition
+        strip.adjust(toNormalizedSliderPosition: 0.9)
+        let overTheMarks = try XCTUnwrap(exposure(of: strip) { $0 > 1 }, "the exposure well over the marks, at \(strip.value ?? "none")")
+        // On the dots' row, 2 points above the strip's foot, and 6 points left of the dot: within
+        // its reach, where a click on the frames would land 0.3 stops under.
+        let besideTheDot = strip.coordinate(withNormalizedOffset: CGVector(dx: marks, dy: 1))
+            .withOffset(CGVector(dx: -6, dy: -2))
+        besideTheDot.hover()
+        let bubble = app.popovers.firstMatch
+        XCTAssert(bubble.waitForExistence(timeout: 5), "a bubble with the pointer on the dot")
+        for name in ["As shot", "Centre-weighted"] {
+            XCTAssert(bubble.staticTexts.matching(NSPredicate(format: "value == %@", name)).firstMatch.exists, "\(name) in the bubble")
+        }
+        XCTAssertGreaterThanOrEqual(bubble.frame.minY, strip.frame.maxY, "the bubble under the strip")
+        // Of the dot's two marks, the one the exposure counts from.
+        besideTheDot.click()
+        XCTAssertNotNil(exposure(of: strip) { abs($0 - 0.016) < 0.01 }, "the exposure on Centre-weighted, at \(strip.value ?? "none")")
+        let undo = undoItem()
+        XCTAssert(undo.title.contains("Undo Exposure"), "Edit › Undo shows “\(undo.title)”")
+        // The click's mark and offset back as they were, in one step.
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertNotNil(exposure(of: strip) { abs($0 - overTheMarks) < 0.01 }, "the exposure back after Undo, at \(strip.value ?? "none")")
+        strip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
+        XCTAssert(bubble.waitForNonExistence(timeout: 5), "the bubble with the pointer on the frames")
+    }
+
     // MARK: Undo
 
     /// Edit › Undo names the change, and is greyed out once there's nothing left to undo.
@@ -144,16 +186,6 @@ final class SpektraMacUITests: XCTestCase {
             showTab(tab)
             try audit("\(tab) tab")
         }
-        // The Camera tab again with the exposure off a mark, brighter than the photo metered: the
-        // text under the strip then says how far it is from the mark, over a brighter photo (#336).
-        showTab(.camera)
-        panel.sliders["Exposure"].adjust(toNormalizedSliderPosition: 0.4)
-        let offAMark = panel.staticTexts.matching(NSPredicate(format: "value CONTAINS ' EV from '")).firstMatch
-        XCTAssert(offAMark.waitForExistence(timeout: 5), "the exposure off a mark")
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: rendered, evaluatedWith: app.windows["main"])], timeout: 30),
-                       .completed, "the render off a mark")
-        Thread.sleep(forTimeInterval: 2)
-        try audit("camera tab, \((offAMark.value as? String) ?? "off a mark")")
         app.typeKey("l", modifierFlags: [.command, .option])
         XCTAssert(app.windows["Log"].waitForExistence(timeout: 5))
         // Once it has settled: audited as it opened, a few of its times failed the contrast check
@@ -256,6 +288,19 @@ final class SpektraMacUITests: XCTestCase {
     /// The settings panel.
     @MainActor private var panel: XCUIElement {
         app.windows["main"].scrollViews.firstMatch
+    }
+
+    /// A strip's value, its exposure in stops, once `condition` holds for it, within 5 seconds; nil
+    /// if it doesn't.
+    @MainActor private func exposure(of strip: XCUIElement, where condition: (Double) -> Bool) -> Double? {
+        let deadline = Date.now.addingTimeInterval(5)
+        repeat {
+            if let value = strip.value as? Double, condition(value) {
+                return value
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        } while Date.now < deadline
+        return nil
     }
 
     /// The Reset arrows of the settings tab showing, top to bottom: buttons, not part of their
