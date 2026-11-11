@@ -397,8 +397,8 @@ private struct DevelopmentRow: View {
 /// A stopwatch's face to set a time among `stops` on, after the Clock app's: a rim of fine ticks,
 /// ten a minute, the minutes' numbers within it, and a thin orange hand through a ring at the
 /// centre. A turn is 12 minutes, which both stocks' times are within, so a time is where a clock
-/// has that hour: 6.5 minutes at half past six. A yellow dot at the rim marks each stop, the
-/// `standard` one's larger.
+/// has that hour: 6.5 minutes at half past six. The rim's line at each stop is the hand's orange,
+/// longer and thicker than the rest, the `standard` one's most.
 ///
 /// A click or a drag on the face sets the stop nearest the pointer's direction from the centre,
 /// and the hand sweeps to it the shorter way round, as it does to a time set any other way (by
@@ -458,10 +458,12 @@ private struct StopwatchFace: View {
                 context.draw(Text(verbatim: "\(minute)").font(.system(size: 13)),
                              at: point(at: Double(minute), inset: 25))
             }
+            // Each stop's own line, over the rim's.
             for stop in stops {
-                let middle = point(at: stop, inset: 13), reach: CGFloat = stop == standard ? 3.5 : 2.5
-                context.fill(Path(ellipseIn: CGRect(x: middle.x - reach, y: middle.y - reach, width: 2 * reach, height: 2 * reach)),
-                             with: .color(.yellow))
+                var line = Path()
+                line.move(to: point(at: stop, inset: 0))
+                line.addLine(to: point(at: stop, inset: stop == standard ? 13 : 10))
+                context.stroke(line, with: .color(.orange), lineWidth: stop == standard ? 3 : 2)
             }
         }
         .overlay {
