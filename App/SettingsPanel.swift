@@ -359,6 +359,9 @@ private struct ChoiceRow<Value: Hashable>: View {
 /// The Development row under a black-and-white film or print film with a choice of development
 /// times: those its curves were measured at, in minutes. Choosing the standard one sets none, as
 /// the controls are before a choice. Under any other stock, nothing.
+///
+/// To try (#352), the time shows four ways at once: the menu, and under it a row of buttons, a bar
+/// and a dial, each setting the one time. One of them is to be kept.
 private struct DevelopmentRow: View {
     @Environment(PhotoModel.self) private var model
     let stock: String
@@ -372,15 +375,114 @@ private struct DevelopmentRow: View {
                 controls[keyPath: minutes] = time == times.standard ? nil : time
                 return controls
             }
-            let choices = times.measured.map { time in
+            let name = { (time: Double) -> String in
                 let name = Measurement(value: time, unit: UnitDuration.minutes)
                     .formatted(.measurement(width: .abbreviated, usage: .asProvided))
-                return (name: time == times.standard ? "\(name) (standard)" : name, value: time)
+                return time == times.standard ? "\(name) (standard)" : name
             }
-            ChoiceRow(title: "Development", sections: [.init(heading: nil, choices: choices)],
-                      selection: Binding(get: { times.developed }, set: { model.controls = developing($0) }),
-                      controls: $model.controls, choosing: developing)
-                .help("How long it's developed for, from the times its curves were measured at. Longer gives more contrast.")
+            let time = Binding(get: { times.developed }, set: { model.controls = developing($0) })
+            let help = "How long it's developed for, from the times its curves were measured at. Longer gives more contrast."
+            ChoiceRow(title: "Development", sections: [.init(heading: nil, choices: times.measured.map { (name($0), $0) })],
+                      selection: time, controls: $model.controls, choosing: developing)
+                .help(help)
+            // A button for each time, across the panel: five beside a title are wider than it is. The
+            // time's unit and whether it's the standard one are over them, and a dot is under the
+            // standard one's button, as a segment takes text alone.
+            HStack {
+                Text("Development")
+                Spacer(minLength: 8)
+                Text(name(times.developed))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityHidden(true)
+            Picker("Development buttons", selection: time) {
+                ForEach(times.measured, id: \.self) { measured in
+                    Text(measured.formatted())
+                        .tag(measured)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .overlay(alignment: .bottom) {
+                // The segments are equally wide, so a row of as many equal cells puts the dot under its own.
+                HStack(spacing: 0) {
+                    ForEach(times.measured, id: \.self) { measured in
+                        Circle()
+                            .fill(.secondary)
+                            .frame(width: 4, height: 4)
+                            .opacity(measured == times.standard ? 1 : 0)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .offset(y: 7)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            .padding(.bottom, 7)
+            .help(help)
+            // The panel's bar, each time at its own place along it and filled from the standard one.
+            ValueSlider("Development", value: time, stops: times.measured, neutral: times.standard,
+                        format: .number.precision(.fractionLength(0...1)), unit: "min")
+                .help(help)
+            HStack {
+                Text("Development")
+                    .fixedSize()
+                    .accessibilityHidden(true)
+                Spacer(minLength: 8)
+                Text(name(times.developed))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                DialSlider(title: "Development dial", value: time, stops: times.measured)
+                    .fixedSize()
+            }
+            .help(help)
+        }
+    }
+}
+
+/// AppKit's circular slider, stopping only on `stops`. Its value is the stop's place among them, so
+/// they're evenly spaced around it however far apart they are. A circular slider's lowest and
+/// highest values are one place, straight up, and its tick marks divide the whole turn: with as
+/// many marks as stops and the highest value one past the last stop, each stop has its own place,
+/// the first straight up, and a turn past the last comes round to the first. To try for the
+/// development time (#352).
+private struct DialSlider: NSViewRepresentable {
+    let title: String
+    @Binding var value: Double
+    let stops: [Double]
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSSlider {
+        let slider = NSSlider(value: 0, minValue: 0, maxValue: 1, target: context.coordinator,
+                              action: #selector(Coordinator.turned(_:)))
+        slider.sliderType = .circular
+        slider.allowsTickMarkValuesOnly = true
+        slider.setAccessibilityLabel(title)
+        return slider
+    }
+
+    func updateNSView(_ slider: NSSlider, context: Context) {
+        context.coordinator.dial = self
+        slider.maxValue = Double(stops.count)
+        slider.numberOfTickMarks = stops.count
+        slider.doubleValue = Double(stops.firstIndex(of: value) ?? 0)
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var dial: DialSlider
+
+        init(_ dial: DialSlider) {
+            self.dial = dial
+        }
+
+        @objc func turned(_ slider: NSSlider) {
+            // The highest value is the first stop's place again.
+            let stop = dial.stops[Int(slider.doubleValue.rounded()) % dial.stops.count]
+            if stop != dial.value {
+                dial.value = stop
+            }
         }
     }
 }
@@ -706,11 +808,16 @@ extension Parameters.DiffusionFilter.Family {
 /// Return opens it for typing. With Increase Contrast, the fill and the line are stronger.
 /// SwiftUI's `Slider` can't be restyled (there's no slider style to conform to), so the bar is
 /// drawn here, and accessibility finds an AppKit slider in its place (``SliderElement``).
+///
+/// Given `stops`, it stops only on those, each at its own place along the bar, with a line at each
+/// and no steps between them: a drag, the arrow keys and a typed value all land on the nearest.
 private struct ValueSlider: View {
     let title: String
     @Binding var value: Double
     let range: ClosedRange<Double>
     let step: Double
+    /// The only values it sets, lowest first; nil for every `step` of the range.
+    let stops: [Double]?
     let neutral: Double?
     let format: FloatingPointFormatStyle<Double>
     let unit: String
@@ -735,10 +842,26 @@ private struct ValueSlider: View {
         _value = value
         self.range = range
         self.step = step
+        stops = nil
         self.neutral = neutral
         self.format = format
         self.unit = unit
         self.onEditingChanged = onEditingChanged
+    }
+
+    /// A slider that stops only on `stops` (at least two, lowest first), from the first to the last.
+    init(_ title: String, value: Binding<Double>, stops: [Double], neutral: Double? = nil,
+         format: FloatingPointFormatStyle<Double>, unit: String = "") {
+        self.title = title
+        _value = value
+        range = stops[0]...stops[stops.count - 1]
+        // Unused: the stops are the values it sets.
+        step = 0
+        self.stops = stops
+        self.neutral = neutral
+        self.format = format
+        self.unit = unit
+        onEditingChanged = { _ in }
     }
 
     /// The bar's coordinate space, where the drag and ``valueFrame`` are measured.
@@ -748,7 +871,8 @@ private struct ValueSlider: View {
     private static let clickTolerance = SliderRuler.minimumSpacing / 2
 
     var body: some View {
-        let ruler = SliderRuler(range: range, step: step, neutral: neutral, width: width)
+        let ruler = stops.map { SliderRuler(values: $0, neutral: neutral) }
+            ?? SliderRuler(range: range, step: step, neutral: neutral, width: width)
         // Sizes and shades measured from Photos' (macOS 26) screenshots. Shades the system has are its
         // own (the measured text is `.secondary` in dark mode); the rest as the primary style's opacity.
         HStack {
@@ -847,7 +971,7 @@ private struct ValueSlider: View {
         .accessibilityHidden(true)
         .background {
             SliderElement(title: title, value: value, range: range, valueText: valueText,
-                          set: { value = range.stepped($0, by: step) },
+                          set: { value = settled($0) },
                           move: { moveOneLine(upward: $0, on: ruler) })
                 .accessibilityAction(named: "Type Value", startTyping)
         }
@@ -890,6 +1014,11 @@ private struct ValueSlider: View {
         }
     }
 
+    /// `value` as the slider sets it: on the nearest of its `stops`, or else at the nearest step.
+    private func settled(_ value: Double) -> Double {
+        stops?.min { abs($0 - value) < abs($1 - value) } ?? range.stepped(value, by: step)
+    }
+
     private func startTyping() {
         typedText = value.formatted(format)
         isTyping = true
@@ -906,7 +1035,7 @@ private struct ValueSlider: View {
         guard typedText != value.formatted(format) else { return }
         let text = typedText.replacing(/[.,]/, with: format.locale.decimalSeparator ?? ".")
         do {
-            value = range.stepped(try format.parseStrategy.parse(text), by: step)
+            value = settled(try format.parseStrategy.parse(text))
         } catch {
             NSSound.beep()
         }
@@ -1231,6 +1360,14 @@ struct SliderRuler {
             return Line(value: index == steps ? range.upperBound : range.lowerBound + Double(index) * step, rank: rank)
         }
         tolerance = step / 2
+    }
+
+    /// A ruler with a line at each of `values` alone (lowest first), for a slider that stops only
+    /// on them, however unevenly they lie: the one at `neutral` bright, the others long.
+    init(values: [Double], neutral: Double?) {
+        lines = values.map { Line(value: $0, rank: $0 == neutral ? .bright : .long) }
+        // Half the smallest gap between two of them.
+        tolerance = (zip(values.dropFirst(), values).map { $0 - $1 }.min() ?? 0) / 2
     }
 
     /// The line nearest `value`: where a drag to it stops.
