@@ -402,10 +402,7 @@ private struct DevelopmentRow: View {
                     .help(help)
             }
             HStack {
-                // The stopwatch has the time on its face.
-                Text("Development")
-                    .fixedSize()
-                    .accessibilityHidden(true)
+                clockTitle(name(times.developed))
                 Spacer(minLength: 8)
                 TimerFace(title: "Development stopwatch", look: .stopwatch, value: time, stops: times.measured,
                           standard: times.standard, valueText: name(times.developed))
@@ -571,14 +568,14 @@ private struct TimerFace: View {
         /// hand from the centre, in the accent colour under the pointer and while dragged.
         case clock
         /// After the Clock app's stopwatch, larger and with no disc: a rim of fine ticks, ten a
-        /// minute, the stops' dots and the minutes' numbers within it, a thin orange hand through a
-        /// ring at the centre and the time under the centre, in minutes and seconds.
+        /// minute, the stops' dots and the minutes' numbers within it, and a thin orange hand
+        /// through a ring at the centre. As wide as the row has room for beside the longest time.
         case stopwatch
 
         var diameter: CGFloat {
             switch self {
             case .clock: 72
-            case .stopwatch: 160
+            case .stopwatch: 132
             }
         }
     }
@@ -609,7 +606,6 @@ private struct TimerFace: View {
 
     var body: some View {
         let handStyle = isHovered || isDragging ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary)
-        let readout = Duration.seconds(value * 60).formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2)))
         Canvas { context, size in
             let centre = CGPoint(x: size.width / 2, y: size.height / 2), radius = min(size.width, size.height) / 2
             /// Where the hand points for `minutes`, `inset` from the rim.
@@ -655,12 +651,10 @@ private struct TimerFace: View {
                                    lineWidth: isMinute ? 1.5 : 1)
                 }
                 for minute in 1...Int(Self.turn) {
-                    context.draw(Text(verbatim: "\(minute)").font(.system(size: 14)),
-                                 at: point(at: Double(minute), inset: 27))
+                    context.draw(Text(verbatim: "\(minute)").font(.system(size: 13)),
+                                 at: point(at: Double(minute), inset: 25))
                 }
                 drawStops(inset: 13)
-                context.draw(Text(verbatim: readout).font(.system(size: 13)).monospacedDigit(),
-                             at: CGPoint(x: centre.x, y: centre.y + radius * 0.36))
                 // The hand goes on through the centre, a fifth of the radius past it, around a ring there.
                 let ring: CGFloat = 3.5, back = value + Self.turn / 2
                 let orange = GraphicsContext.Shading.color(.orange)
