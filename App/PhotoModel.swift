@@ -103,7 +103,7 @@ final class PhotoModel {
     var exposureRange: ClosedRange<Double> {
         Controls.exposureRange(readings: photo?.metering)
     }
-    /// While the Exposure strip is held: the trackpad then clicks as it passes a mark.
+    /// While the Exposure strip is held: the trackpad then clicks as it passes a mark's dot.
     var isAdjustingExposure = false
     /// The marks of the dot under the pointer, under the Exposure strip: the canvas then tints the
     /// regions they meter.
