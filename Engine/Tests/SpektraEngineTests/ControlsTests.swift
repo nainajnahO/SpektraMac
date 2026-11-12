@@ -16,9 +16,10 @@ private let adjustmentTitles: [Controls.Adjustment: String] = [
     .enlargerDiffusion: "Enlarger Diffusion", .glare: "Glare",
 ]
 
-/// The controls as their preset's JSON object.
+/// Every stored property of the controls, as a JSON object: their preset's, but with the exposure,
+/// which a preset leaves out.
 private func json(_ controls: Controls) throws -> [String: Any] {
-    try JSONSerialization.jsonObject(with: controls.preset()) as! [String: Any]
+    try JSONSerialization.jsonObject(with: JSONEncoder().encode(controls)) as! [String: Any]
 }
 
 /// Controls with every stored property away from its default, whatever they are, through the
@@ -155,20 +156,15 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
     #expect(unchanged.controls == Controls() && unchanged.changed.isEmpty)
 }
 
-/// The Exposure slider keeps the controls' mark wherever it's set, beside another mark too, and
-/// moves the offset from it, which the next photo's reading of that mark takes. A mark the photo
-/// has no reading for is kept too, the offset counting from the mark it starts from.
-@Test func exposureKeepsItsMark() {
-    let metered = readings(centreWeighted: 2)
-    #expect(abs(metered.ev[MeteringMark.centreWeighted.rawValue]! - 2) < 1e-12)
-    #expect(abs(metered.ev[MeteringMark.asShot.rawValue]!) < 1e-12)
-    let besideAsShot = Controls().setting(.exposure, to: 0.1, readings: metered)
-    #expect(besideAsShot.exposureMark == .centreWeighted && abs(besideAsShot.exposureOffsetEV - -1.9) < 1e-12)
-    #expect(abs(besideAsShot.exposureEV(readings: readings(centreWeighted: -3)) - -4.9) < 1e-12)
-    var faces = Controls()
-    faces.exposureMark = .faces
-    let over = faces.setting(.exposure, to: 2.5, readings: metered)
-    #expect(over.exposureMark == .faces && abs(over.exposureOffsetEV - 0.5) < 1e-12)
+/// A preset carries no exposure, as the exposure is the photo's: a film's saved defaults and the
+/// settings the app quits with are presets too, so neither moves it.
+@Test func presetsCarryNoExposure() throws {
+    var controls = Controls()
+    controls.exposureEV = 1.5
+    controls.grainSize = 0.5
+    let preset = try Controls(preset: controls.preset())
+    #expect(preset.exposureEV == 0)
+    #expect(preset.grainSize == 0.5)
 }
 
 /// The exposure's range is −4…+8 stops, widened to whole stops past a reading outside it.
@@ -179,7 +175,7 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
     #expect(Controls.exposureRange(readings: readings(centreWeighted: -5.2)) == -7...8)
 }
 
-/// A strip's frames set its control, the exposure's from the controls' mark; a strip whose control
+/// A strip's frames set its control; a strip whose control
 /// changes nothing the controls show has none: the print's while the film shows, and the
 /// saturation's with the couplers off, or on a black-and-white film, which has one layer.
 @Test func stripsFrameTheirControl() throws {
@@ -191,8 +187,7 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
     controls.couplers = false
     controls.scanFilm = true
     #expect(Controls.Strip.allCases.filter { $0.applies(to: controls, films: films) } == [.exposure])
-    let metered = readings(centreWeighted: 2)
-    #expect(abs(Controls().setting(.exposure, to: 3, readings: metered).exposureEV(readings: metered) - 3) < 1e-12)
-    #expect(Controls().setting(.couplerSaturation, to: 0.4, readings: metered).couplerSaturation == 0.4)
-    #expect(Controls().setting(.printExposure, to: 1.3, readings: metered).printExposure == 1.3)
+    #expect(Controls().setting(.exposure, to: 3).exposureEV == 3)
+    #expect(Controls().setting(.couplerSaturation, to: 0.4).couplerSaturation == 0.4)
+    #expect(Controls().setting(.printExposure, to: 1.3).printExposure == 1.3)
 }

@@ -78,9 +78,11 @@ final class PhotoModel {
         get { controls.film }
         set { controls = controls(choosing: newValue) }
     }
-    /// What choosing `film` sets the controls to (``film``).
+    /// What choosing `film` sets the controls to (``film``), at the same exposure: the photo's.
     func controls(choosing film: String) -> Controls {
-        savedDefaults(for: film) ?? controls.choosing(film: film, from: films)
+        var chosen = savedDefaults(for: film) ?? controls.choosing(film: film, from: films)
+        chosen.exposureEV = controls.exposureEV
+        return chosen
     }
     var filmName: String { films.first { $0.stock == controls.film }?.name ?? controls.film }
     var paperName: String { papers.first { $0.stock == controls.paper }?.name ?? controls.paper }
@@ -97,35 +99,9 @@ final class PhotoModel {
     func developmentTimes(of stock: String, asking minutes: Double?) -> (measured: [Double], standard: Double, developed: Double)? {
         engine?.developmentTimes(of: stock, asking: minutes)
     }
-    /// The exposure the slider shows, in stops over the photo as shot (``Controls/exposureEV(readings:)``).
-    /// Set, it keeps the controls' mark and moves the offset from it, near another mark too: only a
-    /// click on a mark's dot puts the exposure on one (``putExposure(on:)``).
-    var exposureEV: Double {
-        get { photo.map { controls.exposureEV(readings: $0.metering) } ?? controls.exposureOffsetEV }
-        set {
-            guard let photo else { return }
-            controls = controls.setting(.exposure, to: newValue, readings: photo.metering)
-        }
-    }
-    /// Puts the exposure on `mark`, at no offset from it: one change of the controls, so one step
-    /// undoes it.
-    func putExposure(on mark: MeteringMark) {
-        var controls = controls
-        controls.exposureMark = mark
-        controls.exposureOffsetEV = 0
-        self.controls = controls
-    }
     /// The exposure's range (``Controls/exposureRange(readings:)``).
     var exposureRange: ClosedRange<Double> {
         Controls.exposureRange(readings: photo?.metering)
-    }
-    /// The marks the exposure is on: those whose reading for this photo rounds to it.
-    var marksAtExposure: [MeteringMark] {
-        guard let photo else { return [] }
-        let exposure = exposureEV
-        return MeteringMark.allCases.filter { mark in
-            photo.metering.ev[mark.rawValue].map { abs($0 - exposure) < 0.05 } ?? false
-        }
     }
     /// While the Exposure strip is held: the trackpad then clicks as it passes a mark.
     var isAdjustingExposure = false
@@ -332,6 +308,12 @@ final class PhotoModel {
                     throw error
                 }
                 self.metadata = metadata
+                // Every photo opens as shot, with nothing to undo: the last photo's changes were its
+                // own, and Undo would bring its exposure back with them.
+                undoManager?.removeAllActions()
+                undoManager?.disableUndoRegistration()
+                controls.exposureEV = 0
+                undoManager?.enableUndoRegistration()
                 photo = Photo(name: url.lastPathComponent, width: opened.width, height: opened.height,
                               previewWidth: opened.previewWidth, previewHeight: opened.previewHeight,
                               metering: opened.metering, meteringOverlays: opened.meteringOverlays)
@@ -472,7 +454,7 @@ final class PhotoModel {
                     isRenderingFullResolution = true
                     try await show(controls: controls, mode: .full, engine: engine, photo: photo)
                 }
-                renderStrips(photo: photo, engine: engine)
+                renderStrips(engine: engine)
             } catch {
                 guard !Task.isCancelled else { return }
                 fail("Could not render", error)
@@ -599,7 +581,7 @@ final class PhotoModel {
     /// Renders the strips for the controls, unless they show them or are being made for them. Each
     /// frame is a render of its own, so a change's preview waits on one frame at most; each strip
     /// shows once all its frames are done.
-    private func renderStrips(photo: Photo, engine: Engine) {
+    private func renderStrips(engine: Engine) {
         let controls = controls
         guard controls != stripControls, stripTask == nil else { return }
         stripTask = Task {
@@ -618,7 +600,7 @@ final class PhotoModel {
                         // The value at the middle of the frame.
                         let value = span.lowerBound
                             + (Double(frame) + 0.5) / Double(Self.framesPerStrip) * (span.upperBound - span.lowerBound)
-                        let frameControls = controls.setting(strip, to: value, readings: photo.metering)
+                        let frameControls = controls.setting(strip, to: value)
                         let (image, frameTime) = try await EngineTime.measure(on: engine) {
                             try $0.display(controls: frameControls, mode: .thumbnail)
                         }
@@ -808,7 +790,7 @@ final class PhotoModel {
 
     /// The exposure as the slider shows it, signed, to a tenth of a stop.
     private var exposureText: String {
-        exposureEV.formatted(.number.precision(.fractionLength(1)).sign(strategy: .always(includingZero: false)))
+        controls.exposureEV.formatted(.number.precision(.fractionLength(1)).sign(strategy: .always(includingZero: false)))
     }
 
     // MARK: LUTs
@@ -833,11 +815,11 @@ final class PhotoModel {
     }
 
     /// Renders the controls' look as a `.cube` LUT for LightCraft, which applies one to its
-    /// display-encoded sRGB, exposed as the exposure slider shows (``Engine/lut(controls:exposureEV:size:)``),
+    /// display-encoded sRGB, exposed as the exposure slider shows (``Engine/lut(controls:size:)``),
     /// titled ``lutName``, then opens the Export LUT panel to write it.
     func exportLUT() {
         guard let engine else { return }
-        let (controls, exposureEV, stops, title) = (controls, exposureEV, exposureText, lutName)
+        let (controls, stops, title) = (controls, exposureText, lutName)
         let comments = [
             "Made with SpektraMac from Spektrafilm by Andrea Volpato (https://github.com/andreavolpato/spektrafilm).",
             "Film and paper data: CC BY-SA 4.0.",
@@ -847,7 +829,7 @@ final class PhotoModel {
         ]
         Task {
             do {
-                let lut = try await engine.lut(controls: controls, exposureEV: exposureEV, size: Self.lutSize)
+                let lut = try await engine.lut(controls: controls, size: Self.lutSize)
                 lutFile = LUTFile(lut: lut, title: title, comments: comments, stops: stops)
                 isExportingLUT = true
             } catch {
@@ -912,7 +894,10 @@ final class PhotoModel {
                 ])
             }
             actionName = "Open Preset"
-            controls = checked(preset, from: url.lastPathComponent)
+            var opened = checked(preset, from: url.lastPathComponent)
+            // A preset carries no exposure (``Controls/preset()``): it stays the photo's.
+            opened.exposureEV = controls.exposureEV
+            controls = opened
             actionName = nil
             note("Opened preset \(url.lastPathComponent)")
         } catch {

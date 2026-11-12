@@ -49,18 +49,12 @@ private func bottomHalfRegions(faces: [CGRect] = []) -> MeteringRegions {
     #expect(readings.ev[MeteringMark.people.rawValue]! < readings.ev[MeteringMark.centreWeighted.rawValue]! - 0.9)
 }
 
-/// A mark Vision found nothing for has no reading; resolving it takes the next broader mark's.
-@Test func marksWithNothingFoundResolveBroader() {
+/// A mark Vision found nothing for has no reading, so no dot; As shot and Centre-weighted always do.
+@Test func marksWithNothingFoundHaveNoReading() {
     let nothing = WeightMap(values: Array(repeating: 0, count: 16), width: 4, height: 4)
     let none = MeteringReadings(luminance: split(top: 2, bottom: 0.02), width: 40, height: 30,
                                 regions: MeteringRegions(objects: nothing, people: nothing, faces: []))
-    #expect(none.ev[MeteringMark.objects.rawValue] == nil && none.ev[MeteringMark.people.rawValue] == nil)
-    #expect(none.reading(resolving: .faces).mark == .centreWeighted)
-    #expect(none.reading(resolving: .asShot).mark == .asShot)
-
-    let peopleOnly = MeteringReadings(luminance: split(top: 2, bottom: 0.02), width: 40, height: 30,
-                                      regions: bottomHalfRegions())
-    #expect(peopleOnly.reading(resolving: .faces).mark == .people)
+    #expect(none.ev.map { $0 != nil } == [true, true, false, false, false])
 }
 
 /// Vision's face boxes have their origin at the lower left; the weights' first row is the top.
@@ -97,8 +91,9 @@ extension PhotoOpeningTests {
         #expect(opened.meteringOverlays.values.allSatisfy { $0.width == image.width && $0.height == image.height })
 
         var controls = Controls()
+        controls.exposureEV = opened.metering.ev[MeteringMark.centreWeighted.rawValue]!
         let centreWeighted = try await engine.render(controls: controls, mode: .preview)
-        controls.exposureMark = .faces
+        controls.exposureEV = face
         let faces = try await engine.render(controls: controls, mode: .preview)
         #expect(centreWeighted.pixels != faces.pixels)
     }

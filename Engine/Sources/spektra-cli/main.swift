@@ -118,7 +118,7 @@ func benchmarkRenders(of url: URL) async throws {
             // A different exposure each time: the engine keeps the film's steps for renders that
             // only change the print, and this times every stage.
             var controls = Controls()
-            controls.exposureOffsetEV = Double(run) * 0.01
+            controls.exposureEV = Double(run) * 0.01
             let start = ContinuousClock.now
             _ = try await engine.render(controls: controls, mode: mode)
             best = min(best, ContinuousClock.now - start)

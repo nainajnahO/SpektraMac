@@ -50,8 +50,8 @@ film itself) and its scan.
 - **22 films, 9 papers.** Colour negatives (Portra, Ektar, Gold, Ultramax, Fujifilm Pro 400H, C200, X-Tra), slides
   (Velvia, Provia, Ektachrome, Kodachrome), motion picture film (Vision3 50D to 500T) and black-and-white film
   (Double-X, Tri-X Reversal), printed on Kodak and Fujifilm papers or Kodak's cinema print films, or viewed as film.
-- **The camera.** Exposure metered on the whole frame, or on the faces, people or objects it finds, and remembered
-  from photo to photo; highlight recovery; diffusion filters (Glimmerglass, Black Pro-Mist, Pro-Mist, CineBloom).
+- **The camera.** Exposure from the photo as shot, with a click to meter it on the whole frame, or on the faces,
+  people or objects it finds; highlight recovery; diffusion filters (Glimmerglass, Black Pro-Mist, Pro-Mist, CineBloom).
 - **The film.** Halation and light scattering in the emulsion, the DIR couplers behind film's saturation and edge
   contrast, grain from silver halide particles, and for black-and-white film the development time.
 - **The print.** Enlarger exposure and colour filters, preflash, paper contrast, a darkroom burn for bright skies,

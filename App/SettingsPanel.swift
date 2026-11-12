@@ -23,7 +23,7 @@ struct SettingsPanel: View {
                     AdjustmentGroup("Exposure", systemImage: "plusminus.circle", adjustment: .exposure) {
                         ExposureStrip()
                     } options: {
-                        ValueSlider("Exposure", value: $model.exposureEV, in: model.exposureRange, step: 0.1, neutral: 0,
+                        ValueSlider("Exposure", value: $model.controls.exposureEV, in: model.exposureRange, step: 0.1, neutral: 0,
                                     format: ExposureStrip.stops, unit: "EV")
                             .disabled(model.photo == nil)
                         ValueSlider("Highlight boost", value: $model.controls.highlightBoost, in: Controls.range(\.highlightBoost), step: 0.5,
@@ -541,12 +541,12 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
     }
 }
 
-/// The exposure, in stops over the photo as shot. Its dots are where each way of metering puts
-/// it for this photo (``MeteringMark``): a click on one puts the exposure on its mark, and a drag
-/// moves it from there, keeping that mark however near another it goes. A dot is in the accent
-/// colour while the exposure is on it. With the pointer on a dot, a bubble says what its mark
-/// meters, and the canvas tints the region it meters. As a drag passes a mark, the trackpad clicks.
-/// Marks whose dots would be less than a dot apart share one, whose bubble has each.
+/// The exposure, in stops over the photo as shot, where each photo opens. Its dots are where each
+/// way of metering puts it for this photo (``MeteringMark``): a click on one puts the exposure on
+/// its mark. A dot is in the accent colour while the exposure is on it. With the pointer on a dot, a
+/// bubble says what its mark meters, and the canvas tints the region it meters. As a drag passes a
+/// mark, the trackpad clicks. Marks whose dots would be less than a dot apart share one, whose
+/// bubble has each, and a click on it puts the exposure on the first's reading.
 struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
     /// The strip's width, for how near two readings put their dots.
@@ -557,26 +557,19 @@ struct ExposureStrip: View {
         let readings = model.photo.map { photo in
             MeteringMark.allCases.compactMap { mark in photo.metering.ev[mark.rawValue].map { (mark: mark, ev: $0) } }
         } ?? []
-        let here = model.marksAtExposure
+        let exposure = model.controls.exposureEV
+        // The marks the exposure is on: those whose reading is within half of a drag's step of it.
+        let here = readings.filter { abs($0.ev - exposure) < 0.05 }.map(\.mark)
         let range = model.exposureRange
-        // The mark the exposure counts from: the one chosen, or the one it starts from on a photo
-        // with no reading for it.
-        let counted = model.photo.map { $0.metering.reading(resolving: model.controls.exposureMark) }
         // Two dots' width, in stops: readings nearer than that would draw dots less than a dot apart,
         // which read as one, and a click between them could be for either. Before the strip is
         // measured, only the same reading.
         let nearby = width > 0 ? 2 * ThumbnailStrip.dotSize / width * (range.upperBound - range.lowerBound) : 0
         let dots = Self.dots(of: readings, within: nearby)
         let marks = dots.map { dot in
-            let note = if let counted, dot.marks.contains(counted.mark), counted.mark != model.controls.exposureMark {
-                "No \(model.controls.exposureMark.name.lowercased()) found in this photo, so the exposure counts from \(counted.mark.name)."
-            } else {
-                String?.none
-            }
-            return ThumbnailStrip.Mark(items: dot.marks.map { (systemImage: $0.systemImage, name: $0.name, about: $0.about) },
-                                       value: dot.value, isOn: dot.marks.contains { here.contains($0) }, note: note) {
-                // On a dot several marks share, the one the exposure counts from, if it's one of them.
-                model.putExposure(on: dot.marks.contains(model.controls.exposureMark) ? model.controls.exposureMark : dot.marks[0])
+            ThumbnailStrip.Mark(items: dot.marks.map { (systemImage: $0.systemImage, name: $0.name, about: $0.about) },
+                                value: dot.value, isOn: dot.marks.contains { here.contains($0) }) {
+                model.controls.exposureEV = readings.first { $0.mark == dot.marks[0] }!.ev
             }
         }
         // The dot under the pointer.
@@ -585,14 +578,14 @@ struct ExposureStrip: View {
         } set: { value in
             model.hoveredMarks = dots.first { $0.value == value }?.marks ?? []
         }
-        ThumbnailStrip("Exposure", value: $model.exposureEV, in: range, step: 0.1, format: Self.stops,
+        ThumbnailStrip("Exposure", value: $model.controls.exposureEV, in: range, step: 0.1, format: Self.stops,
                        unit: "EV", frames: model.strips[.exposure], marks: marks, hoveredMark: hoveredDot) {
             model.isAdjustingExposure = $0
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         // A click as a drag passes a mark: a fast one jumps over the step nearest it between two of
         // the pointer's moves, so a click on landing there would miss it.
-        .sensoryFeedback(.alignment, trigger: model.exposureEV) { old, new in
+        .sensoryFeedback(.alignment, trigger: exposure) { old, new in
             model.isAdjustingExposure && readings.contains { (old < $0.ev && $0.ev <= new) || (new <= $0.ev && $0.ev < old) }
         }
         .disabled(model.photo == nil)
@@ -1002,8 +995,6 @@ private struct ThumbnailStrip: View {
         let value: Double
         /// Whether the value is on it: it's then in the accent colour.
         let isOn: Bool
-        /// More for its bubble, under what it stands for.
-        let note: String?
         /// What a click on its dot does.
         let choose: () -> Void
 
@@ -1168,7 +1159,7 @@ private struct ThumbnailStrip: View {
     }
 
     /// What a dot's bubble shows: each thing it stands for, its symbol beside its name and what it
-    /// is, then its note.
+    /// is.
     private func bubble(for mark: Mark) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(mark.items, id: \.name) { item in
@@ -1182,9 +1173,6 @@ private struct ThumbnailStrip: View {
                         Text("\(item.about.prefix(1).uppercased())\(item.about.dropFirst()).")
                     }
                 }
-            }
-            if let note = mark.note {
-                Text(note)
             }
         }
         .padding(12)

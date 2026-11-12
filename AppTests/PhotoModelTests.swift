@@ -158,6 +158,37 @@ final class PhotoModelTests {
         #expect(model.controls == before)
     }
 
+    // MARK: Exposure
+
+    /// The exposure is the photo's: a film's saved defaults and a preset leave it as it is, and
+    /// every photo opens at its exposure as shot, with nothing to undo, so Undo can't bring the last
+    /// photo's exposure back (#360).
+    @Test func exposureIsThePhotos() async throws {
+        let model = try await openedModel()
+        let undoManager = UndoManager()
+        undoManager.groupsByEvent = false
+        model.undoManager = undoManager
+        let film = model.controls.film
+        event(undoManager) {
+            model.controls.exposureEV = 1.5
+            model.controls.grainSize = 0.5
+        }
+        model.makeDefaultForFilm()
+        event(undoManager) { model.film = "kodak_gold_200" }
+        event(undoManager) { model.film = film }
+        #expect(model.controls.exposureEV == 1.5 && model.controls.grainSize == 0.5)
+        var preset = Controls()
+        preset.grainSize = 0.8
+        let url = try write(preset, named: "Grain.json")
+        event(undoManager) { model.openPreset(url) }
+        #expect(model.controls.exposureEV == 1.5 && model.controls.grainSize == 0.8)
+
+        model.open(try photo(named: "Second.jpg", width: 300, height: 200))
+        try await until { model.photo?.name == "Second.jpg" }
+        #expect(model.controls.exposureEV == 0)
+        #expect(!undoManager.canUndo && !undoManager.canRedo)
+    }
+
     // MARK: Undo
 
     /// A slider's drag undoes in one step, named after its settings group; Open Preset and Restore
@@ -202,7 +233,7 @@ final class PhotoModelTests {
     /// exposure and the adjustments switched on.
     @Test func editRecordSummary() async throws {
         let model = try await makeModel()
-        model.controls.exposureOffsetEV = 0.5
+        model.controls.exposureEV = 0.5
         model.controls.burn = true
         model.controls.cameraDiffusion.active = true
         // Numbers as the app writes them, in this Mac's format.

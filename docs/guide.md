@@ -81,8 +81,9 @@ Accessibility › Display), the sliders' fill and value line are stronger.
 
 **Undo.** **Edit › Undo** (⌘Z) takes back the last change to the settings, and **Edit › Redo** (⇧⌘Z) makes it again. A
 whole drag of a slider, strip or the tone graph is one step, as is a choice from a menu, a group's ↩, an opened preset
-and Restore Factory Defaults (which also brings the film's saved defaults back). The settings carry over from photo to
-photo, and so does what you can undo.
+and Restore Factory Defaults (which also brings the film's saved defaults back). The settings but the exposure carry
+over from photo to photo; what you can undo doesn't: opening a photo starts afresh, so Undo only takes back changes to
+the photo that's open.
 
 **Speed.** While you drag a slider, the photo shows a quick preview without grain or blurs (about 20 ms on an M1
 Pro). When you let go, the finished look renders at the size of the window. Renders already made come back at once,
@@ -101,8 +102,9 @@ photo, saving, exporting a LUT, a preset), an alert says what and why.
 
 ### Exposure
 
-How much light reaches the film, in stops (EV). The strip shows the photo from 4 stops under to 8 stops over the
-exposure as shot.
+How much light reaches the film, in stops (EV) over the exposure as shot. Every photo opens at 0, as shot, and
+choosing a film or opening a preset leaves the exposure as it is. The strip shows the photo from 4 stops under to 8
+stops over.
 
 The dots under the strip are **metering marks**: the exposure each way of metering gives this photo. Point at a dot
 and a bubble opens under it with the mark's symbol, its name and what it meters, and the area it meters is tinted
@@ -110,30 +112,25 @@ pink. Click the dot to put the exposure on that mark. A dot is in the accent col
 Apple's Vision finds the faces, people and objects when the photo opens.
 
 Marks that read the same, or so nearly that their dots would almost touch, share one dot. Its bubble lists each of
-them, and a click puts the exposure on the mark you last clicked, if it's one of them, or else on the first in the
-table below.
+them, and a click puts the exposure on the first in the table below.
 
-Dragging the strip moves the exposure from the mark you clicked, and doesn't stop at the other dots. As a drag passes
-a dot, the trackpad clicks.
+Dragging the strip doesn't stop at the dots. As a drag passes a mark, the trackpad clicks.
 
 ![The Exposure strip held at the Objects mark: the rocket and its tower are tinted pink](images/metering.webp)
 
 | Mark | Meters |
 |---|---|
 | As shot | The exposure the camera chose. |
-| Centre-weighted | The whole frame, the centre counting most, as Spektrafilm and a film camera do. The default. |
+| Centre-weighted | The whole frame, the centre counting most, as Spektrafilm and a film camera do. |
 | Objects | What stands out in the frame. |
 | People | The people in the frame, so a bright sky or background can't darken them. |
 | Faces | The faces in the frame. |
 
-SpektraMac remembers the mark and how far you are from it, not the exposure itself. Set +0.3 EV from Faces, and the
-next photo opens 0.3 stops over its own faces' reading. If a photo has no faces (or no people, or nothing that stands
-out), the mark falls back, from Faces to People, People to Objects and Objects to Centre-weighted, and the bubble of
-the mark it falls back to says so.
+A mark the photo has no reading for, such as Faces in a photo without faces, has no dot.
 
 **Options:**
 
-- **Exposure** sets the same value with a slider, as an offset from the mark.
+- **Exposure** sets the same value with a slider.
 - **Highlight boost** (0–10 EV, off at 0) raises the brightest highlights before they reach the film, rebuilding
   light the camera clipped, so bright lights glow more.
 
