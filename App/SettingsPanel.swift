@@ -411,10 +411,12 @@ private struct DevelopmentRow: View {
 /// model renders previews alone and the change is one step to undo, as while a slider is held.
 /// With Full Keyboard Access the arrow keys go a stop. Scrolling over it goes a stop for each
 /// notch of a mouse's wheel or each `scrollPerStop` points on a trackpad, up or away for a longer
-/// time, each a step to undo as an arrow key's is; the settings don't scroll meanwhile. SwiftUI
-/// has no scrolling of its own for a control on the Mac (its Digital Crown's is the watch's), so
-/// it's AppKit's events, watched while the pointer is on the stopwatch. Accessibility finds an
-/// AppKit slider in its place (``SliderElement``), as for a ``ValueSlider``.
+/// time, round past the last and the first as the button on top does, with a click on the
+/// trackpad at each; each is a step to undo, as an arrow key's is, and the settings don't scroll
+/// meanwhile. SwiftUI has no scrolling of its own for a control on the Mac (its Digital Crown's
+/// is the watch's), so it's AppKit's events, watched while the pointer is on the stopwatch.
+/// Accessibility finds an AppKit slider in its place (``SliderElement``), as for a
+/// ``ValueSlider``.
 ///
 /// Till the pointer comes to it, it's tucked into the window's edge: on its side, its face's
 /// centre on the edge, its button poking out towards the settings. The pointer on the half in
@@ -495,7 +497,7 @@ private struct Stopwatch: View {
         VStack(spacing: 0) {
             // The button on top, on its stem. The case, after it in the stack, is drawn over it, so
             // it goes into the case as it's pressed.
-            Button(action: next) {
+            Button { goRound(by: 1) } label: {
                 VStack(spacing: 0) {
                     RoundedRectangle(cornerRadius: 1.5)
                         .frame(width: 14, height: 5)
@@ -553,8 +555,11 @@ private struct Stopwatch: View {
         }
         .onDisappear(perform: stopWatchingScrolling)
         .onChange(of: scrolledStops) { old, new in
-            step(by: new - old)
+            goRound(by: new - old)
         }
+        // A click on the trackpad at each time a scroll goes to, as a drag clicks at each it
+        // reaches.
+        .sensoryFeedback(.alignment, trigger: scrolledStops)
         // The area reaches past its place both ways: in the row's layout the stopwatch is as wide
         // as ever.
         .padding(.leading, -Self.outShift)
@@ -712,10 +717,14 @@ private struct Stopwatch: View {
         }
     }
 
-    /// To the next stop, and from the last back to the first: the button on top's.
-    private func next() {
+    /// To the stop `places` on from the value, round from the last to the first and back from the
+    /// first to the last: the button on top's, and scrolling's.
+    private func goRound(by places: Int) {
         guard let index = stops.firstIndex(of: value) else { return }
-        value = stops[(index + 1) % stops.count]
+        let target = ((index + places) % stops.count + stops.count) % stops.count
+        if target != index {
+            value = stops[target]
+        }
     }
 
     /// The button on top's look: pressed, it goes in, as a stopwatch's does. A plain button's
@@ -741,14 +750,10 @@ private struct Stopwatch: View {
         stops.min { abs(($0 - minutes).remainder(dividingBy: Self.turn)) < abs(($1 - minutes).remainder(dividingBy: Self.turn)) }!
     }
 
-    /// Towards the stop `places` on from the value, as far as the stops go: scrolling quickly can
-    /// count two before the stopwatch goes to them.
+    /// To the stop `places` on from the value, if there is one.
     private func step(by places: Int) {
-        guard let index = stops.firstIndex(of: value) else { return }
-        let target = min(max(index + places, 0), stops.count - 1)
-        if target != index {
-            value = stops[target]
-        }
+        guard let index = stops.firstIndex(of: value), stops.indices.contains(index + places) else { return }
+        value = stops[index + places]
     }
 
     private func endDrag() {
