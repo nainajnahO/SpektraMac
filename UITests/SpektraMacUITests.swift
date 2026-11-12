@@ -109,6 +109,24 @@ final class SpektraMacUITests: XCTestCase {
         XCTAssertNotNil(value(of: dial) { $0 == 9 }, "Undo after the drag, at \(dial.value ?? "none")")
     }
 
+    /// The button on top of the Development dial goes to the next measured time, and after the
+    /// longest back to the shortest (#352).
+    @MainActor func testDevelopmentButtonGoesToTheNextTime() throws {
+        try launch()
+        defer { quit() }
+        showTab(.film)
+        choose(film: "Kodak Double-X Negative Film 5222")
+        let dial = panel.sliders["Development"], next = panel.buttons["Next time"]
+        XCTAssert(dial.waitForExistence(timeout: 5), "Development on Double-X")
+        XCTAssertNotNil(value(of: dial) { $0 == 6.5 }, "the standard time, at \(dial.value ?? "none")")
+        next.click()
+        XCTAssertNotNil(value(of: dial) { $0 == 9 }, "once from 6.5, at \(dial.value ?? "none")")
+        next.click()
+        XCTAssertNotNil(value(of: dial) { $0 == 12 }, "twice, at \(dial.value ?? "none")")
+        next.click()
+        XCTAssertNotNil(value(of: dial) { $0 == 4 }, "three times, round to the shortest, at \(dial.value ?? "none")")
+    }
+
     // MARK: Metering marks
 
     /// A photo opens at its exposure as shot (#360). The pointer on a mark's dot opens a bubble

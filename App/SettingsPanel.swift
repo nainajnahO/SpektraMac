@@ -398,13 +398,13 @@ private struct DevelopmentRow: View {
 /// minute, the minutes' numbers within it, and a thin orange hand through a ring at the centre. A
 /// turn is 12 minutes, which both stocks' times are within, so a time is where a clock has that
 /// hour: 6.5 minutes at half past six. The rim's line at each stop is the hand's orange, longer
-/// and thicker than the rest, the `standard` one's most. The case and its button are only to
-/// look at.
+/// and thicker than the rest, the `standard` one's most.
 ///
 /// A click or a drag on the face sets the stop nearest the pointer's direction from the centre,
 /// and the hand sweeps to it the shorter way round, as it does to a time set any other way (by
 /// Undo, say). That stop's line grows a little while the pointer points at it, to show which a
-/// click sets. A drag clicks the trackpad at each stop it reaches; meanwhile the model renders
+/// click sets. The button on top goes to the next stop, and from the last back to the first,
+/// going in as it's pressed. A drag clicks the trackpad at each stop it reaches; meanwhile the model renders
 /// previews alone and the change is one step to undo, as while a slider is held. With Full
 /// Keyboard Access the arrow keys go a stop. Accessibility finds an AppKit slider in its place
 /// (``SliderElement``), as for a ``ValueSlider``.
@@ -449,14 +449,21 @@ private struct Stopwatch: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // The button on top, on its stem.
-            VStack(spacing: 0) {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .frame(width: 14, height: 5)
-                Rectangle()
-                    .frame(width: 6, height: 3)
+            // The button on top, on its stem. The case, after it in the stack, is drawn over it, so
+            // it goes into the case as it's pressed.
+            Button(action: next) {
+                VStack(spacing: 0) {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .frame(width: 14, height: 5)
+                    Rectangle()
+                        .frame(width: 6, height: 3)
+                }
+                .foregroundStyle(Self.steel)
+                .contentShape(.rect)
             }
-            .foregroundStyle(Self.steel)
+            .buttonStyle(PushedIn())
+            .accessibilityLabel("Next time")
+            .help("The next time, and after the longest the shortest")
             face
                 // On the face alone: on the whole stopwatch, its slider would take the stopwatch's
                 // frame, the case and button too, for accessibility.
@@ -481,6 +488,11 @@ private struct Stopwatch: View {
             let ticksAMinute = 10
             for tick in 0..<Int(Self.turn) * ticksAMinute {
                 let minutes = Double(tick) / Double(ticksAMinute)
+                // At a stop, the stop's own line, below, in place of this one: under it, this one
+                // would show through, a line of its own.
+                if stops.contains(where: { abs(($0 - minutes).remainder(dividingBy: Self.turn)) < 0.01 }) {
+                    continue
+                }
                 let isMinute = tick.isMultiple(of: ticksAMinute), isHalfMinute = tick.isMultiple(of: ticksAMinute / 2)
                 var line = Path()
                 line.move(to: point(at: minutes, inset: 0))
@@ -494,7 +506,7 @@ private struct Stopwatch: View {
             }
         }
         .overlay {
-            // Each stop's own line, over the rim's: views and not drawn on the canvas, for the one
+            // Each stop's own line, in the rim's: views and not drawn on the canvas, for the one
             // pointed at to grow smoothly.
             ZStack {
                 ForEach(stops, id: \.self) { stop in
@@ -575,6 +587,21 @@ private struct Stopwatch: View {
                               value = stops.min { abs($0 - asked) < abs($1 - asked) }!
                           },
                           move: { step(by: $0 ? 1 : -1) })
+        }
+    }
+
+    /// To the next stop, and from the last back to the first: the button on top's.
+    private func next() {
+        guard let index = stops.firstIndex(of: value) else { return }
+        value = stops[(index + 1) % stops.count]
+    }
+
+    /// The button on top's look: pressed, it goes in, as a stopwatch's does. A plain button's
+    /// would only dim.
+    private struct PushedIn: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .offset(y: configuration.isPressed ? 1.5 : 0)
         }
     }
 
