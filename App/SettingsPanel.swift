@@ -475,7 +475,7 @@ private struct Stopwatch: View {
     /// keeps it out.
     private static let area = CGSize(width: outShift + size.width + SettingsPanel.trailingMargin, height: size.height)
     /// The points scrolled on a trackpad for a stop.
-    private static let scrollPerStop: CGFloat = 16
+    private static let scrollPerStop: CGFloat = 40
 
     /// Out of the window's edge, and upright in its place.
     private var isOut: Bool { isHovered || isDragging || focus != nil }
