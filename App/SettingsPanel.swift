@@ -390,8 +390,7 @@ private struct DevelopmentRow: View {
                 .accessibilityHidden(true)
                 .help(help)
                 Spacer(minLength: 8)
-                Stopwatch(title: "Development", value: time, stops: times.measured, standard: times.standard,
-                          valueText: name, help: help)
+                Stopwatch(title: "Development", value: time, stops: times.measured, valueText: name, help: help)
             }
         }
     }
@@ -402,7 +401,7 @@ private struct DevelopmentRow: View {
 /// minute, the minutes' numbers within it, and a thin orange hand through a ring at the centre. A
 /// turn is 12 minutes, which both stocks' times are within, so a time is where a clock has that
 /// hour: 6.5 minutes at half past six. The rim's line at each stop is the hand's orange, longer
-/// and thicker than the rest, the `standard` one's most.
+/// and thicker than the rest, all alike: the time under the row's title says which is standard.
 ///
 /// A click or a drag on the face sets the stop nearest the pointer's direction from the centre,
 /// and the hand sweeps to it the shorter way round, as it does to a time set any other way (by
@@ -428,7 +427,6 @@ private struct Stopwatch: View {
     let title: String
     @Binding var value: Double
     let stops: [Double]
-    let standard: Double
     let valueText: String
     let help: String
     /// Where the hand points, in minutes: at the value, or on its way there. It counts on past a
@@ -470,11 +468,10 @@ private struct Stopwatch: View {
         case button, face
     }
 
-    init(title: String, value: Binding<Double>, stops: [Double], standard: Double, valueText: String, help: String) {
+    init(title: String, value: Binding<Double>, stops: [Double], valueText: String, help: String) {
         self.title = title
         _value = value
         self.stops = stops
-        self.standard = standard
         self.valueText = valueText
         self.help = help
         _handMinutes = State(initialValue: value.wrappedValue)
@@ -570,7 +567,7 @@ private struct Stopwatch: View {
                 ForEach(stops, id: \.self) { stop in
                     Rectangle()
                         .fill(.orange)
-                        .frame(width: stop == standard ? 3 : 2, height: Self.radius * (stop == standard ? 0.2 : 0.15))
+                        .frame(width: 3, height: Self.radius * 0.2)
                         .scaleEffect(stop == pointedStop ? 1.3 : 1, anchor: .top)
                         // At the rim, turned to its time.
                         .frame(maxHeight: .infinity, alignment: .top)
