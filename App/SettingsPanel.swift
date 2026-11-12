@@ -415,9 +415,10 @@ private struct DevelopmentRow: View {
 ///
 /// Till the pointer comes to it, it's tucked into the window's edge: on its side, its face's
 /// centre on the edge, its button poking out towards the settings. The pointer on the half in
-/// sight brings it out, slid and turned upright into its place, and it tucks back as the pointer
-/// leaves its place and the margin to the edge. A drag on it, or the keyboard's focus, keeps it
-/// out. Its place in the row is the same either way.
+/// sight brings it out, slid and turned upright to stand a little left of its place in the row,
+/// and it tucks back as the pointer leaves where it stands, its place and the margin to the edge.
+/// A drag on it, or the keyboard's focus, keeps it out. Its place in the row is the same either
+/// way.
 ///
 /// Drawn here, as the system has none (#352): AppKit's circular slider is a 24-point knob that
 /// draws no marks, the Mac's clock, a date picker's, is for a time of day, and the Clock app's
@@ -456,8 +457,11 @@ private struct Stopwatch: View {
     private static let size = CGSize(width: diameter + 2 * caseWidth, height: buttonHeight + diameter + 2 * caseWidth)
     /// The face's centre in the stopwatch: what it turns about as it's tucked.
     private static let centre = CGPoint(x: size.width / 2, y: buttonHeight + caseWidth + radius)
-    /// Its place and the margin to the window's edge, where the pointer keeps it out.
-    private static let area = CGSize(width: size.width + SettingsPanel.trailingMargin, height: size.height)
+    /// How far left of its place in the row it stands when out.
+    private static let outShift: CGFloat = 12
+    /// Where it stands when out, its place and the margin to the window's edge: where the pointer
+    /// keeps it out.
+    private static let area = CGSize(width: outShift + size.width + SettingsPanel.trailingMargin, height: size.height)
 
     /// Out of the window's edge, and upright in its place.
     private var isOut: Bool { isHovered || isDragging || focus != nil }
@@ -524,7 +528,9 @@ private struct Stopwatch: View {
                 isHovered = false
             }
         }
-        // The margin is the panel's: in the row's layout the stopwatch is as wide as ever.
+        // The area reaches past its place both ways: in the row's layout the stopwatch is as wide
+        // as ever.
+        .padding(.leading, -Self.outShift)
         .padding(.trailing, -SettingsPanel.trailingMargin)
     }
 
