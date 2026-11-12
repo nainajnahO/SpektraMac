@@ -167,9 +167,13 @@ struct SettingsPanel: View {
             }
             .padding(.vertical)
             .padding(.leading, 15)
-            .padding(.trailing, 20)
+            .padding(.trailing, Self.trailingMargin)
         }
     }
+
+    /// The space right of the settings, to the window's edge: the Development stopwatch tucks
+    /// into the edge across it.
+    static let trailingMargin: CGFloat = 20
 }
 
 /// A group of settings as Photos lays out an adjustment: a disclosure headed by its symbol and
@@ -404,10 +408,16 @@ private struct DevelopmentRow: View {
 /// and the hand sweeps to it the shorter way round, as it does to a time set any other way (by
 /// Undo, say). That stop's line grows a little while the pointer points at it, to show which a
 /// click sets. The button on top goes to the next stop, and from the last back to the first,
-/// going in as it's pressed. A drag clicks the trackpad at each stop it reaches; meanwhile the model renders
-/// previews alone and the change is one step to undo, as while a slider is held. With Full
-/// Keyboard Access the arrow keys go a stop. Accessibility finds an AppKit slider in its place
-/// (``SliderElement``), as for a ``ValueSlider``.
+/// going in as it's pressed. A drag clicks the trackpad at each stop it reaches; meanwhile the
+/// model renders previews alone and the change is one step to undo, as while a slider is held.
+/// With Full Keyboard Access the arrow keys go a stop. Accessibility finds an AppKit slider in its
+/// place (``SliderElement``), as for a ``ValueSlider``.
+///
+/// Till the pointer comes to it, it's tucked into the window's edge: on its side, its face's
+/// centre on the edge, its button poking out towards the settings. The pointer on the half in
+/// sight brings it out, slid and turned upright into its place, and it tucks back as the pointer
+/// leaves its place and the margin to the edge. A drag on it, or the keyboard's focus, keeps it
+/// out. Its place in the row is the same either way.
 ///
 /// Drawn here, as the system has none (#352): AppKit's circular slider is a 24-point knob that
 /// draws no marks, the Mac's clock, a date picker's, is for a time of day, and the Clock app's
@@ -426,6 +436,10 @@ private struct Stopwatch: View {
     @State private var isDragging = false
     /// The stop the pointer points at, hovering or dragging: the one a click sets.
     @State private var pointedStop: Double?
+    /// Whether the pointer is on the stopwatch, or in its place or the margin to the window's edge.
+    @State private var isHovered = false
+    /// The part with the keyboard's focus, if one has.
+    @FocusState private var focus: Part?
     @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
 
@@ -435,7 +449,22 @@ private struct Stopwatch: View {
     private static let diameter: CGFloat = 84
     private static let radius = diameter / 2
     private static let caseWidth: CGFloat = 4
+    /// The button on top's, with its stem.
+    private static let buttonHeight: CGFloat = 8
     private static let steel = Color.gray.gradient
+    /// The stopwatch's, its button too.
+    private static let size = CGSize(width: diameter + 2 * caseWidth, height: buttonHeight + diameter + 2 * caseWidth)
+    /// The face's centre in the stopwatch: what it turns about as it's tucked.
+    private static let centre = CGPoint(x: size.width / 2, y: buttonHeight + caseWidth + radius)
+    /// Its place and the margin to the window's edge, where the pointer keeps it out.
+    private static let area = CGSize(width: size.width + SettingsPanel.trailingMargin, height: size.height)
+
+    /// Out of the window's edge, and upright in its place.
+    private var isOut: Bool { isHovered || isDragging || focus != nil }
+
+    private enum Part {
+        case button, face
+    }
 
     init(title: String, value: Binding<Double>, stops: [Double], standard: Double, valueText: String, help: String) {
         self.title = title
@@ -456,7 +485,7 @@ private struct Stopwatch: View {
                     RoundedRectangle(cornerRadius: 1.5)
                         .frame(width: 14, height: 5)
                     Rectangle()
-                        .frame(width: 6, height: 3)
+                        .frame(width: 6, height: Self.buttonHeight - 5)
                 }
                 .foregroundStyle(Self.steel)
                 .contentShape(.rect)
@@ -464,6 +493,7 @@ private struct Stopwatch: View {
             .buttonStyle(PushedIn())
             .accessibilityLabel("Next time")
             .help("The next time, and after the longest the shortest")
+            .focused($focus, equals: .button)
             face
                 // On the face alone: on the whole stopwatch, its slider would take the stopwatch's
                 // frame, the case and button too, for accessibility.
@@ -474,6 +504,28 @@ private struct Stopwatch: View {
                 }
         }
         .opacity(isEnabled ? 1 : 0.5)
+        // Tucked: turned onto its side, its button towards the settings, and slid right till its
+        // face's centre is on the window's edge, where the panel's scroll view cuts it off.
+        .rotationEffect(isOut ? .zero : .degrees(-90),
+                        anchor: UnitPoint(x: Self.centre.x / Self.size.width, y: Self.centre.y / Self.size.height))
+        .offset(x: isOut ? 0 : Self.area.width - Self.centre.x)
+        .animation(.smooth(duration: 0.35), value: isOut)
+        .frame(width: Self.area.width, alignment: .leading)
+        .contentShape(.rect)
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let location):
+                // Tucked, only the half in sight brings it out: the face's centre to the
+                // button's end, turned to the left of the edge. Out, all the area keeps it out.
+                if isOut || location.x >= Self.area.width - Self.centre.y {
+                    isHovered = true
+                }
+            case .ended:
+                isHovered = false
+            }
+        }
+        // The margin is the panel's: in the row's layout the stopwatch is as wide as ever.
+        .padding(.trailing, -SettingsPanel.trailingMargin)
     }
 
     /// The face, and all that's done on it.
@@ -556,7 +608,15 @@ private struct Stopwatch: View {
                     value = stop
                 }
             }
-            .onEnded { _ in endDrag() })
+            .onEnded { drag in
+                endDrag()
+                // Hovering may have ended on the way: where the drag ends says whether the pointer
+                // is still in the area that keeps the stopwatch out. The face is the button and the
+                // case's width from the area's corner.
+                let inArea = CGPoint(x: drag.location.x + Self.caseWidth,
+                                     y: drag.location.y + Self.buttonHeight + Self.caseWidth)
+                isHovered = CGRect(origin: .zero, size: Self.area).contains(inArea)
+            })
         .onChange(of: value) { _, value in
             withAnimation(.smooth(duration: 0.3)) {
                 // The shorter way round: the gap as a part of a turn, half of one at most.
@@ -571,6 +631,7 @@ private struct Stopwatch: View {
             }
         }
         .focusable(interactions: .activate)
+        .focused($focus, equals: .face)
         .onMoveCommand { direction in
             switch direction {
             case .left, .down: step(by: -1)

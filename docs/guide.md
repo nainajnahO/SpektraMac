@@ -167,8 +167,9 @@ Otherwise the settings stay as they are.
 
 Under Kodak Double-X, how long the film is developed for: 4, 5, 6.5 (the standard), 9 or 12 minutes, the times its
 curves were measured at. Longer gives a more contrasty negative, as in a darkroom. Set it on the dial, a stopwatch of
-12 minutes with an orange mark at each time: click a mark, drag the hand round to it, or press the button on top for
-the next time. Colour films, and Tri-X Reversal, are developed one way, and have no such dial.
+12 minutes with an orange mark at each time. It lies on its side, half in the window's right edge, till the pointer
+comes to it; then it slides out upright. Click a mark, drag the hand round to it, or press the button on top for the
+next time. Colour films, and Tri-X Reversal, are developed one way, and have no such dial.
 
 <table>
   <tr>
