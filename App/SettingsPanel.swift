@@ -379,7 +379,14 @@ private struct DevelopmentRow: View {
             HStack {
                 // The time under the title: on one line beside the face, they'd be wider than the panel.
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Development")
+                    HStack(spacing: 4) {
+                        Text("Development")
+                        // The row's help on an icon of its own: over the stopwatch it would come up
+                        // as the time's being set.
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.secondary)
+                            .help("How long it's developed for, from the times its curves were measured at. Longer gives more contrast.")
+                    }
                     Text(name)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
@@ -387,8 +394,6 @@ private struct DevelopmentRow: View {
                 .fixedSize()
                 // The face's slider says both.
                 .accessibilityHidden(true)
-                // On the title alone: over the stopwatch it would come up as the time's being set.
-                .help("How long it's developed for, from the times its curves were measured at. Longer gives more contrast.")
                 Spacer(minLength: 8)
                 Stopwatch(title: "Development", value: time, stops: times.measured, valueText: name)
             }
