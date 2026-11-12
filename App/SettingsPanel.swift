@@ -376,7 +376,6 @@ private struct DevelopmentRow: View {
             let name = times.developed == times.standard ? "\(minutesName) (standard)" : minutesName
             let time = Binding(get: { times.developed },
                                set: { model.controls[keyPath: minutes] = $0 == times.standard ? nil : $0 })
-            let help = "How long it's developed for, from the times its curves were measured at. Longer gives more contrast."
             HStack {
                 // The time under the title: on one line beside the face, they'd be wider than the panel.
                 VStack(alignment: .leading, spacing: 2) {
@@ -388,9 +387,10 @@ private struct DevelopmentRow: View {
                 .fixedSize()
                 // The face's slider says both.
                 .accessibilityHidden(true)
-                .help(help)
+                // On the title alone: over the stopwatch it would come up as the time's being set.
+                .help("How long it's developed for, from the times its curves were measured at. Longer gives more contrast.")
                 Spacer(minLength: 8)
-                Stopwatch(title: "Development", value: time, stops: times.measured, valueText: name, help: help)
+                Stopwatch(title: "Development", value: time, stops: times.measured, valueText: name)
             }
         }
     }
@@ -434,7 +434,6 @@ private struct Stopwatch: View {
     @Binding var value: Double
     let stops: [Double]
     let valueText: String
-    let help: String
     /// Where the hand points, in minutes: at the value, or on its way there. It counts on past a
     /// turn's end and back before its start, for the hand to go the shorter way round.
     @State private var handMinutes: Double
@@ -484,12 +483,11 @@ private struct Stopwatch: View {
         case button, face
     }
 
-    init(title: String, value: Binding<Double>, stops: [Double], valueText: String, help: String) {
+    init(title: String, value: Binding<Double>, stops: [Double], valueText: String) {
         self.title = title
         _value = value
         self.stops = stops
         self.valueText = valueText
-        self.help = help
         _handMinutes = State(initialValue: value.wrappedValue)
     }
 
@@ -509,12 +507,8 @@ private struct Stopwatch: View {
             }
             .buttonStyle(PushedIn())
             .accessibilityLabel("Next time")
-            .help("The next time, and after the longest the shortest")
             .focused($focus, equals: .button)
             face
-                // On the face alone: on the whole stopwatch, its slider would take the stopwatch's
-                // frame, the case and button too, for accessibility.
-                .help(help)
                 .padding(Self.caseWidth)
                 .background {
                     Circle().strokeBorder(Self.steel, lineWidth: Self.caseWidth)

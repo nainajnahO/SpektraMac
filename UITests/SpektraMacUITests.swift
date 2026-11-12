@@ -373,8 +373,7 @@ final class SpektraMacUITests: XCTestCase {
     }
 
     /// Brings the Development dial out of the window's edge, where it's tucked till the pointer
-    /// comes to it, leaving the pointer in the margin right of it, off the face and its help tag
-    /// (#352).
+    /// comes to it, leaving the pointer in the margin right of it, off the face (#352).
     @MainActor private func bringOut(_ dial: XCUIElement) {
         // The face's centre is at one height, tucked or out: the slider's middle.
         panel.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0))
