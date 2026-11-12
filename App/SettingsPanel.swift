@@ -357,8 +357,8 @@ private struct ChoiceRow<Value: Hashable>: View {
 }
 
 /// The Development row under a black-and-white film or print film with a choice of development
-/// times: those its curves were measured at, in minutes, on a stopwatch's face
-/// (``StopwatchFace``) with the time beside it. Choosing the standard one sets none, as the
+/// times: those its curves were measured at, in minutes, on a stopwatch
+/// (``Stopwatch``) with the time beside it. Choosing the standard one sets none, as the
 /// controls are before a choice. Under any other stock, nothing.
 private struct DevelopmentRow: View {
     @Environment(PhotoModel.self) private var model
@@ -386,57 +386,91 @@ private struct DevelopmentRow: View {
                 .accessibilityHidden(true)
                 .help(help)
                 Spacer(minLength: 8)
-                StopwatchFace(title: "Development", value: time, stops: times.measured, standard: times.standard,
-                              valueText: name)
-                    .help(help)
+                Stopwatch(title: "Development", value: time, stops: times.measured, standard: times.standard,
+                          valueText: name, help: help)
             }
         }
     }
 }
 
-/// A stopwatch's face to set a time among `stops` on, after the Clock app's: a rim of fine ticks,
-/// ten a minute, the minutes' numbers within it, and a thin orange hand through a ring at the
-/// centre. A turn is 12 minutes, which both stocks' times are within, so a time is where a clock
-/// has that hour: 6.5 minutes at half past six. The rim's line at each stop is the hand's orange,
-/// longer and thicker than the rest, the `standard` one's most.
+/// A stopwatch to set a time among `stops` on: a face after the Clock app's stopwatch, in a
+/// mechanical stopwatch's case with its button on top. The face has a rim of fine ticks, ten a
+/// minute, the minutes' numbers within it, and a thin orange hand through a ring at the centre. A
+/// turn is 12 minutes, which both stocks' times are within, so a time is where a clock has that
+/// hour: 6.5 minutes at half past six. The rim's line at each stop is the hand's orange, longer
+/// and thicker than the rest, the `standard` one's most. The case and its button are only to
+/// look at.
 ///
 /// A click or a drag on the face sets the stop nearest the pointer's direction from the centre,
 /// and the hand sweeps to it the shorter way round, as it does to a time set any other way (by
-/// Undo, say). A drag clicks the trackpad at each stop it reaches; meanwhile the model renders
+/// Undo, say). That stop's line grows a little while the pointer points at it, to show which a
+/// click sets. A drag clicks the trackpad at each stop it reaches; meanwhile the model renders
 /// previews alone and the change is one step to undo, as while a slider is held. With Full
 /// Keyboard Access the arrow keys go a stop. Accessibility finds an AppKit slider in its place
 /// (``SliderElement``), as for a ``ValueSlider``.
 ///
 /// Drawn here, as the system has none (#352): AppKit's circular slider is a 24-point knob that
 /// draws no marks, the Mac's clock, a date picker's, is for a time of day, and the Clock app's
-/// stopwatch is its own drawing. As wide as the row has room for beside the longest time.
-private struct StopwatchFace: View {
+/// stopwatch is its own drawing. The face's parts are in proportion to its radius, so its size is
+/// one number.
+private struct Stopwatch: View {
     let title: String
     @Binding var value: Double
     let stops: [Double]
     let standard: Double
     let valueText: String
+    let help: String
     /// Where the hand points, in minutes: at the value, or on its way there. It counts on past a
     /// turn's end and back before its start, for the hand to go the shorter way round.
     @State private var handMinutes: Double
     @State private var isDragging = false
+    /// The stop the pointer points at, hovering or dragging: the one a click sets.
+    @State private var pointedStop: Double?
     @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
 
     /// The minutes of a full turn.
     private nonisolated static let turn = 12.0
-    private static let diameter: CGFloat = 132
+    /// The face's, within the case.
+    private static let diameter: CGFloat = 84
+    private static let radius = diameter / 2
+    private static let caseWidth: CGFloat = 4
+    private static let steel = Color.gray.gradient
 
-    init(title: String, value: Binding<Double>, stops: [Double], standard: Double, valueText: String) {
+    init(title: String, value: Binding<Double>, stops: [Double], standard: Double, valueText: String, help: String) {
         self.title = title
         _value = value
         self.stops = stops
         self.standard = standard
         self.valueText = valueText
+        self.help = help
         _handMinutes = State(initialValue: value.wrappedValue)
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            // The button on top, on its stem.
+            VStack(spacing: 0) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .frame(width: 14, height: 5)
+                Rectangle()
+                    .frame(width: 6, height: 3)
+            }
+            .foregroundStyle(Self.steel)
+            face
+                // On the face alone: on the whole stopwatch, its slider would take the stopwatch's
+                // frame, the case and button too, for accessibility.
+                .help(help)
+                .padding(Self.caseWidth)
+                .background {
+                    Circle().strokeBorder(Self.steel, lineWidth: Self.caseWidth)
+                }
+        }
+        .opacity(isEnabled ? 1 : 0.5)
+    }
+
+    /// The face, and all that's done on it.
+    private var face: some View {
         Canvas { context, size in
             let centre = CGPoint(x: size.width / 2, y: size.height / 2), radius = min(size.width, size.height) / 2
             /// Where the hand points for `minutes`, `inset` from the rim.
@@ -450,27 +484,36 @@ private struct StopwatchFace: View {
                 let isMinute = tick.isMultiple(of: ticksAMinute), isHalfMinute = tick.isMultiple(of: ticksAMinute / 2)
                 var line = Path()
                 line.move(to: point(at: minutes, inset: 0))
-                line.addLine(to: point(at: minutes, inset: isMinute ? 8 : isHalfMinute ? 6 : 4))
+                line.addLine(to: point(at: minutes, inset: radius * (isMinute ? 0.12 : isHalfMinute ? 0.09 : 0.06)))
                 context.stroke(line, with: .style(isMinute ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary)),
                                lineWidth: isMinute ? 1.5 : 1)
             }
             for minute in 1...Int(Self.turn) {
-                context.draw(Text(verbatim: "\(minute)").font(.system(size: 13)),
-                             at: point(at: Double(minute), inset: 25))
+                context.draw(Text(verbatim: "\(minute)").font(.system(size: radius * 0.22)),
+                             at: point(at: Double(minute), inset: radius * 0.4))
             }
-            // Each stop's own line, over the rim's.
-            for stop in stops {
-                var line = Path()
-                line.move(to: point(at: stop, inset: 0))
-                line.addLine(to: point(at: stop, inset: stop == standard ? 13 : 10))
-                context.stroke(line, with: .color(.orange), lineWidth: stop == standard ? 3 : 2)
+        }
+        .overlay {
+            // Each stop's own line, over the rim's: views and not drawn on the canvas, for the one
+            // pointed at to grow smoothly.
+            ZStack {
+                ForEach(stops, id: \.self) { stop in
+                    Rectangle()
+                        .fill(.orange)
+                        .frame(width: stop == standard ? 3 : 2, height: Self.radius * (stop == standard ? 0.2 : 0.15))
+                        .scaleEffect(stop == pointedStop ? 1.3 : 1, anchor: .top)
+                        // At the rim, turned to its time.
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .rotationEffect(.degrees(stop / Self.turn * 360))
+                }
             }
+            .animation(.snappy(duration: 0.15), value: pointedStop)
         }
         .overlay {
             // The hand, drawn to 12 and turned to its time: a turn is what SwiftUI animates.
             Path { hand in
-                let centre = Self.diameter / 2, ring: CGFloat = 3.5
-                hand.move(to: CGPoint(x: centre, y: 2))
+                let centre = Self.radius, ring = Self.radius * 0.06
+                hand.move(to: CGPoint(x: centre, y: Self.radius * 0.03))
                 hand.addLine(to: CGPoint(x: centre, y: centre - ring))
                 hand.addEllipse(in: CGRect(x: centre - ring, y: centre - ring, width: 2 * ring, height: 2 * ring))
                 // On through the centre, a fifth of the radius past it.
@@ -481,18 +524,22 @@ private struct StopwatchFace: View {
             .rotationEffect(.degrees(handMinutes / Self.turn * 360))
         }
         .frame(width: Self.diameter, height: Self.diameter)
-        .opacity(isEnabled ? 1 : 0.5)
         .contentShape(.circle)
+        .onContinuousHover { phase in
+            if case .active(let location) = phase {
+                pointedStop = stop(at: location)
+            } else {
+                pointedStop = nil
+            }
+        }
         .gesture(DragGesture(minimumDistance: 0)
             .onChanged { drag in
                 if !isDragging {
                     isDragging = true
                     model.isAdjusting = true
                 }
-                let across = drag.location.x - Self.diameter / 2, down = drag.location.y - Self.diameter / 2
-                // At the centre the pointer has no direction, and a tremble there would spin the hand.
-                guard hypot(across, down) >= 6 else { return }
-                let stop = nearestStop(to: atan2(across, -down) / (2 * .pi) * Self.turn)
+                guard let stop = stop(at: drag.location) else { return }
+                pointedStop = stop
                 if stop != value {
                     value = stop
                 }
@@ -529,6 +576,14 @@ private struct StopwatchFace: View {
                           },
                           move: { step(by: $0 ? 1 : -1) })
         }
+    }
+
+    /// The stop nearest the direction of `location` from the face's centre. None at the centre: the
+    /// pointer has no direction there, and a tremble would spin the hand.
+    private func stop(at location: CGPoint) -> Double? {
+        let across = location.x - Self.radius, down = location.y - Self.radius
+        guard hypot(across, down) >= 6 else { return nil }
+        return nearestStop(to: atan2(across, -down) / (2 * .pi) * Self.turn)
     }
 
     /// Of the stops, the one nearest `minutes` around the face, where a turn's end is its start.
