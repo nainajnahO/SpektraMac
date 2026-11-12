@@ -409,8 +409,12 @@ private struct DevelopmentRow: View {
 /// click sets. The button on top goes to the next stop, and from the last back to the first,
 /// going in as it's pressed. A drag clicks the trackpad at each stop it reaches; meanwhile the
 /// model renders previews alone and the change is one step to undo, as while a slider is held.
-/// With Full Keyboard Access the arrow keys go a stop. Accessibility finds an AppKit slider in its
-/// place (``SliderElement``), as for a ``ValueSlider``.
+/// With Full Keyboard Access the arrow keys go a stop. Scrolling over it goes a stop for each
+/// notch of a mouse's wheel or each `scrollPerStop` points on a trackpad, up or away for a longer
+/// time, each a step to undo as an arrow key's is; the settings don't scroll meanwhile. SwiftUI
+/// has no scrolling of its own for a control on the Mac (its Digital Crown's is the watch's), so
+/// it's AppKit's events, watched while the pointer is on the stopwatch. Accessibility finds an
+/// AppKit slider in its place (``SliderElement``), as for a ``ValueSlider``.
 ///
 /// Till the pointer comes to it, it's tucked into the window's edge: on its side, its face's
 /// centre on the edge, its button poking out towards the settings. The pointer on the half in
@@ -439,6 +443,14 @@ private struct Stopwatch: View {
     @State private var isHovered = false
     /// The part with the keyboard's focus, if one has.
     @FocusState private var focus: Part?
+    /// AppKit's watch on scrolling, while the pointer is on the stopwatch.
+    @State private var scrollMonitor: Any?
+    /// The points scrolled on a trackpad towards the next stop.
+    @State private var scrolled: CGFloat = 0
+    /// The stops scrolled, on less back, since the stopwatch came. AppKit's watch counts them and
+    /// doesn't go to them itself: it holds the stopwatch as it was when the watch began, and with
+    /// it the time then.
+    @State private var scrolledStops = 0
     @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
 
@@ -460,6 +472,8 @@ private struct Stopwatch: View {
     /// Where it stands when out, its place and the margin to the window's edge: where the pointer
     /// keeps it out.
     private static let area = CGSize(width: outShift + size.width + SettingsPanel.trailingMargin, height: size.height)
+    /// The points scrolled on a trackpad for a stop.
+    private static let scrollPerStop: CGFloat = 16
 
     /// Out of the window's edge, and upright in its place.
     private var isOut: Bool { isHovered || isDragging || focus != nil }
@@ -524,6 +538,22 @@ private struct Stopwatch: View {
             case .ended:
                 isHovered = false
             }
+        }
+        .onChange(of: isHovered) { _, isHovered in
+            if isHovered {
+                scrolled = 0
+                scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+                    MainActor.assumeIsolated { scroll(event) }
+                    // Not on to the panel: it would scroll the settings from under the pointer.
+                    return nil
+                }
+            } else {
+                stopWatchingScrolling()
+            }
+        }
+        .onDisappear(perform: stopWatchingScrolling)
+        .onChange(of: scrolledStops) { old, new in
+            step(by: new - old)
         }
         // The area reaches past its place both ways: in the row's layout the stopwatch is as wide
         // as ever.
@@ -654,6 +684,34 @@ private struct Stopwatch: View {
         }
     }
 
+    /// A stop on for a scroll up or away, or back for one down or towards, whichever way the
+    /// system scrolls a page: for each notch of a mouse's wheel, or each `scrollPerStop` points on
+    /// a trackpad.
+    private func scroll(_ event: NSEvent) {
+        // The glide after the fingers leave the trackpad would run on through the stops.
+        guard event.momentumPhase.isEmpty else { return }
+        if event.phase == .began {
+            scrolled = 0
+        }
+        let up = event.isDirectionInvertedFromDevice ? -event.scrollingDeltaY : event.scrollingDeltaY
+        if event.hasPreciseScrollingDeltas {
+            scrolled += up
+            if abs(scrolled) >= Self.scrollPerStop {
+                scrolledStops += scrolled > 0 ? 1 : -1
+                scrolled = 0
+            }
+        } else if up != 0 {
+            scrolledStops += up > 0 ? 1 : -1
+        }
+    }
+
+    private func stopWatchingScrolling() {
+        if let scrollMonitor {
+            NSEvent.removeMonitor(scrollMonitor)
+            self.scrollMonitor = nil
+        }
+    }
+
     /// To the next stop, and from the last back to the first: the button on top's.
     private func next() {
         guard let index = stops.firstIndex(of: value) else { return }
@@ -683,10 +741,14 @@ private struct Stopwatch: View {
         stops.min { abs(($0 - minutes).remainder(dividingBy: Self.turn)) < abs(($1 - minutes).remainder(dividingBy: Self.turn)) }!
     }
 
-    /// To the stop `places` on from the value, if there is one.
+    /// Towards the stop `places` on from the value, as far as the stops go: scrolling quickly can
+    /// count two before the stopwatch goes to them.
     private func step(by places: Int) {
-        guard let index = stops.firstIndex(of: value), stops.indices.contains(index + places) else { return }
-        value = stops[index + places]
+        guard let index = stops.firstIndex(of: value) else { return }
+        let target = min(max(index + places, 0), stops.count - 1)
+        if target != index {
+            value = stops[target]
+        }
     }
 
     private func endDrag() {
