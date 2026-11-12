@@ -368,6 +368,9 @@ private struct DevelopmentRow: View {
     @Environment(PhotoModel.self) private var model
     let stock: String
     let minutes: WritableKeyPath<Controls, Double?>
+    @State private var showsHelp = false
+
+    private static let help = "How long it's developed for, from the times its curves were measured at. Longer gives more contrast."
 
     var body: some View {
         if let times = model.developmentTimes(of: stock, asking: model.controls[keyPath: minutes]) {
@@ -381,19 +384,32 @@ private struct DevelopmentRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 4) {
                         Text("Development")
-                        // The row's help on an icon of its own: over the stopwatch it would come up
-                        // as the time's being set.
-                        Image(systemName: "info.circle")
-                            .foregroundStyle(.secondary)
-                            .help("How long it's developed for, from the times its curves were measured at. Longer gives more contrast.")
+                            // The face's slider says it.
+                            .accessibilityHidden(true)
+                        // The row's help on a button of its own, a help tag on hover and a popover
+                        // on a click: over the stopwatch it would come up as the time's being set.
+                        Button {
+                            showsHelp.toggle()
+                        } label: {
+                            Image(systemName: "info.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("About development")
+                        .help(Self.help)
+                        .popover(isPresented: $showsHelp) {
+                            Text(Self.help)
+                                .frame(width: 220, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding()
+                        }
                     }
                     Text(name)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
+                        // The face's slider says it.
+                        .accessibilityHidden(true)
                 }
                 .fixedSize()
-                // The face's slider says both.
-                .accessibilityHidden(true)
                 Spacer(minLength: 8)
                 Stopwatch(title: "Development", value: time, stops: times.measured, valueText: name)
             }
