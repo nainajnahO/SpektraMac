@@ -35,6 +35,8 @@ struct SettingsPanel: View {
                     ChoiceRow(title: "Film", sections: stockSections(model.films), selection: $model.film,
                               controls: $model.controls, choosing: model.controls(choosing:))
                     DevelopmentRow(stock: model.controls.film, minutes: \.filmDevelopmentTime)
+                        // Over the settings below, as the compact stopwatch stands out over them (#365).
+                        .zIndex(1)
                     AdjustmentGroup("Halation", systemImage: "sun.haze", adjustment: .halation,
                                     isOn: $model.controls.halation) {
                         ValueSlider("Strength", value: $model.controls.halationAmount, in: Controls.range(\.halationAmount), step: 0.05, neutral: 1,
@@ -98,6 +100,8 @@ struct SettingsPanel: View {
                                                      set: { model.controls = model.controls.choosing(paper: $0) }),
                                   controls: $model.controls) { model.controls.choosing(paper: $0) }
                         DevelopmentRow(stock: model.controls.paper, minutes: \.paperDevelopmentTime)
+                            // Over the settings below, as the compact stopwatch stands out over them (#365).
+                            .zIndex(1)
                         AdjustmentGroup("Contrast", systemImage: "circle.lefthalf.filled", adjustment: .contrast) {
                             ToneGraphView()
                         } options: {
@@ -362,8 +366,9 @@ private struct ChoiceRow<Value: Hashable>: View {
 
 /// The Development row under a black-and-white film or print film with a choice of development
 /// times: those its curves were measured at, in minutes, on a stopwatch
-/// (``Stopwatch``) with the time beside it. Choosing the standard one sets none, as the
-/// controls are before a choice. Under any other stock, nothing.
+/// (``Stopwatch``) with the time beside it, or for now on another of the controls #365 tries
+/// (``DevelopmentControl``). Choosing the standard one sets none, as the controls are before a
+/// choice. Under any other stock, nothing.
 private struct DevelopmentRow: View {
     @Environment(PhotoModel.self) private var model
     let stock: String
@@ -379,39 +384,135 @@ private struct DevelopmentRow: View {
             let name = times.developed == times.standard ? "\(minutesName) (standard)" : minutesName
             let time = Binding(get: { times.developed },
                                set: { model.controls[keyPath: minutes] = $0 == times.standard ? nil : $0 })
-            HStack {
-                // The time under the title: on one line beside the face, they'd be wider than the panel.
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
-                        Text("Development")
+            switch model.developmentControl {
+            case .stopwatch, .compact:
+                HStack {
+                    // The time under the title: on one line beside the face, they'd be wider than the panel.
+                    VStack(alignment: .leading, spacing: 2) {
+                        title
+                        Text(name)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
                             // The face's slider says it.
                             .accessibilityHidden(true)
-                        // The row's help on a button of its own, a help tag on hover and a popover
-                        // on a click: over the stopwatch it would come up as the time's being set.
-                        Button {
-                            showsHelp.toggle()
-                        } label: {
-                            Image(systemName: "info.circle")
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel("About development")
-                        .help(Self.help)
-                        .popover(isPresented: $showsHelp) {
-                            Text(Self.help)
-                                .frame(width: 220, alignment: .leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding()
+                    }
+                    .fixedSize()
+                    Spacer(minLength: 8)
+                    Stopwatch(title: "Development", value: time, stops: times.measured, valueText: name,
+                              isCompact: model.developmentControl == .compact)
+                }
+            case .expandable:
+                ExpandableTimes(title: title, name: name, value: time, times: times.measured, standard: times.standard)
+            case .segmented:
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        title
+                        Spacer(minLength: 8)
+                        Text(name)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            // The picker says it.
+                            .accessibilityHidden(true)
+                    }
+                    Picker("Development", selection: time) {
+                        ForEach(times.measured, id: \.self) { minutes in
+                            Text(minutes.formatted()).tag(minutes)
                         }
                     }
-                    Text(name)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        // The face's slider says it.
-                        .accessibilityHidden(true)
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
-                .fixedSize()
-                Spacer(minLength: 8)
-                Stopwatch(title: "Development", value: time, stops: times.measured, valueText: name)
+            }
+        }
+    }
+
+    /// The title, with the row's help on a button of its own beside it, a help tag on hover and a
+    /// popover on a click: over the stopwatch it would come up as the time's being set.
+    private var title: some View {
+        HStack(spacing: 4) {
+            Text("Development")
+                // The control says it.
+                .accessibilityHidden(true)
+            Button {
+                showsHelp.toggle()
+            } label: {
+                Image(systemName: "info.circle")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("About development")
+            .help(Self.help)
+            .popover(isPresented: $showsHelp) {
+                Text(Self.help)
+                    .frame(width: 220, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding()
+            }
+        }
+    }
+}
+
+/// Temporary, for #365: which control the Development row is, chosen in View › Development
+/// Control, to try them side by side. Not kept between launches. The switch and the controls not
+/// chosen go before #358 merges.
+enum DevelopmentControl: String, CaseIterable {
+    case stopwatch = "Stopwatch"
+    case expandable = "A · Expandable Times"
+    case compact = "C · Compact Stopwatch"
+    case segmented = "Segmented Picker"
+}
+
+/// Temporary, for #365, A: the time on one row; a click on it shows the measured times below as
+/// buttons, the chosen one pressed and the standard one marked, and another hides them.
+private struct ExpandableTimes<Title: View>: View {
+    let title: Title
+    let name: String
+    @Binding var value: Double
+    let times: [Double]
+    let standard: Double
+    @State private var showsTimes = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                title
+                Button {
+                    withAnimation(.snappy) { showsTimes.toggle() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Spacer(minLength: 8)
+                        Text(name)
+                            .monospacedDigit()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .rotationEffect(.degrees(showsTimes ? 90 : 0))
+                    }
+                    .foregroundStyle(.secondary)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Development")
+                .accessibilityValue(name)
+            }
+            if showsTimes {
+                HStack(spacing: 4) {
+                    ForEach(times, id: \.self) { time in
+                        VStack(spacing: 2) {
+                            Toggle(isOn: Binding(get: { time == value }, set: { if $0 { value = time } })) {
+                                // All as wide: each as its number would space them unevenly.
+                                Text(time.formatted())
+                                    .monospacedDigit()
+                                    .frame(minWidth: 28)
+                            }
+                            .toggleStyle(.button)
+                            Text("standard")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .opacity(time == standard ? 1 : 0)
+                                .accessibilityHidden(time != standard)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
             }
         }
     }
@@ -446,6 +547,10 @@ private struct DevelopmentRow: View {
 /// A drag on it, or the keyboard's focus, keeps it out. Its place in the row is the same either
 /// way.
 ///
+/// Compact (temporary, for #365, C), it's a stopwatch symbol in the row: the symbol brings it out,
+/// from past the window's edge, to stand over the settings below, and its face has the hand and
+/// the stops alone.
+///
 /// Drawn here, as the system has none (#352): AppKit's circular slider is a 24-point knob that
 /// draws no marks, the Mac's clock, a date picker's, is for a time of day, and the Clock app's
 /// stopwatch is its own drawing. The face's parts are in proportion to its radius, so its size is
@@ -455,6 +560,7 @@ private struct Stopwatch: View {
     @Binding var value: Double
     let stops: [Double]
     let valueText: String
+    let isCompact: Bool
     /// Where the hand points, in minutes: at the value, or on its way there. It counts on past a
     /// turn's end and back before its start, for the hand to go the shorter way round.
     @State private var handMinutes: Double
@@ -504,15 +610,45 @@ private struct Stopwatch: View {
         case button, face
     }
 
-    init(title: String, value: Binding<Double>, stops: [Double], valueText: String) {
+    init(title: String, value: Binding<Double>, stops: [Double], valueText: String, isCompact: Bool) {
         self.title = title
         _value = value
         self.stops = stops
         self.valueText = valueText
+        self.isCompact = isCompact
         _handMinutes = State(initialValue: value.wrappedValue)
     }
 
     var body: some View {
+        if isCompact {
+            Image(systemName: "stopwatch")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .opacity(isOut ? 0 : 1)
+                .accessibilityHidden(true)
+                .onHover { isHovering in
+                    if isHovering {
+                        isHovered = true
+                    }
+                }
+                // Out, it stands over the settings below, from the symbol's top. Tucked, it's past
+                // the window's edge, and leaves the pointer to them.
+                .overlay(alignment: .topTrailing) {
+                    tucking
+                        .allowsHitTesting(isOut)
+                        .padding(.trailing, -SettingsPanel.trailingMargin)
+                }
+        } else {
+            tucking
+                // The area reaches past its place both ways: in the row's layout the stopwatch is
+                // as wide as ever.
+                .padding(.leading, -Self.outShift)
+                .padding(.trailing, -SettingsPanel.trailingMargin)
+        }
+    }
+
+    /// The stopwatch, where it stands out or tucked, and the area that keeps it out.
+    private var tucking: some View {
         VStack(spacing: 0) {
             // The button on top, on its stem. The case, after it in the stack, is drawn over it, so
             // it goes into the case as it's pressed.
@@ -532,15 +668,23 @@ private struct Stopwatch: View {
             face
                 .padding(Self.caseWidth)
                 .background {
+                    // Compact, it stands over the settings: they'd show through the face. The
+                    // window's colour, as the panel's background style is see-through.
+                    if isCompact {
+                        Circle()
+                            .fill(Color(nsColor: .windowBackgroundColor))
+                            .shadow(radius: 3)
+                    }
                     Circle().strokeBorder(Self.steel, lineWidth: Self.caseWidth)
                 }
         }
         .opacity(isEnabled ? 1 : 0.5)
         // Tucked: turned onto its side, its button towards the settings, and slid right till its
-        // face's centre is on the window's edge, where the panel's scroll view cuts it off.
+        // face's centre is on the window's edge, where the panel's scroll view cuts it off; compact,
+        // till all of it is past the edge.
         .rotationEffect(isOut ? .zero : .degrees(-90),
                         anchor: UnitPoint(x: Self.centre.x / Self.size.width, y: Self.centre.y / Self.size.height))
-        .offset(x: isOut ? 0 : Self.area.width - Self.centre.x)
+        .offset(x: isOut ? 0 : Self.area.width - Self.centre.x + (isCompact ? Self.radius + Self.caseWidth + 2 : 0))
         .animation(.smooth(duration: 0.35), value: isOut)
         .frame(width: Self.area.width, alignment: .leading)
         .contentShape(.rect)
@@ -575,15 +719,13 @@ private struct Stopwatch: View {
         // A click on the trackpad at each time a scroll goes to, as a drag clicks at each it
         // reaches.
         .sensoryFeedback(.alignment, trigger: scrolledStops)
-        // The area reaches past its place both ways: in the row's layout the stopwatch is as wide
-        // as ever.
-        .padding(.leading, -Self.outShift)
-        .padding(.trailing, -SettingsPanel.trailingMargin)
     }
 
     /// The face, and all that's done on it.
     private var face: some View {
         Canvas { context, size in
+            // Compact, the hand and the stops alone.
+            guard !isCompact else { return }
             let centre = CGPoint(x: size.width / 2, y: size.height / 2), radius = min(size.width, size.height) / 2
             /// Where the hand points for `minutes`, `inset` from the rim.
             func point(at minutes: Double, inset: CGFloat) -> CGPoint {
