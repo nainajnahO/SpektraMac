@@ -19,10 +19,9 @@ public struct Controls: Codable, Sendable, Hashable {
     /// Longer gives more contrast. A colour stock is developed one way, whatever these say.
     public var filmDevelopmentTime: Double?
     public var paperDevelopmentTime: Double?
-    /// The exposure: `exposureMark`'s reading for the photo (``MeteringReadings``) plus
-    /// `exposureOffsetEV` stops. A new photo opens at the same mark's own reading.
-    public var exposureMark = MeteringMark.centreWeighted
-    public var exposureOffsetEV = 0.0
+    /// The exposure, in stops over the photo as shot. It's the photo's: the app opens each photo
+    /// at 0, and a preset carries none (``preset()``).
+    public var exposureEV = 0.0
     /// Stops the brightest highlights are raised by before they reach the film, rebuilding light
     /// the camera clipped (0 is off).
     public var highlightBoost = 0.0
@@ -81,11 +80,15 @@ public struct Controls: Codable, Sendable, Hashable {
         self = try JSONDecoder().decode(Controls.self, from: preset)
     }
 
-    /// The controls as a preset: JSON, readable and with sorted keys so presets diff cleanly.
+    /// The controls as a preset: JSON, readable and with sorted keys so presets diff cleanly. At no
+    /// exposure, as the exposure is the photo's: a film's saved defaults and the settings the app
+    /// quits with are presets too, and resetting the exposure to them puts it back as shot.
     public func preset() throws -> Data {
+        var preset = self
+        preset.exposureEV = 0
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(self)
+        return try encoder.encode(preset)
     }
 
     /// Each number's range: what its slider spans, and what a preset is brought within
@@ -100,8 +103,8 @@ public struct Controls: Codable, Sendable, Hashable {
         // makes too wide to size its convolution by, stopping the engine.
         let diffusionStrength = 0.125...2.0, diffusionSize = 0.0...3.0, diffusionWarmth = -1.5...1.5
         return [
-            // The Exposure slider's −4…+8 stops, from a mark at either end of them.
-            \.exposureOffsetEV: -12...12,
+            // The Exposure strip's −4…+8 stops, widened past a reading outside them.
+            \.exposureEV: -12...12,
             \.highlightBoost: 0...10,
             \.printExposure: 0...2,
             \.yFilterShift: filterShift,
@@ -171,8 +174,7 @@ extension Controls {
         var reset = self
         switch adjustment {
         case .exposure:
-            reset.exposureMark = defaults.exposureMark
-            reset.exposureOffsetEV = defaults.exposureOffsetEV
+            reset.exposureEV = defaults.exposureEV
             reset.highlightBoost = defaults.highlightBoost
         case .cameraDiffusion:
             reset.cameraDiffusion = defaults.cameraDiffusion
@@ -224,7 +226,7 @@ extension Controls {
         case "paper": "Paper"
         case "scanFilm": "Print or Film"
         case "filmDevelopmentTime", "paperDevelopmentTime": "Development"
-        case "exposureMark", "exposureOffsetEV", "highlightBoost": "Exposure"
+        case "exposureEV", "highlightBoost": "Exposure"
         case "printExposure", "yFilterShift", "mFilterShift", "preflash": "Enlarger"
         case "printContrast", "printHighlightContrast", "printShadowContrast": "Contrast"
         case "cameraDiffusion": "Lens Diffusion"
@@ -277,12 +279,6 @@ extension Controls {
         return (checked, changed)
     }
 
-    /// The exposure these controls give a photo metered as `readings`, in stops over it as shot:
-    /// their mark's reading plus their offset.
-    public func exposureEV(readings: MeteringReadings) -> Double {
-        readings.reading(resolving: exposureMark).ev + exposureOffsetEV
-    }
-
     /// The Exposure slider's range for a photo metered as `readings` (nil with none open): −4…+8
     /// stops, widened to whole stops past any reading outside it. Not past the exposure: a drag
     /// held at the end would widen it, and the next step follow it.
@@ -309,14 +305,12 @@ extension Controls {
         }
     }
 
-    /// These controls with `strip`'s control at `value`: for the exposure, `value` stops over the
-    /// photo as shot (metered as `readings`), from the controls' mark, which it keeps however near
-    /// another mark it is, so the next photo opens as far from that mark's own reading.
-    public func setting(_ strip: Strip, to value: Double, readings: MeteringReadings) -> Controls {
+    /// These controls with `strip`'s control at `value`.
+    public func setting(_ strip: Strip, to value: Double) -> Controls {
         var controls = self
         switch strip {
         case .exposure:
-            controls.exposureOffsetEV = value - readings.reading(resolving: exposureMark).ev
+            controls.exposureEV = value
         case .couplerSaturation:
             controls.couplerSaturation = value
         case .printExposure:
@@ -439,7 +433,7 @@ public actor Engine {
     public static let outputColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)!
     /// The colour space of export renders: ``outputSpace`` with its transfer function (sRGB's).
     public static let exportColorSpace = CGColorSpace(name: CGColorSpace.displayP3)!
-    /// The colour space LUTs take and give (``lut(controls:exposureEV:size:)``): sRGB with its
+    /// The colour space LUTs take and give (``lut(controls:size:)``): sRGB with its
     /// transfer function.
     static let lutColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     /// The input colour space: RGBImage's working space, linear.
@@ -512,27 +506,18 @@ public actor Engine {
         var thumbnail: PhotoImage?
         /// The last `reduced` render's image of the photo.
         var reduced: PhotoImage
-        /// What Vision found in the photo, for metering the images made later.
-        let regions: MeteringRegions
     }
 
-    /// One image of the photo with the exposure each metering mark gives it (Spektrafilm meters
-    /// each image on its own preview), and what the last render of it left to start from: the
-    /// film's log exposure and the developed film. Renders only read these textures.
+    /// One image of the photo, and what the last render of it left to start from: the film's log
+    /// exposure and the developed film. Renders only read these textures.
     private struct PhotoImage {
         let texture: any MTLTexture
-        let metering: MeteringReadings
         var exposure: Step?
         var film: Step?
-
-        /// The exposure `controls` give this image: their mark's reading for it plus their offset.
-        func exposureEV(for controls: Controls) -> Double {
-            controls.exposureEV(readings: metering)
-        }
     }
 
     /// A step's result and what it was made from: the film, the parameters it reads and the
-    /// exposure (a mark's reading for the photo plus an offset, so not a parameter).
+    /// exposure, which the controls set rather than the parameters, as Spektrafilm meters it.
     private struct Step {
         struct Key: Equatable {
             let film: String
@@ -578,8 +563,8 @@ public actor Engine {
 
     /// Makes `image` (``RGBImage/decode(contentsOf:)``) the photo renders work on: Core Image
     /// renders it once into a texture, and its preview (at most ``previewMaxSize`` on the long side)
-    /// from that on the GPU. Vision looks for the metering marks' regions in the preview, and each
-    /// image is metered once at every mark, in place. Throws ``PhotoTooLargeError`` for a photo over
+    /// from that on the GPU. Vision looks for the metering marks' regions in the preview, which is
+    /// metered at every mark. Throws ``PhotoTooLargeError`` for a photo over
     /// ``maxSide`` on a side. A photo that fails to open leaves the open one open, to render on,
     /// with the memory and steps kept from its renders.
     public func open(_ image: CIImage) throws -> OpenedPhoto {
@@ -591,36 +576,22 @@ public actor Engine {
         let preview = try scaled(full, toLongSide: previewMaxSize)
         // Auto-exposure is metered the same way in every mode (input space, no CCTF decoding).
         let space = tables.colourSpaces[Self.inputColorSpace]!
-        let previewLuminance = meteredLuminance(of: Pixels(preview), colourSpace: space, cctfDecoding: false)
-        let centreWeighted = MeteringReadings(luminance: previewLuminance.y, width: previewLuminance.width,
-                                              height: previewLuminance.height, regions: nil).reading(resolving: .centreWeighted)
-        // The full image's luminance (about 40 ms at 12 MP, on the CPU) while Vision looks at the
-        // preview: it needs no regions.
-        nonisolated(unsafe) let fullPixels = Pixels(full)
-        nonisolated(unsafe) var fullLuminance: (y: [Double], width: Int, height: Int)?
-        let metering = DispatchGroup()
-        if full !== preview {
-            DispatchQueue.global(qos: .userInitiated).async(group: metering) {
-                fullLuminance = meteredLuminance(of: fullPixels, colourSpace: space, cctfDecoding: false)
-            }
-        }
-        let found = Result { try MeteringRegions(finding: visionView(of: preview, exposure: centreWeighted.ev)) }
-        metering.wait()  // even if Vision failed: the metering reads `full`
-        let regions = try found.get()
+        let luminance = meteredLuminance(of: Pixels(preview), colourSpace: space, cctfDecoding: false)
+        // Centre-weighted always has a reading: Vision needs no regions for it.
+        let centreWeighted = MeteringReadings(luminance: luminance.y, width: luminance.width, height: luminance.height,
+                                              regions: nil).ev[MeteringMark.centreWeighted.rawValue]!
+        let regions = try MeteringRegions(finding: visionView(of: preview, exposure: centreWeighted))
         // Nothing left can throw: the memory set aside for renders of all of the previous photo
         // goes, with its kept steps. Until here, a photo that fails to open leaves them, so the
         // open photo's next zoom or save starts from them.
         releaseFullSizeMemory()
-        let previewImage = PhotoImage(texture: preview, metering: MeteringReadings(
-            luminance: previewLuminance.y, width: previewLuminance.width, height: previewLuminance.height, regions: regions))
-        let fullImage = fullLuminance.map { luminance in
-            PhotoImage(texture: full, metering: MeteringReadings(luminance: luminance.y, width: luminance.width,
-                                                                 height: luminance.height, regions: regions))
-        } ?? previewImage
-        photo = Photo(full: fullImage, preview: previewImage, reduced: previewImage, regions: regions)
+        let metering = MeteringReadings(luminance: luminance.y, width: luminance.width, height: luminance.height,
+                                        regions: regions)
+        let previewImage = PhotoImage(texture: preview)
+        photo = Photo(full: full === preview ? previewImage : PhotoImage(texture: full), preview: previewImage,
+                      reduced: previewImage)
         return OpenedPhoto(width: width, height: height, previewWidth: preview.width, previewHeight: preview.height,
-                           metering: previewImage.metering,
-                           meteringOverlays: regions.overlays(for: previewImage.metering, width: width, height: height))
+                           metering: metering, meteringOverlays: regions.overlays(for: metering, width: width, height: height))
     }
 
     /// Loads the models Vision looks for the metering marks' regions with (about 0.2 s on an M1
@@ -639,15 +610,6 @@ public actor Engine {
         let texture = gpu.makeReadableTexture(width: Int(scaled.extent.width), height: Int(scaled.extent.height))
         try render(scaled, from: scaled.extent, into: texture)
         return texture
-    }
-
-    /// `texture` as an image of the open photo, metered at every mark (in the input space, no
-    /// CCTF decoding, as in every mode).
-    private func metered(_ texture: any MTLTexture, regions: MeteringRegions) -> PhotoImage {
-        let luminance = meteredLuminance(of: Pixels(texture), colourSpace: tables.colourSpaces[Self.inputColorSpace]!,
-                                         cctfDecoding: false)
-        return PhotoImage(texture: texture, metering: MeteringReadings(
-            luminance: luminance.y, width: luminance.width, height: luminance.height, regions: regions))
     }
 
     /// What Vision looks at: `preview` exposed by Spektrafilm's meter, so a dim scene is readable, as 8-bit
@@ -750,8 +712,7 @@ public actor Engine {
         case .thumbnail:
             if photo.thumbnail == nil {
                 let thumbnail = try scaled(photo.full.texture, toLongSide: thumbnailMaxSize)
-                self.photo!.thumbnail = thumbnail === photo.full.texture
-                    ? photo.full : metered(thumbnail, regions: photo.regions)
+                self.photo!.thumbnail = thumbnail === photo.full.texture ? photo.full : PhotoImage(texture: thumbnail)
             }
             return \.thumbnail!
         case .reduced(let longSide):
@@ -759,7 +720,7 @@ public actor Engine {
             guard longSide < max(full.width, full.height) else { return \.full }
             let last = photo.reduced.texture
             if max(last.width, last.height) != longSide {
-                self.photo!.reduced = metered(try scaled(full, toLongSide: longSide), regions: photo.regions)
+                self.photo!.reduced = PhotoImage(texture: try scaled(full, toLongSide: longSide))
             }
             return \.reduced
         case .full, .export:
@@ -787,7 +748,7 @@ public actor Engine {
     /// film exposure and developed film for the next.
     private func render(_ image: inout PhotoImage, controls: Controls, parameters: Parameters,
                         simulation: Simulation) throws -> (output: any MTLTexture, burnMask: (any MTLTexture)?) {
-        let exposureEV = image.exposureEV(for: controls)
+        let exposureEV = controls.exposureEV
         let keys = Step.keys(for: controls, parameters: parameters, exposureEV: exposureEV)
         // What's still valid of the last render; the rest is released before this one.
         if image.exposure?.key != keys.exposure {
@@ -832,11 +793,11 @@ public actor Engine {
 
     /// A `size`³ 3D LUT of `controls`' look, for an app that applies one to display-encoded sRGB
     /// (LightCraft does, after its own edits): each sRGB colour of the lattice opened as a photo is
-    /// (Core Image decodes it into the working space), exposed `exposureEV` stops over itself and
+    /// (Core Image decodes it into the working space), exposed as the controls set it, and
     /// rendered as an export. What depends on other pixels is left out
     /// (``Parameters/applyPerPixelMode()``). Doesn't touch the open photo. At most 128: the lattice
     /// renders as an image size² wide, and a texture is at most 16384.
-    public func lut(controls: Controls, exposureEV: Double, size: Int) throws -> LUT {
+    public func lut(controls: Controls, size: Int) throws -> LUT {
         precondition((2...128).contains(size))
         var parameters = parameters(for: controls, mode: .export)
         parameters.applyPerPixelMode()
@@ -860,7 +821,7 @@ public actor Engine {
         let input = gpu.makeReadableTexture(width: size * size, height: size)
         try render(lattice, from: lattice.extent, into: input)
         let output = try gpu.run { encoder in
-            let exposed = simulation.encodePreprocess(input, autoExposureEV: exposureEV, on: encoder)
+            let exposed = simulation.encodePreprocess(input, autoExposureEV: controls.exposureEV, on: encoder)
             return simulation.encodePrintAndScan(simulation.encodeDevelop(simulation.encodeExpose(exposed, on: encoder),
                                                                           on: encoder), on: encoder)
         }
@@ -870,7 +831,7 @@ public actor Engine {
 
     /// The open photo's ``ToneGraph`` as `controls` set it. The curve is the print's whatever the
     /// toolbar shows, with what a LUT holds (``Parameters/applyPerPixelMode()``): a ramp of greys
-    /// rendered as ``lut(controls:exposureEV:size:)`` renders its lattice. The histogram is of the
+    /// rendered as ``lut(controls:size:)`` renders its lattice. The histogram is of the
     /// preview's film exposure, kept from its last render if that had these controls' exposure.
     public func toneGraph(controls: Controls) throws -> ToneGraph {
         guard photo != nil else { preconditionFailure("A tone graph before a photo is open") }
@@ -885,7 +846,7 @@ public actor Engine {
     private func previewHasExposure(of controls: Controls) -> Bool {
         let preview = photo!.preview
         let keys = Step.keys(for: controls, parameters: parameters(for: controls, mode: .preview),
-                             exposureEV: preview.exposureEV(for: controls))
+                             exposureEV: controls.exposureEV)
         return preview.exposure?.key == keys.exposure
     }
 

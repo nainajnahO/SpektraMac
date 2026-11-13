@@ -86,8 +86,8 @@ extension PhotoOpeningTests {
     /// Opening renders the decoded photo straight onto the GPU: its renders, full, preview, reduced
     /// and thumbnail, are exactly the parity-tested chain on the photo decoded to an `RGBImage` and on
     /// that scaled down as the preview was made before (Core Image's Lanczos from the CPU copy), to the
-    /// preview's size, a reduced render's and a thumbnail's. A Display P3 8-bit PNG and 16-bit TIFF
-    /// larger than the preview, and the synthetic DNG.
+    /// preview's size, a reduced render's and a thumbnail's, each at the exposure the chain meters
+    /// it at. A Display P3 8-bit PNG and 16-bit TIFF larger than the preview, and the synthetic DNG.
     @Test(arguments: ["png", "tif", "dng"])
     func openRendersTheDecodedPhoto(format: String) async throws {
         let url: URL
@@ -126,13 +126,15 @@ extension PhotoOpeningTests {
             return RGBImage(width: width, height: height, pixels: (0..<(width * height)).flatMap { rgba[($0 * 4)..<($0 * 4 + 3)] })
         }
 
-        let controls = Controls()
+        var controls = Controls()
         let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
         let (gpu, tables, database) = (try GPU(), try Tables.load(), try Tables.loadNeutralPrintFilters())
         for (mode, image) in [(RenderMode.full, decoded), (.preview, scaled(to: 1600)), (.reduced(longSide: 1000), scaled(to: 1000)),
                               (.thumbnail, scaled(to: 256))] {
-            let rendered = try await engine.render(controls: controls, mode: mode)
             let parameters = Engine.parameters(for: controls, film: film, print: paper, database: database, mode: mode)
+            controls.exposureEV = autoExposureEV(of: image, colourSpace: tables.colourSpaces[parameters.io.inputColorSpace]!,
+                                                 cctfDecoding: parameters.io.inputCctfDecoding)
+            let rendered = try await engine.render(controls: controls, mode: mode)
             let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: tables)
             let chain = gpu.download(try gpu.run { simulation.encode(image, on: $0) })
             #expect(rendered.width == image.width && rendered.height == image.height, "\(mode)")
@@ -353,8 +355,8 @@ extension PhotoOpeningTests {
         let changes: [(String, (inout Controls) -> Void)] = [
             ("defaults", { _ in }), ("Y filter", { $0.yFilterShift = 12 }), ("print exposure", { $0.printExposure = 1.3 }),
             ("paper", { $0.paper = "fujifilm_crystal_archive_typeii" }), ("negative", { $0.scanFilm = true }),
-            ("print", { $0.scanFilm = false }), ("exposure", { $0.exposureOffsetEV = 1.25 }),
-            ("as shot", { $0.exposureMark = .asShot }), ("faces", { $0.exposureMark = .faces }), ("grain off", { $0.grain = false }),
+            ("print", { $0.scanFilm = false }), ("exposure", { $0.exposureEV = 1.25 }),
+            ("under", { $0.exposureEV = -0.6 }), ("grain off", { $0.grain = false }),
             ("halation off", { $0.halation = false }), ("burn", { $0.burn = true }),
             ("film", { $0.film = "kodak_gold_200" }),
         ]
@@ -370,17 +372,20 @@ extension PhotoOpeningTests {
     }
 
     /// The engine's render, in steps from the photo kept on the GPU, is exactly the parity-tested
-    /// chain from the image, grain and auto-exposure (the Centre-weighted mark) included.
+    /// chain from the image, grain and auto-exposure included: at the exposure Spektrafilm meters
+    /// the image at.
     @Test func engineRenderIsTheChain() async throws {
         let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
-        let controls = Controls()
+        var controls = Controls()
+        let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
+        let parameters = Engine.parameters(for: controls, film: film, print: paper,
+                                           database: try Tables.loadNeutralPrintFilters(), mode: .full)
+        controls.exposureEV = autoExposureEV(of: image, colourSpace: try Tables.load().colourSpaces[parameters.io.inputColorSpace]!,
+                                             cctfDecoding: parameters.io.inputCctfDecoding)
         let engine = try Engine()
         _ = try await engine.open(image.ciImage)
         let rendered = try await engine.render(controls: controls, mode: .full)
 
-        let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
-        let parameters = Engine.parameters(for: controls, film: film, print: paper,
-                                           database: try Tables.loadNeutralPrintFilters(), mode: .full)
         let gpu = try GPU()
         let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: try Tables.load())
         let chain = gpu.download(try gpu.run { simulation.encode(image, on: $0) })
@@ -425,7 +430,7 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     pixels.replaceSubrange(0..<3, with: [.nan, .nan, .nan])
     let exported = directory.appending(component: "out").appendingPathExtension(for: type)
     var controls = Controls()
-    controls.exposureOffsetEV = 0.3
+    controls.exposureEV = 0.3
     let record = EditRecord(software: "SpektraMac 1.2", summary: "Kodak Portra 400 printed on Kodak Portra Endura · +0.3 EV",
                             keywords: ["Kodak Portra 400", "SpektraMac"], controls: controls)
     let gpu = try GPU()
@@ -456,7 +461,7 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
         CGImageMetadataCopyStringValueWithPath(xmp, nil, "\(EditRecord.prefix):\(name)" as CFString) as String?
     }
     #expect(setting("film") == "kodak_portra_400")
-    #expect(setting("exposureOffsetEV") == "0.3")
+    #expect(setting("exposureEV") == "0.3")
     #expect(setting("grain") == "true")
     // A diffusion filter's settings by its name and theirs.
     #expect(setting("cameraDiffusionStrength") == "0.5")
@@ -579,13 +584,13 @@ extension PhotoOpeningTests {
     controls.cameraDiffusion.spatialScale = 1e20
     controls.enlargerDiffusion.spatialScale = 1e20
     controls.grainSize = 0
-    controls.exposureOffsetEV = -1000
+    controls.exposureEV = -1000
     let clamped = controls.clampedToRanges()
     #expect(clamped.printContrast == Controls.range(\.printContrast).lowerBound)
     #expect(clamped.cameraDiffusion.spatialScale == Controls.range(\.cameraDiffusion.spatialScale).upperBound)
     #expect(clamped.enlargerDiffusion.spatialScale == Controls.range(\.enlargerDiffusion.spatialScale).upperBound)
     #expect(clamped.grainSize == Controls.range(\.grainSize).lowerBound)
-    #expect(clamped.exposureOffsetEV == Controls.range(\.exposureOffsetEV).lowerBound)
+    #expect(clamped.exposureEV == Controls.range(\.exposureEV).lowerBound)
 }
 
 extension PhotoOpeningTests {
@@ -613,8 +618,6 @@ extension PhotoOpeningTests {
     controls.film = "kodak_vision3_500t"
     controls.paper = "kodak_2383"
     controls.scanFilm = true
-    controls.exposureMark = .people
-    controls.exposureOffsetEV = -0.75
     controls.printExposure = 1.24
     controls.yFilterShift = -7
     controls.mFilterShift = 12
@@ -649,8 +652,7 @@ extension PhotoOpeningTests {
 }
 
 extension PhotoOpeningTests {
-    /// A LUT entry is what a render of a photo of that one sRGB colour gives, exposed the same (the
-    /// As shot mark plus the offset), when nothing that depends on other pixels is on: patches of
+    /// A LUT entry is what a render of a photo of that one sRGB colour gives, exposed the same, when nothing that depends on other pixels is on: patches of
     /// lattice colours, black, white, grey and some in between, through the chain an export renders,
     /// in sRGB as the LUT is (the app's own renders are Display P3). Within a quarter of an 8-bit
     /// level (measured: 3.7e-4): the photo's render still runs its blurs, through half-float
@@ -658,12 +660,11 @@ extension PhotoOpeningTests {
     @Test func lutEntriesAreUniformRenders() async throws {
         let size = 5
         var controls = Controls()
-        controls.exposureMark = .asShot
-        controls.exposureOffsetEV = 0.7
+        controls.exposureEV = 0.7
         controls.grain = false
         controls.glare = false
         let engine = try Engine()
-        let lut = try await engine.lut(controls: controls, exposureEV: controls.exposureOffsetEV, size: size)
+        let lut = try await engine.lut(controls: controls, size: size)
         #expect(lut.values.count == size * size * size * 3)
 
         let colours: [SIMD3<Int>] = [[0, 0, 0], [4, 4, 4], [2, 2, 2], [4, 0, 0], [0, 4, 0], [0, 0, 4], [1, 3, 2], [3, 1, 4]]
@@ -692,7 +693,7 @@ extension PhotoOpeningTests {
         let input = gpu.upload(rgb: rgb(fromRGBA: working, width: width, height: patch), width: width, height: patch)
         let rendered = gpu.download(try gpu.run { encoder in
             let logExposure = simulation.encodeExpose(
-                simulation.encodePreprocess(input, autoExposureEV: controls.exposureOffsetEV, on: encoder), on: encoder)
+                simulation.encodePreprocess(input, autoExposureEV: controls.exposureEV, on: encoder), on: encoder)
             return simulation.encodePrintAndScan(simulation.encodeDevelop(logExposure, on: encoder),
                                                  burnMask: simulation.encodeBurnMask(logExposure, on: encoder), on: encoder)
         })
@@ -720,7 +721,6 @@ extension PhotoOpeningTests {
     @Test func toneGraphIsTheRenderOfAGrey() async throws {
         let e: Float = 1
         var controls = Controls()
-        controls.exposureOffsetEV = Double(e)
         controls.halation = false
         controls.grain = false
         controls.glare = false
@@ -729,7 +729,8 @@ extension PhotoOpeningTests {
         let photo = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
                             size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: Engine.exportColorSpace)
         let engine = try Engine()
-        _ = try await engine.open(photo)
+        // `e` stops over the grey metered to mid-grey.
+        controls.exposureEV = try await engine.open(photo).metering.ev[MeteringMark.centreWeighted.rawValue]! + Double(e)
         let rendered = try await engine.render(controls: controls, mode: .export)
         let graph = try await engine.toneGraph(controls: controls)
         #expect(graph.curve.count == 256 && graph.histogram.count == 256)
@@ -800,7 +801,6 @@ extension PhotoOpeningTests {
     @Test func burnedToneCurveIsABurnedRender() async throws {
         let e: Float = 1
         var controls = Controls()
-        controls.exposureOffsetEV = Double(e)
         controls.halation = false
         controls.grain = false
         controls.glare = false
@@ -812,7 +812,8 @@ extension PhotoOpeningTests {
         let photo = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
                             size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: Engine.exportColorSpace)
         let engine = try Engine()
-        _ = try await engine.open(photo)
+        // `e` stops over the grey metered to mid-grey.
+        controls.exposureEV = try await engine.open(photo).metering.ev[MeteringMark.centreWeighted.rawValue]! + Double(e)
         let rendered = try await engine.render(controls: controls, mode: .export)
         // The graph leaves the burn out (`applyPerPixelMode`), as a LUT does.
         let graph = try await engine.toneGraph(controls: controls)
@@ -872,11 +873,13 @@ extension PhotoOpeningTests {
     /// copied into (``Profile``) never reaches the image.
     @Test func blackAndWhiteGrainIsGrey() async throws {
         let engine = try Engine()
-        _ = try await engine.open(Self.ramp())
+        // Metered as Spektrafilm meters it, as the numbers below were measured.
+        let metered = try await engine.open(Self.ramp()).metering.ev[MeteringMark.centreWeighted.rawValue]!
         var negative = Controls().choosing(film: "kodak_doublex", from: engine.films)
         negative.scanFilm = true
-        for controls in [Controls().choosing(film: "kodak_doublex", from: engine.films), negative,
-                         Controls().choosing(film: "kodak_trix", from: engine.films)] {
+        for var controls in [Controls().choosing(film: "kodak_doublex", from: engine.films), negative,
+                             Controls().choosing(film: "kodak_trix", from: engine.films)] {
+            controls.exposureEV = metered
             var smooth = controls
             smooth.grain = false
             let pixels = try await engine.render(controls: controls, mode: .export).pixels
@@ -947,7 +950,7 @@ extension PhotoOpeningTests {
                 controls[keyPath: control] = end
                 // 12 stops under, the ramp's brightest pixel gives the film 4 × 2⁻¹² of white's
                 // exposure: the print of a negative that thin is rightly black.
-                settings.append(("\(control) at \(end)", controls, control == \Controls.exposureOffsetEV && end < 0))
+                settings.append(("\(control) at \(end)", controls, control == \Controls.exposureEV && end < 0))
             }
         }
         for (name, end) in [("lower", \ClosedRange<Double>.lowerBound), ("upper", \ClosedRange<Double>.upperBound)] {

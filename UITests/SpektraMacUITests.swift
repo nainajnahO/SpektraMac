@@ -82,20 +82,20 @@ final class SpektraMacUITests: XCTestCase {
 
     // MARK: Metering marks
 
-    /// The pointer on a mark's dot opens a bubble under it saying what the mark meters, each mark's
-    /// on a dot marks share, and a click there puts the exposure on the mark, in one step to undo.
-    /// The bubble closes as the pointer leaves the dots (#353). That the strip doesn't snap to a
-    /// mark is the engine's `exposureKeepsItsMark`: a drag here lands only within a few tenths of
-    /// a stop of where it's aimed.
+    /// A photo opens at its exposure as shot (#360). The pointer on a mark's dot opens a bubble
+    /// under it saying what the mark meters, each mark's on a dot marks share, and a click there
+    /// puts the exposure on the first mark's reading, in one step to undo. The bubble closes as the
+    /// pointer leaves the dots (#353).
     @MainActor func testClickingADotPutsTheExposureOnItsMark() throws {
         try launch()
         defer { quit() }
         showTab(.camera)
-        // The test's photo is a gradient: As shot reads it at 0 and Centre-weighted, the film's
-        // default, 0.016 stops over, a third of a point to its right on the strip, so they share a
-        // dot. Its range is −4…+8 stops. The strip's value is the exposure, in stops.
+        // The test's photo is a gradient: As shot reads it at 0 and Centre-weighted 0.016 stops
+        // over, a third of a point to its right on the strip, so they share a dot. Its range is
+        // −4…+8 stops. The strip's value is the exposure, in stops.
         let strip = panel.sliders["Exposure"]
         XCTAssert(strip.waitForExistence(timeout: 5), "the Exposure strip")
+        XCTAssertNotNil(exposure(of: strip) { $0 == 0 }, "the photo opened as shot, at \(strip.value ?? "none")")
         let marks = strip.normalizedSliderPosition
         strip.adjust(toNormalizedSliderPosition: 0.9)
         let overTheMarks = try XCTUnwrap(exposure(of: strip) { $0 > 1 }, "the exposure well over the marks, at \(strip.value ?? "none")")
@@ -110,12 +110,11 @@ final class SpektraMacUITests: XCTestCase {
             XCTAssert(bubble.staticTexts.matching(NSPredicate(format: "value == %@", name)).firstMatch.exists, "\(name) in the bubble")
         }
         XCTAssertGreaterThanOrEqual(bubble.frame.minY, strip.frame.maxY, "the bubble under the strip")
-        // Of the dot's two marks, the one the exposure counts from.
         besideTheDot.click()
-        XCTAssertNotNil(exposure(of: strip) { abs($0 - 0.016) < 0.01 }, "the exposure on Centre-weighted, at \(strip.value ?? "none")")
+        XCTAssertNotNil(exposure(of: strip) { $0 == 0 }, "the exposure on As shot, at \(strip.value ?? "none")")
         let undo = undoItem()
         XCTAssert(undo.title.contains("Undo Exposure"), "Edit › Undo shows “\(undo.title)”")
-        // The click's mark and offset back as they were, in one step.
+        // The exposure back as it was, in one step.
         app.typeKey("z", modifierFlags: .command)
         XCTAssertNotNil(exposure(of: strip) { abs($0 - overTheMarks) < 0.01 }, "the exposure back after Undo, at \(strip.value ?? "none")")
         strip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()

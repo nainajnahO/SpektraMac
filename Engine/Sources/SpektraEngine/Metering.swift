@@ -7,8 +7,8 @@ import Vision
 /// over the photo as shot. As shot is the camera's own exposure; Centre-weighted is
 /// Spektrafilm's auto-exposure (a film camera's meter). The others are SpektraMac's own: they
 /// meter what Apple's Vision finds in the photo, so a bright sky or background can't darken the
-/// subject the way it does on a film camera's meter. ``Controls/exposureMark`` picks one.
-public enum MeteringMark: Int, CaseIterable, Codable, Sendable {
+/// subject the way it does on a film camera's meter.
+public enum MeteringMark: Int, CaseIterable, Sendable {
     case asShot, centreWeighted, objects, people, faces
 }
 
@@ -158,16 +158,6 @@ public struct MeteringReadings: Sendable, Equatable {
             }
         }
         self.ev = ev
-    }
-
-    /// `mark`'s reading, or where it has none, the next broader mark's that has one: Faces →
-    /// People → Objects → Centre-weighted.
-    public func reading(resolving mark: MeteringMark) -> (mark: MeteringMark, ev: Double) {
-        var mark = mark
-        while ev[mark.rawValue] == nil {
-            mark = MeteringMark(rawValue: mark.rawValue - 1)!
-        }
-        return (mark, ev[mark.rawValue]!)
     }
 }
 
