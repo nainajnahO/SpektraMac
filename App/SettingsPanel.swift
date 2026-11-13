@@ -357,30 +357,98 @@ private struct ChoiceRow<Value: Hashable>: View {
 }
 
 /// The Development row under a black-and-white film or print film with a choice of development
-/// times: those its curves were measured at, in minutes. Choosing the standard one sets none, as
-/// the controls are before a choice. Under any other stock, nothing.
+/// times: those its curves were measured at, in minutes. It's the time, as that's seldom changed;
+/// a click on it shows a segmented picker of the times under it, a segment for each with a dot
+/// under the standard one, and another hides it (#352, #365). Choosing the standard one sets none,
+/// as the controls are before a choice. Under any other stock, nothing.
+///
+/// The picker's segments are all as wide, so the dot is under its segment in a row of as many
+/// columns, as wide as the picker.
 private struct DevelopmentRow: View {
     @Environment(PhotoModel.self) private var model
     let stock: String
     let minutes: WritableKeyPath<Controls, Double?>
+    @State private var showsTimes = false
+    @State private var showsHelp = false
+
+    private static let help = "How long it's developed for, from the times its curves were measured at. Longer gives more contrast."
 
     var body: some View {
-        @Bindable var model = model
         if let times = model.developmentTimes(of: stock, asking: model.controls[keyPath: minutes]) {
-            let developing = { (time: Double) -> Controls in
-                var controls = model.controls
-                controls[keyPath: minutes] = time == times.standard ? nil : time
-                return controls
+            let format = { (minutes: Double) in
+                Measurement(value: minutes, unit: UnitDuration.minutes).formatted(.measurement(width: .abbreviated, usage: .asProvided))
             }
-            let choices = times.measured.map { time in
-                let name = Measurement(value: time, unit: UnitDuration.minutes)
-                    .formatted(.measurement(width: .abbreviated, usage: .asProvided))
-                return (name: time == times.standard ? "\(name) (standard)" : name, value: time)
+            let name = times.developed == times.standard ? "\(format(times.developed)) (standard)" : format(times.developed)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    HStack(spacing: 4) {
+                        Text("Development")
+                            // The time's button says it.
+                            .accessibilityHidden(true)
+                        // The row's help on a button of its own: a help tag on hover and a popover
+                        // on a click.
+                        Button {
+                            showsHelp.toggle()
+                        } label: {
+                            Image(systemName: "info.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("About development")
+                        .help(Self.help)
+                        .popover(isPresented: $showsHelp) {
+                            Text(Self.help)
+                                .frame(width: 220, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding()
+                        }
+                    }
+                    Button {
+                        withAnimation(.snappy) { showsTimes.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Spacer(minLength: 8)
+                            Text(name)
+                                .monospacedDigit()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .rotationEffect(.degrees(showsTimes ? 90 : 0))
+                        }
+                        .foregroundStyle(.secondary)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Development")
+                    // With the standard time, which the dot under its segment marks.
+                    .accessibilityValue(times.developed == times.standard ? name : "\(name), standard \(format(times.standard))")
+                }
+                if showsTimes {
+                    Picker("Development", selection: Binding(get: { times.developed },
+                                                             set: { model.controls[keyPath: minutes] = $0 == times.standard ? nil : $0 })) {
+                        ForEach(times.measured, id: \.self) { time in
+                            Text(time.formatted()).tag(time)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .padding(.bottom, 8)
+                    .overlay(alignment: .bottom) {
+                        HStack(spacing: 0) {
+                            ForEach(times.measured, id: \.self) { time in
+                                Circle()
+                                    .fill(.secondary)
+                                    .frame(width: 4, height: 4)
+                                    .opacity(time == times.standard ? 1 : 0)
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .padding(.bottom, 1)
+                        // The time's button says it.
+                        .accessibilityHidden(true)
+                    }
+                    // Under the time, at the right.
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
             }
-            ChoiceRow(title: "Development", sections: [.init(heading: nil, choices: choices)],
-                      selection: Binding(get: { times.developed }, set: { model.controls = developing($0) }),
-                      controls: $model.controls, choosing: developing)
-                .help("How long it's developed for, from the times its curves were measured at. Longer gives more contrast.")
         }
     }
 }

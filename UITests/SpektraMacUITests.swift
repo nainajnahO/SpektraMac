@@ -62,22 +62,50 @@ final class SpektraMacUITests: XCTestCase {
 
     // MARK: Black-and-white film
 
-    /// A black-and-white film has a Development menu, as the print film it's printed on has, and
-    /// no Saturation, which is between a colour film's layers; a colour film, the reverse (#350).
+    /// A black-and-white film has a Development control, as the print film it's printed on has,
+    /// and no Saturation, which is between a colour film's layers; a colour film, the reverse
+    /// (#350). The control is the time, on a row that shows a segmented picker (#352).
     @MainActor func testBlackAndWhiteFilmHasDevelopmentAndNoSaturation() throws {
         try launch()
         defer { quit() }
         showTab(.film)
         choose(film: "Kodak Double-X Negative Film 5222")
-        XCTAssert(app.popUpButtons["Development"].waitForExistence(timeout: 5), "Development on Double-X")
+        XCTAssert(panel.buttons["Development"].waitForExistence(timeout: 5), "Development on Double-X")
         XCTAssertFalse(panel.sliders["Saturation"].exists, "Saturation on Double-X")
         showTab(.print)
         XCTAssertEqual(app.popUpButtons["Paper"].value as? String, "Kodak Print Film 2302")
-        XCTAssert(app.popUpButtons["Development"].waitForExistence(timeout: 5), "Development on 2302")
+        XCTAssert(panel.buttons["Development"].waitForExistence(timeout: 5), "Development on 2302")
         showTab(.film)
         choose(film: "Kodak Portra 400")
         XCTAssert(panel.sliders["Saturation"].waitForExistence(timeout: 5), "Saturation on Portra 400")
-        XCTAssertFalse(app.popUpButtons["Development"].exists, "Development on Portra 400")
+        XCTAssertFalse(panel.buttons["Development"].exists, "Development on Portra 400")
+    }
+
+    /// A click on the Development row's time shows a segmented picker, with a film's standard time
+    /// chosen to begin with; a click on a segment chooses its time, the row still saying the
+    /// standard one, Undo puts back the one before, and another click on the time hides the picker
+    /// (#352, #365).
+    @MainActor func testDevelopmentSegmentChoosesItsTime() throws {
+        try launch()
+        defer { quit() }
+        showTab(.film)
+        choose(film: "Kodak Double-X Negative Film 5222")
+        let row = panel.buttons["Development"], times = panel.radioGroups["Development"]
+        XCTAssert(row.waitForExistence(timeout: 5), "Development on Double-X")
+        XCTAssertFalse(times.exists, "the picker before a click on the time")
+        row.click()
+        XCTAssert(times.waitForExistence(timeout: 5), "the picker after a click on the time")
+        let standard = times.radioButtons[6.5.formatted()], nine = times.radioButtons["9"]
+        XCTAssertNotNil(value(of: standard) { $0 == 1 }, "the standard time chosen to begin with")
+        nine.click()
+        XCTAssertNotNil(value(of: nine) { $0 == 1 }, "9 chosen")
+        // The row says the standard time, which the picker marks.
+        XCTAssert((row.value as? String)?.hasSuffix("standard \(6.5.formatted()) min") == true,
+                  "the row with 9 chosen: \(row.value ?? "none")")
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertNotNil(value(of: standard) { $0 == 1 }, "the standard time after Undo")
+        row.click()
+        XCTAssert(times.waitForNonExistence(timeout: 5), "the picker after another click on the time")
     }
 
     // MARK: Metering marks
@@ -95,10 +123,10 @@ final class SpektraMacUITests: XCTestCase {
         // range is −4…+8 stops. The strip's value is the exposure, in stops.
         let strip = panel.sliders["Exposure"]
         XCTAssert(strip.waitForExistence(timeout: 5), "the Exposure strip")
-        XCTAssertNotNil(exposure(of: strip) { $0 == 0 }, "the photo opened as shot, at \(strip.value ?? "none")")
+        XCTAssertNotNil(value(of: strip) { $0 == 0 }, "the photo opened as shot, at \(strip.value ?? "none")")
         let marks = strip.normalizedSliderPosition
         strip.adjust(toNormalizedSliderPosition: 0.9)
-        let overTheMarks = try XCTUnwrap(exposure(of: strip) { $0 > 1 }, "the exposure well over the marks, at \(strip.value ?? "none")")
+        let overTheMarks = try XCTUnwrap(value(of: strip) { $0 > 1 }, "the exposure well over the marks, at \(strip.value ?? "none")")
         // On the dots' row, 2 points above the strip's foot, and 6 points left of the dot: within
         // its reach, where a click on the frames would land 0.3 stops under.
         let besideTheDot = strip.coordinate(withNormalizedOffset: CGVector(dx: marks, dy: 1))
@@ -111,12 +139,12 @@ final class SpektraMacUITests: XCTestCase {
         }
         XCTAssertGreaterThanOrEqual(bubble.frame.minY, strip.frame.maxY, "the bubble under the strip")
         besideTheDot.click()
-        XCTAssertNotNil(exposure(of: strip) { abs($0 - 0.008) < 0.001 }, "the exposure on the dot, at \(strip.value ?? "none")")
+        XCTAssertNotNil(value(of: strip) { abs($0 - 0.008) < 0.001 }, "the exposure on the dot, at \(strip.value ?? "none")")
         let undo = undoItem()
         XCTAssert(undo.title.contains("Undo Exposure"), "Edit › Undo shows “\(undo.title)”")
         // The exposure back as it was, in one step.
         app.typeKey("z", modifierFlags: .command)
-        XCTAssertNotNil(exposure(of: strip) { abs($0 - overTheMarks) < 0.01 }, "the exposure back after Undo, at \(strip.value ?? "none")")
+        XCTAssertNotNil(value(of: strip) { abs($0 - overTheMarks) < 0.01 }, "the exposure back after Undo, at \(strip.value ?? "none")")
         strip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
         XCTAssert(bubble.waitForNonExistence(timeout: 5), "the bubble with the pointer on the frames")
     }
@@ -147,8 +175,8 @@ final class SpektraMacUITests: XCTestCase {
     // MARK: Accessibility
 
     /// The accessibility audit (missing labels, contrast, hit areas, clipped text…) of the main window
-    /// with each settings tab showing, the Camera tab again with the exposure off a mark, and of the
-    /// Log window, in light mode. Any finding fails the test.
+    /// with each settings tab showing, and of the Log window, in light mode. Any finding fails the
+    /// test.
     @MainActor func testAccessibilityAuditInLightMode() throws {
         try auditApp(in: "light")
     }
@@ -156,6 +184,43 @@ final class SpektraMacUITests: XCTestCase {
     /// The same in dark mode: contrast differs between the two, and the Mac may be in either.
     @MainActor func testAccessibilityAuditInDarkMode() throws {
         try auditApp(in: "dark")
+    }
+
+    /// The audit of the Film and Print tabs again under a black-and-white film and the print film it
+    /// brings with it, in light and in dark mode, for their Development rows, with the segmented
+    /// picker hidden and shown. The tabs' audit is of the films' default, a colour film, which has
+    /// none (#352, #365).
+    @MainActor func testAccessibilityAuditOfTheDevelopmentPicker() throws {
+        var findings: [String] = []
+        for appearance in ["light", "dark"] {
+            try launch(appearance: appearance)
+            defer { quit() }
+            showTab(.film)
+            choose(film: "Kodak Double-X Negative Film 5222")
+            // The pointer off the settings, where the menu leaves it: a help tag it brings up there
+            // is an element with no description to the audit.
+            app.windows["main"].coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).hover()
+            for tab in [Tab.film, .print] {
+                showTab(tab)
+                let row = panel.buttons["Development"]
+                XCTAssert(row.waitForExistence(timeout: 5), "Development on the \(tab) tab")
+                // Once the film's renders have landed, as for the tabs' audit.
+                Thread.sleep(forTimeInterval: 3)
+                for state in ["picker hidden", "picker shown"] {
+                    if state == "picker shown" {
+                        row.click()
+                        XCTAssert(panel.radioGroups["Development"].waitForExistence(timeout: 5), "the picker on the \(tab) tab")
+                        // The pointer off the settings again, from the time.
+                        app.windows["main"].coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).hover()
+                    }
+                    try app.performAccessibilityAudit { issue in
+                        findings.append("\(appearance), \(tab) tab, \(state): \(Self.describe(issue))")
+                        return true
+                    }
+                }
+            }
+        }
+        XCTAssert(findings.isEmpty, "\(findings.count) findings:\n" + findings.joined(separator: "\n"))
     }
 
     /// The audit with the app in `appearance` (`-UITestAppearance`).
@@ -289,12 +354,12 @@ final class SpektraMacUITests: XCTestCase {
         app.windows["main"].scrollViews.firstMatch
     }
 
-    /// A strip's value, its exposure in stops, once `condition` holds for it, within 5 seconds; nil
-    /// if it doesn't.
-    @MainActor private func exposure(of strip: XCUIElement, where condition: (Double) -> Bool) -> Double? {
+    /// A control's value (a strip's exposure in stops, a segment's 1 when chosen and 0 when not) once
+    /// `condition` holds for it, within 5 seconds; nil if it doesn't.
+    @MainActor private func value(of control: XCUIElement, where condition: (Double) -> Bool) -> Double? {
         let deadline = Date.now.addingTimeInterval(5)
         repeat {
-            if let value = strip.value as? Double, condition(value) {
+            if let value = control.value as? Double, condition(value) {
                 return value
             }
             Thread.sleep(forTimeInterval: 0.1)

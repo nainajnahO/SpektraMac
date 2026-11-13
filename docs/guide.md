@@ -167,7 +167,10 @@ Otherwise the settings stay as they are.
 
 Under Kodak Double-X, how long the film is developed for: 4, 5, 6.5 (the standard), 9 or 12 minutes, the times its
 curves were measured at. Longer gives a more contrasty negative, as in a darkroom. Colour films, and Tri-X Reversal,
-are developed one way, and have no such menu.
+are developed one way, and have no such setting.
+
+The row shows the time. Click it to show a segmented picker with a segment for each time, a dot under the standard
+one, and click it again to hide the picker.
 
 <table>
   <tr>
@@ -222,8 +225,9 @@ paper takes a tint from the enlarger's filters, and a colour negative on the bla
 
 ### Development
 
-Under Kodak Print Film 2302, the black-and-white print film, how long it's developed for: 2, 3.5, 5 (the standard),
-7 or 9 minutes. Longer gives a more contrasty print. Choosing another paper goes back to the standard time.
+Under Kodak Print Film 2302, the black-and-white print film, how long it's developed for, set as the film's is:
+2, 3.5, 5 (the standard), 7 or 9 minutes. Longer gives a more contrasty print. Choosing another paper goes back to
+the standard time.
 
 ### Contrast
 
