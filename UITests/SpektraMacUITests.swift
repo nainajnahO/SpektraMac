@@ -83,8 +83,9 @@ final class SpektraMacUITests: XCTestCase {
     }
 
     /// The Development row's default: a click on the time shows a segmented picker, with a film's
-    /// standard time chosen to begin with; a click on a segment chooses its time, Undo puts back
-    /// the one before, and another click on the time hides the picker (#365).
+    /// standard time chosen to begin with; a click on a segment chooses its time, the row still
+    /// saying the standard one, Undo puts back the one before, and another click on the time hides
+    /// the picker (#365).
     @MainActor func testDevelopmentSegmentChoosesItsTime() throws {
         try launch()
         defer { quit() }
@@ -99,6 +100,9 @@ final class SpektraMacUITests: XCTestCase {
         XCTAssertNotNil(value(of: standard) { $0 == 1 }, "the standard time chosen to begin with")
         nine.click()
         XCTAssertNotNil(value(of: nine) { $0 == 1 }, "9 chosen")
+        // The row says the standard time, which the picker marks.
+        XCTAssert((row.value as? String)?.hasSuffix("standard \(6.5.formatted()) min") == true,
+                  "the row with 9 chosen: \(row.value ?? "none")")
         app.typeKey("z", modifierFlags: .command)
         XCTAssertNotNil(value(of: standard) { $0 == 1 }, "the standard time after Undo")
         row.click()

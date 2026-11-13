@@ -375,14 +375,16 @@ private struct DevelopmentRow: View {
 
     var body: some View {
         if let times = model.developmentTimes(of: stock, asking: model.controls[keyPath: minutes]) {
-            let minutesName = Measurement(value: times.developed, unit: UnitDuration.minutes)
-                .formatted(.measurement(width: .abbreviated, usage: .asProvided))
-            let name = times.developed == times.standard ? "\(minutesName) (standard)" : minutesName
+            let format = { (minutes: Double) in
+                Measurement(value: minutes, unit: UnitDuration.minutes).formatted(.measurement(width: .abbreviated, usage: .asProvided))
+            }
+            let name = times.developed == times.standard ? "\(format(times.developed)) (standard)" : format(times.developed)
             let time = Binding(get: { times.developed },
                                set: { model.controls[keyPath: minutes] = $0 == times.standard ? nil : $0 })
             switch model.developmentControl {
             case .segmented:
-                SegmentedTimes(title: title, name: name, value: time, times: times.measured)
+                SegmentedTimes(title: title, name: name, value: time, times: times.measured, standard: times.standard,
+                               standardName: format(times.standard))
             case .stopwatch:
                 HStack {
                     // The time under the title: on one line beside the face, they'd be wider than the panel.
@@ -441,13 +443,17 @@ enum DevelopmentControl: String, CaseIterable {
 }
 
 /// The Development row's default: the time on one row, as development time is seldom changed. A
-/// click on it shows a segmented picker of the measured times under it, a segment for each, and
-/// another hides it (#365).
+/// click on it shows a segmented picker of the measured times under it, a segment for each with a
+/// dot under the standard one, and another hides it (#365). The picker's segments are all as wide,
+/// so the dot is under its segment in a row of as many columns, as wide as the picker.
 private struct SegmentedTimes<Title: View>: View {
     let title: Title
     let name: String
     @Binding var value: Double
     let times: [Double]
+    let standard: Double
+    /// The standard time, in minutes, for assistive apps: the row says it.
+    let standardName: String
     @State private var showsTimes = false
 
     var body: some View {
@@ -470,7 +476,8 @@ private struct SegmentedTimes<Title: View>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Development")
-                .accessibilityValue(name)
+                // With the standard time, which the dot under its segment marks.
+                .accessibilityValue(value == standard ? name : "\(name), standard \(standardName)")
             }
             if showsTimes {
                 Picker("Development", selection: $value) {
@@ -480,6 +487,21 @@ private struct SegmentedTimes<Title: View>: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .padding(.bottom, 8)
+                .overlay(alignment: .bottom) {
+                    HStack(spacing: 0) {
+                        ForEach(times, id: \.self) { time in
+                            Circle()
+                                .fill(.secondary)
+                                .frame(width: 4, height: 4)
+                                .opacity(time == standard ? 1 : 0)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .padding(.bottom, 1)
+                    // The row says it.
+                    .accessibilityHidden(true)
+                }
                 // Under the time, at the right.
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
