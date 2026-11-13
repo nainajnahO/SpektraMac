@@ -50,12 +50,6 @@ final class PhotoModel {
     private(set) var original: CGImage?
     /// The canvas shows ``original`` in place of the edit, and the settings are greyed out.
     var showsOriginal = false
-    /// The Development row's control, chosen in View › Development Control and kept for the next
-    /// launch (#365).
-    var developmentControl = DevelopmentControl.segmented {
-        didSet { defaults.set(developmentControl.rawValue, forKey: Self.developmentControlKey) }
-    }
-    private static let developmentControlKey = "developmentControl"
     /// The photo's EXIF, GPS and IPTC records, for saved renderings.
     @ObservationIgnored private var metadata: PhotoMetadata?
     /// What the sidebar and the Print | Film switch set; every change re-renders the preview, and
@@ -232,9 +226,6 @@ final class PhotoModel {
     init(defaults: UserDefaults = .standard, addsToRecentPhotos: Bool = true) {
         self.defaults = defaults
         self.addsToRecentPhotos = addsToRecentPhotos
-        if let control = defaults.string(forKey: Self.developmentControlKey).flatMap(DevelopmentControl.init(rawValue:)) {
-            developmentControl = control
-        }
         let making = Task.detached(priority: .userInitiated) { try Engine() }
         makingEngine = making
         Task {

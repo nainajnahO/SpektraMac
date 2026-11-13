@@ -64,8 +64,7 @@ final class SpektraMacUITests: XCTestCase {
 
     /// A black-and-white film has a Development control, as the print film it's printed on has,
     /// and no Saturation, which is between a colour film's layers; a colour film, the reverse
-    /// (#350). The control is the default, the time on a row that shows a segmented picker
-    /// (#365).
+    /// (#350). The control is the time, on a row that shows a segmented picker (#352).
     @MainActor func testBlackAndWhiteFilmHasDevelopmentAndNoSaturation() throws {
         try launch()
         defer { quit() }
@@ -82,10 +81,10 @@ final class SpektraMacUITests: XCTestCase {
         XCTAssertFalse(panel.buttons["Development"].exists, "Development on Portra 400")
     }
 
-    /// The Development row's default: a click on the time shows a segmented picker, with a film's
-    /// standard time chosen to begin with; a click on a segment chooses its time, the row still
-    /// saying the standard one, Undo puts back the one before, and another click on the time hides
-    /// the picker (#365).
+    /// A click on the Development row's time shows a segmented picker, with a film's standard time
+    /// chosen to begin with; a click on a segment chooses its time, the row still saying the
+    /// standard one, Undo puts back the one before, and another click on the time hides the picker
+    /// (#352, #365).
     @MainActor func testDevelopmentSegmentChoosesItsTime() throws {
         try launch()
         defer { quit() }
@@ -107,57 +106,6 @@ final class SpektraMacUITests: XCTestCase {
         XCTAssertNotNil(value(of: standard) { $0 == 1 }, "the standard time after Undo")
         row.click()
         XCTAssert(times.waitForNonExistence(timeout: 5), "the picker after another click on the time")
-    }
-
-    /// The Development dial is a clock's face of 12 minutes, on a film's standard time to begin
-    /// with. Out of the window's edge, a click sets the measured time nearest it, as a drag does on
-    /// its way, and Undo puts back the one before (#352).
-    @MainActor func testDevelopmentDialSetsTheMeasuredTimeNearestThePointer() throws {
-        try launch()
-        defer { quit() }
-        showTab(.film)
-        choose(film: "Kodak Double-X Negative Film 5222")
-        use("Stopwatch")
-        let dial = panel.sliders["Development"]
-        XCTAssert(dial.waitForExistence(timeout: 5), "Development on Double-X")
-        bringOut(dial)
-        /// A point on the dial, `across` and `down` from its centre as parts of its radius.
-        func onDial(_ across: Double, _ down: Double) -> XCUICoordinate {
-            dial.coordinate(withNormalizedOffset: CGVector(dx: 0.5 + across / 2, dy: 0.5 + down / 2))
-        }
-        XCTAssertNotNil(value(of: dial) { $0 == 6.5 }, "the standard time, at \(dial.value ?? "none")")
-        // At 9 o'clock, a measured time; then at 8, between two of them and nearer 9 than 6.5.
-        onDial(-0.75, 0).click()
-        XCTAssertNotNil(value(of: dial) { $0 == 9 }, "a click at 9, at \(dial.value ?? "none")")
-        onDial(0, -0.75).click()
-        XCTAssertNotNil(value(of: dial) { $0 == 12 }, "a click at 12, at \(dial.value ?? "none")")
-        onDial(-0.65, 0.375).click()
-        XCTAssertNotNil(value(of: dial) { $0 == 9 }, "a click at 8, at \(dial.value ?? "none")")
-        // From 12 round to between 4 and 5, past 4: a drag is one step to undo.
-        onDial(0, -0.75).click(forDuration: 0.3, thenDragTo: onDial(0.4, 0.65), withVelocity: .slow, thenHoldForDuration: 0.5)
-        XCTAssertNotNil(value(of: dial) { $0 == 5 }, "a drag from 12 to 5, at \(dial.value ?? "none")")
-        app.typeKey("z", modifierFlags: .command)
-        XCTAssertNotNil(value(of: dial) { $0 == 9 }, "Undo after the drag, at \(dial.value ?? "none")")
-    }
-
-    /// The button on top of the Development dial goes to the next measured time, and after the
-    /// longest back to the shortest (#352).
-    @MainActor func testDevelopmentButtonGoesToTheNextTime() throws {
-        try launch()
-        defer { quit() }
-        showTab(.film)
-        choose(film: "Kodak Double-X Negative Film 5222")
-        use("Stopwatch")
-        let dial = panel.sliders["Development"], next = panel.buttons["Next time"]
-        XCTAssert(dial.waitForExistence(timeout: 5), "Development on Double-X")
-        bringOut(dial)
-        XCTAssertNotNil(value(of: dial) { $0 == 6.5 }, "the standard time, at \(dial.value ?? "none")")
-        next.click()
-        XCTAssertNotNil(value(of: dial) { $0 == 9 }, "once from 6.5, at \(dial.value ?? "none")")
-        next.click()
-        XCTAssertNotNil(value(of: dial) { $0 == 12 }, "twice, at \(dial.value ?? "none")")
-        next.click()
-        XCTAssertNotNil(value(of: dial) { $0 == 4 }, "three times, round to the shortest, at \(dial.value ?? "none")")
     }
 
     // MARK: Metering marks
@@ -239,41 +187,35 @@ final class SpektraMacUITests: XCTestCase {
     }
 
     /// The audit of the Film and Print tabs again under a black-and-white film and the print film it
-    /// brings with it, in light and in dark mode, for their Development controls: the time on a row,
-    /// with its segmented picker hidden and shown, and the stopwatch tucked into the window's edge
-    /// and out. The tabs' audit is of the
-    /// films' default, a colour film, which has none (#352, #365).
-    @MainActor func testAccessibilityAuditOfTheDevelopmentDials() throws {
+    /// brings with it, in light and in dark mode, for their Development rows, with the segmented
+    /// picker hidden and shown. The tabs' audit is of the films' default, a colour film, which has
+    /// none (#352, #365).
+    @MainActor func testAccessibilityAuditOfTheDevelopmentPicker() throws {
         var findings: [String] = []
         for appearance in ["light", "dark"] {
             try launch(appearance: appearance)
             defer { quit() }
             showTab(.film)
             choose(film: "Kodak Double-X Negative Film 5222")
-            for control in ["Segmented Picker", "Stopwatch"] {
-                use(control)
-                // The pointer off the settings, where the menus leave it: a help tag it brings up
-                // there is an element with no description to the audit.
-                app.windows["main"].coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).hover()
-                for tab in [Tab.film, .print] {
-                    showTab(tab)
-                    let development = control == "Stopwatch" ? panel.sliders["Development"] : panel.buttons["Development"]
-                    XCTAssert(development.waitForExistence(timeout: 5), "Development on the \(tab) tab")
-                    // Once the film's renders have landed, as for the tabs' audit.
-                    Thread.sleep(forTimeInterval: 3)
-                    for state in control == "Stopwatch" ? ["stopwatch tucked", "stopwatch out"] : ["picker hidden", "picker shown"] {
-                        if state == "stopwatch out" {
-                            bringOut(development)
-                        } else if state == "picker shown" {
-                            development.click()
-                            XCTAssert(panel.radioGroups["Development"].waitForExistence(timeout: 5), "the picker on the \(tab) tab")
-                            // The pointer off the settings again, from the time.
-                            app.windows["main"].coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).hover()
-                        }
-                        try app.performAccessibilityAudit { issue in
-                            findings.append("\(appearance), \(tab) tab, \(state): \(Self.describe(issue))")
-                            return true
-                        }
+            // The pointer off the settings, where the menu leaves it: a help tag it brings up there
+            // is an element with no description to the audit.
+            app.windows["main"].coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).hover()
+            for tab in [Tab.film, .print] {
+                showTab(tab)
+                let row = panel.buttons["Development"]
+                XCTAssert(row.waitForExistence(timeout: 5), "Development on the \(tab) tab")
+                // Once the film's renders have landed, as for the tabs' audit.
+                Thread.sleep(forTimeInterval: 3)
+                for state in ["picker hidden", "picker shown"] {
+                    if state == "picker shown" {
+                        row.click()
+                        XCTAssert(panel.radioGroups["Development"].waitForExistence(timeout: 5), "the picker on the \(tab) tab")
+                        // The pointer off the settings again, from the time.
+                        app.windows["main"].coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).hover()
+                    }
+                    try app.performAccessibilityAudit { issue in
+                        findings.append("\(appearance), \(tab) tab, \(state): \(Self.describe(issue))")
+                        return true
                     }
                 }
             }
@@ -402,13 +344,6 @@ final class SpektraMacUITests: XCTestCase {
             ?? app.radioGroups["Show"]
     }
 
-    /// Chooses the Development row's control in View › Development Control (#365).
-    @MainActor private func use(_ control: String) {
-        app.menuBarItems["View"].click()
-        app.menuBarItems["View"].menuItems["Development Control"].click()
-        app.menuItems[control].click()
-    }
-
     @MainActor private func choose(film: String) {
         app.popUpButtons["Film"].click()
         app.menuItems[film].click()
@@ -419,23 +354,8 @@ final class SpektraMacUITests: XCTestCase {
         app.windows["main"].scrollViews.firstMatch
     }
 
-    /// Brings the Development dial out of the window's edge, where it's tucked till the pointer
-    /// comes to it, leaving the pointer in the margin right of it, off the face (#352). The pointer
-    /// goes across the tucked half in sight to the margin in 6-point steps, as a hand moves a
-    /// mouse: XCUITest moves it in a few jumps, and the app doesn't always hear the last. One hover
-    /// in the margin was seen to leave it tucked in a whole run.
-    @MainActor private func bringOut(_ dial: XCUIElement) {
-        let edge = panel.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0))
-        for inset in stride(from: 40.0, through: 10.0, by: -6.0) {
-            // The face's centre is at one height, tucked or out: the slider's middle.
-            edge.withOffset(CGVector(dx: -inset, dy: dial.frame.midY - panel.frame.minY)).hover()
-        }
-        // Till it has slid out.
-        Thread.sleep(forTimeInterval: 1)
-    }
-
-    /// A control's value (a strip's exposure in stops, the dial's time in minutes, a segment's 1 when
-    /// chosen and 0 when not) once `condition` holds for it, within 5 seconds; nil if it doesn't.
+    /// A control's value (a strip's exposure in stops, a segment's 1 when chosen and 0 when not) once
+    /// `condition` holds for it, within 5 seconds; nil if it doesn't.
     @MainActor private func value(of control: XCUIElement, where condition: (Double) -> Bool) -> Double? {
         let deadline = Date.now.addingTimeInterval(5)
         repeat {

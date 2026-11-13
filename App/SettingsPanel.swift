@@ -167,13 +167,9 @@ struct SettingsPanel: View {
             }
             .padding(.vertical)
             .padding(.leading, 15)
-            .padding(.trailing, Self.trailingMargin)
+            .padding(.trailing, 20)
         }
     }
-
-    /// The space right of the settings, to the window's edge: the Development stopwatch tucks
-    /// into the edge across it.
-    static let trailingMargin: CGFloat = 20
 }
 
 /// A group of settings as Photos lays out an adjustment: a disclosure headed by its symbol and
@@ -361,14 +357,18 @@ private struct ChoiceRow<Value: Hashable>: View {
 }
 
 /// The Development row under a black-and-white film or print film with a choice of development
-/// times: those its curves were measured at, in minutes. By default it's the time, with a
-/// segmented picker of the times a click away (``SegmentedTimes``); or, as chosen in View ›
-/// Development Control, a stopwatch (``Stopwatch``) with the time beside it. Choosing the
-/// standard one sets none, as the controls are before a choice. Under any other stock, nothing.
+/// times: those its curves were measured at, in minutes. It's the time, as that's seldom changed;
+/// a click on it shows a segmented picker of the times under it, a segment for each with a dot
+/// under the standard one, and another hides it (#352, #365). Choosing the standard one sets none,
+/// as the controls are before a choice. Under any other stock, nothing.
+///
+/// The picker's segments are all as wide, so the dot is under its segment in a row of as many
+/// columns, as wide as the picker.
 private struct DevelopmentRow: View {
     @Environment(PhotoModel.self) private var model
     let stock: String
     let minutes: WritableKeyPath<Controls, Double?>
+    @State private var showsTimes = false
     @State private var showsHelp = false
 
     private static let help = "How long it's developed for, from the times its curves were measured at. Longer gives more contrast."
@@ -379,493 +379,77 @@ private struct DevelopmentRow: View {
                 Measurement(value: minutes, unit: UnitDuration.minutes).formatted(.measurement(width: .abbreviated, usage: .asProvided))
             }
             let name = times.developed == times.standard ? "\(format(times.developed)) (standard)" : format(times.developed)
-            let time = Binding(get: { times.developed },
-                               set: { model.controls[keyPath: minutes] = $0 == times.standard ? nil : $0 })
-            switch model.developmentControl {
-            case .segmented:
-                SegmentedTimes(title: title, name: name, value: time, times: times.measured, standard: times.standard,
-                               standardName: format(times.standard))
-            case .stopwatch:
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    // The time under the title: on one line beside the face, they'd be wider than the panel.
-                    VStack(alignment: .leading, spacing: 2) {
-                        title
-                        Text(name)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            // The face's slider says it.
-                            .accessibilityHidden(true)
-                    }
-                    .fixedSize()
-                    Spacer(minLength: 8)
-                    Stopwatch(title: "Development", value: time, stops: times.measured, valueText: name)
-                }
-            }
-        }
-    }
-
-    /// The title, with the row's help on a button of its own beside it, a help tag on hover and a
-    /// popover on a click: over the stopwatch it would come up as the time's being set.
-    private var title: some View {
-        HStack(spacing: 4) {
-            Text("Development")
-                // The control says it.
-                .accessibilityHidden(true)
-            Button {
-                showsHelp.toggle()
-            } label: {
-                Image(systemName: "info.circle")
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("About development")
-            .help(Self.help)
-            .popover(isPresented: $showsHelp) {
-                Text(Self.help)
-                    .frame(width: 220, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding()
-            }
-        }
-    }
-}
-
-/// The Development row's controls, chosen in View › Development Control (#365).
-enum DevelopmentControl: String, CaseIterable {
-    case segmented, stopwatch
-
-    /// Its name in the menu.
-    var name: String {
-        switch self {
-        case .segmented: "Segmented Picker"
-        case .stopwatch: "Stopwatch"
-        }
-    }
-}
-
-/// The Development row's default: the time on one row, as development time is seldom changed. A
-/// click on it shows a segmented picker of the measured times under it, a segment for each with a
-/// dot under the standard one, and another hides it (#365). The picker's segments are all as wide,
-/// so the dot is under its segment in a row of as many columns, as wide as the picker.
-private struct SegmentedTimes<Title: View>: View {
-    let title: Title
-    let name: String
-    @Binding var value: Double
-    let times: [Double]
-    let standard: Double
-    /// The standard time, in minutes, for assistive apps: the row says it.
-    let standardName: String
-    @State private var showsTimes = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                title
-                Button {
-                    withAnimation(.snappy) { showsTimes.toggle() }
-                } label: {
                     HStack(spacing: 4) {
-                        Spacer(minLength: 8)
-                        Text(name)
-                            .monospacedDigit()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .rotationEffect(.degrees(showsTimes ? 90 : 0))
-                    }
-                    .foregroundStyle(.secondary)
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Development")
-                // With the standard time, which the dot under its segment marks.
-                .accessibilityValue(value == standard ? name : "\(name), standard \(standardName)")
-            }
-            if showsTimes {
-                Picker("Development", selection: $value) {
-                    ForEach(times, id: \.self) { time in
-                        Text(time.formatted()).tag(time)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.bottom, 8)
-                .overlay(alignment: .bottom) {
-                    HStack(spacing: 0) {
-                        ForEach(times, id: \.self) { time in
-                            Circle()
-                                .fill(.secondary)
-                                .frame(width: 4, height: 4)
-                                .opacity(time == standard ? 1 : 0)
-                                .frame(maxWidth: .infinity)
+                        Text("Development")
+                            // The time's button says it.
+                            .accessibilityHidden(true)
+                        // The row's help on a button of its own: a help tag on hover and a popover
+                        // on a click.
+                        Button {
+                            showsHelp.toggle()
+                        } label: {
+                            Image(systemName: "info.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("About development")
+                        .help(Self.help)
+                        .popover(isPresented: $showsHelp) {
+                            Text(Self.help)
+                                .frame(width: 220, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding()
                         }
                     }
-                    .padding(.bottom, 1)
-                    // The row says it.
-                    .accessibilityHidden(true)
+                    Button {
+                        withAnimation(.snappy) { showsTimes.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Spacer(minLength: 8)
+                            Text(name)
+                                .monospacedDigit()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .rotationEffect(.degrees(showsTimes ? 90 : 0))
+                        }
+                        .foregroundStyle(.secondary)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Development")
+                    // With the standard time, which the dot under its segment marks.
+                    .accessibilityValue(times.developed == times.standard ? name : "\(name), standard \(format(times.standard))")
                 }
-                // Under the time, at the right.
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-    }
-}
-
-/// A stopwatch to set a time among `stops` on: a face after the Clock app's stopwatch, in a
-/// mechanical stopwatch's case with its button on top. The face has a rim of fine ticks, ten a
-/// minute, the minutes' numbers within it, and a thin orange hand through a ring at the centre. A
-/// turn is 12 minutes, which both stocks' times are within, so a time is where a clock has that
-/// hour: 6.5 minutes at half past six. The rim's line at each stop is the hand's orange, longer
-/// and thicker than the rest, all alike: the time under the row's title says which is standard.
-///
-/// A click or a drag on the face sets the stop nearest the pointer's direction from the centre,
-/// and the hand sweeps to it the shorter way round, as it does to a time set any other way (by
-/// Undo, say). That stop's line grows a little while the pointer points at it, to show which a
-/// click sets. The button on top goes to the next stop, and from the last back to the first,
-/// going in as it's pressed. A drag clicks the trackpad at each stop it reaches; meanwhile the
-/// model renders previews alone and the change is one step to undo, as while a slider is held.
-/// With Full Keyboard Access the arrow keys go a stop. Scrolling over it goes a stop for each
-/// notch of a mouse's wheel or each `scrollPerStop` points on a trackpad, up or away for a longer
-/// time, round past the last and the first as the button on top does, with a click on the
-/// trackpad at each; each is a step to undo, as an arrow key's is, and the settings don't scroll
-/// meanwhile. SwiftUI has no scrolling of its own for a control on the Mac (its Digital Crown's
-/// is the watch's), so it's AppKit's events, watched while the pointer is on the stopwatch.
-/// Accessibility finds an AppKit slider in its place (``SliderElement``), as for a
-/// ``ValueSlider``.
-///
-/// Till the pointer comes to it, it's tucked into the window's edge: on its side, its face's
-/// centre on the edge, its button poking out towards the settings. The pointer on the half in
-/// sight brings it out, slid and turned upright to stand a little left of its place in the row,
-/// and it tucks back as the pointer leaves where it stands, its place and the margin to the edge.
-/// A drag on it, or the keyboard's focus, keeps it out. Its place in the row is the same either
-/// way.
-///
-/// Drawn here, as the system has none (#352): AppKit's circular slider is a 24-point knob that
-/// draws no marks, the Mac's clock, a date picker's, is for a time of day, and the Clock app's
-/// stopwatch is its own drawing. The face's parts are in proportion to its radius, so its size is
-/// one number.
-private struct Stopwatch: View {
-    let title: String
-    @Binding var value: Double
-    let stops: [Double]
-    let valueText: String
-    /// Where the hand points, in minutes: at the value, or on its way there. It counts on past a
-    /// turn's end and back before its start, for the hand to go the shorter way round.
-    @State private var handMinutes: Double
-    @State private var isDragging = false
-    /// The stop the pointer points at, hovering or dragging: the one a click sets.
-    @State private var pointedStop: Double?
-    /// Whether the pointer is on the stopwatch, or in its place or the margin to the window's edge.
-    @State private var isHovered = false
-    /// The part with the keyboard's focus, if one has.
-    @FocusState private var focus: Part?
-    /// AppKit's watch on scrolling, while the pointer is on the stopwatch.
-    @State private var scrollMonitor: Any?
-    /// The points scrolled on a trackpad towards the next stop.
-    @State private var scrolled: CGFloat = 0
-    /// The stops scrolled, on less back, since the stopwatch came. AppKit's watch counts them and
-    /// doesn't go to them itself: it holds the stopwatch as it was when the watch began, and with
-    /// it the time then.
-    @State private var scrolledStops = 0
-    @Environment(PhotoModel.self) private var model
-    @Environment(\.isEnabled) private var isEnabled
-
-    /// The minutes of a full turn.
-    private nonisolated static let turn = 12.0
-    /// The face's, within the case.
-    private static let diameter: CGFloat = 84
-    private static let radius = diameter / 2
-    private static let caseWidth: CGFloat = 4
-    /// The button on top's, with its stem.
-    private static let buttonHeight: CGFloat = 8
-    private static let steel = Color.gray.gradient
-    /// The stopwatch's, its button too.
-    private static let size = CGSize(width: diameter + 2 * caseWidth, height: buttonHeight + diameter + 2 * caseWidth)
-    /// The face's centre in the stopwatch: what it turns about as it's tucked.
-    private static let centre = CGPoint(x: size.width / 2, y: buttonHeight + caseWidth + radius)
-    /// How far left of its place in the row it stands when out.
-    private static let outShift: CGFloat = 12
-    /// Where it stands when out, its place and the margin to the window's edge: where the pointer
-    /// keeps it out.
-    private static let area = CGSize(width: outShift + size.width + SettingsPanel.trailingMargin, height: size.height)
-    /// The points scrolled on a trackpad for a stop.
-    private static let scrollPerStop: CGFloat = 40
-
-    /// Out of the window's edge, and upright in its place.
-    private var isOut: Bool { isHovered || isDragging || focus != nil }
-
-    private enum Part {
-        case button, face
-    }
-
-    init(title: String, value: Binding<Double>, stops: [Double], valueText: String) {
-        self.title = title
-        _value = value
-        self.stops = stops
-        self.valueText = valueText
-        _handMinutes = State(initialValue: value.wrappedValue)
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // The button on top, on its stem. The case, after it in the stack, is drawn over it, so
-            // it goes into the case as it's pressed.
-            Button { goRound(by: 1) } label: {
-                VStack(spacing: 0) {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .frame(width: 14, height: 5)
-                    Rectangle()
-                        .frame(width: 6, height: Self.buttonHeight - 5)
-                }
-                .foregroundStyle(Self.steel)
-                .contentShape(.rect)
-            }
-            .buttonStyle(PushedIn())
-            .accessibilityLabel("Next time")
-            .focused($focus, equals: .button)
-            face
-                .padding(Self.caseWidth)
-                .background {
-                    Circle().strokeBorder(Self.steel, lineWidth: Self.caseWidth)
-                }
-        }
-        .opacity(isEnabled ? 1 : 0.5)
-        // Tucked: turned onto its side, its button towards the settings, and slid right till its
-        // face's centre is on the window's edge, where the panel's scroll view cuts it off.
-        .rotationEffect(isOut ? .zero : .degrees(-90),
-                        anchor: UnitPoint(x: Self.centre.x / Self.size.width, y: Self.centre.y / Self.size.height))
-        .offset(x: isOut ? 0 : Self.area.width - Self.centre.x)
-        .animation(.smooth(duration: 0.35), value: isOut)
-        .frame(width: Self.area.width, alignment: .leading)
-        .contentShape(.rect)
-        .onContinuousHover { phase in
-            switch phase {
-            case .active(let location):
-                // Tucked, only the half in sight brings it out: the face's centre to the
-                // button's end, turned to the left of the edge. Out, all the area keeps it out.
-                if isOut || location.x >= Self.area.width - Self.centre.y {
-                    isHovered = true
-                }
-            case .ended:
-                isHovered = false
-            }
-        }
-        .onChange(of: isHovered) { _, isHovered in
-            if isHovered {
-                scrolled = 0
-                scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
-                    MainActor.assumeIsolated { scroll(event) }
-                    // Not on to the panel: it would scroll the settings from under the pointer.
-                    return nil
-                }
-            } else {
-                stopWatchingScrolling()
-            }
-        }
-        .onDisappear(perform: stopWatchingScrolling)
-        .onChange(of: scrolledStops) { old, new in
-            goRound(by: new - old)
-        }
-        // A click on the trackpad at each time a scroll goes to, as a drag clicks at each it
-        // reaches.
-        .sensoryFeedback(.alignment, trigger: scrolledStops)
-        // The area reaches past its place both ways: in the row's layout the stopwatch is as wide
-        // as ever.
-        .padding(.leading, -Self.outShift)
-        .padding(.trailing, -SettingsPanel.trailingMargin)
-    }
-
-    /// The face, and all that's done on it.
-    private var face: some View {
-        Canvas { context, size in
-            let centre = CGPoint(x: size.width / 2, y: size.height / 2), radius = min(size.width, size.height) / 2
-            /// Where the hand points for `minutes`, `inset` from the rim.
-            func point(at minutes: Double, inset: CGFloat) -> CGPoint {
-                let angle = minutes / Self.turn * 2 * .pi
-                return CGPoint(x: centre.x + sin(angle) * (radius - inset), y: centre.y - cos(angle) * (radius - inset))
-            }
-            let ticksAMinute = 10
-            for tick in 0..<Int(Self.turn) * ticksAMinute {
-                let minutes = Double(tick) / Double(ticksAMinute)
-                // At a stop, the stop's own line, below, in place of this one: under it, this one
-                // would show through, a line of its own.
-                if stops.contains(where: { abs(($0 - minutes).remainder(dividingBy: Self.turn)) < 0.01 }) {
-                    continue
-                }
-                let isMinute = tick.isMultiple(of: ticksAMinute), isHalfMinute = tick.isMultiple(of: ticksAMinute / 2)
-                var line = Path()
-                line.move(to: point(at: minutes, inset: 0))
-                line.addLine(to: point(at: minutes, inset: radius * (isMinute ? 0.12 : isHalfMinute ? 0.09 : 0.06)))
-                context.stroke(line, with: .style(isMinute ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary)),
-                               lineWidth: isMinute ? 1.5 : 1)
-            }
-            for minute in 1...Int(Self.turn) {
-                context.draw(Text(verbatim: "\(minute)").font(.system(size: radius * 0.22)),
-                             at: point(at: Double(minute), inset: radius * 0.4))
-            }
-        }
-        .overlay {
-            // Each stop's own line, in the rim's: views and not drawn on the canvas, for the one
-            // pointed at to grow smoothly.
-            ZStack {
-                ForEach(stops, id: \.self) { stop in
-                    Rectangle()
-                        .fill(.orange)
-                        .frame(width: 3, height: Self.radius * 0.2)
-                        .scaleEffect(stop == pointedStop ? 1.3 : 1, anchor: .top)
-                        // At the rim, turned to its time.
-                        .frame(maxHeight: .infinity, alignment: .top)
-                        .rotationEffect(.degrees(stop / Self.turn * 360))
+                if showsTimes {
+                    Picker("Development", selection: Binding(get: { times.developed },
+                                                             set: { model.controls[keyPath: minutes] = $0 == times.standard ? nil : $0 })) {
+                        ForEach(times.measured, id: \.self) { time in
+                            Text(time.formatted()).tag(time)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .padding(.bottom, 8)
+                    .overlay(alignment: .bottom) {
+                        HStack(spacing: 0) {
+                            ForEach(times.measured, id: \.self) { time in
+                                Circle()
+                                    .fill(.secondary)
+                                    .frame(width: 4, height: 4)
+                                    .opacity(time == times.standard ? 1 : 0)
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .padding(.bottom, 1)
+                        // The time's button says it.
+                        .accessibilityHidden(true)
+                    }
+                    // Under the time, at the right.
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
-            .animation(.snappy(duration: 0.15), value: pointedStop)
         }
-        .overlay {
-            // The hand, drawn to 12 and turned to its time: a turn is what SwiftUI animates.
-            Path { hand in
-                let centre = Self.radius, ring = Self.radius * 0.06
-                hand.move(to: CGPoint(x: centre, y: Self.radius * 0.03))
-                hand.addLine(to: CGPoint(x: centre, y: centre - ring))
-                hand.addEllipse(in: CGRect(x: centre - ring, y: centre - ring, width: 2 * ring, height: 2 * ring))
-                // On through the centre, a fifth of the radius past it.
-                hand.move(to: CGPoint(x: centre, y: centre + ring))
-                hand.addLine(to: CGPoint(x: centre, y: centre * 1.2))
-            }
-            .stroke(.orange, lineWidth: 1.5)
-            .rotationEffect(.degrees(handMinutes / Self.turn * 360))
-        }
-        .frame(width: Self.diameter, height: Self.diameter)
-        .contentShape(.circle)
-        .onContinuousHover { phase in
-            if case .active(let location) = phase {
-                pointedStop = stop(at: location)
-            } else {
-                pointedStop = nil
-            }
-        }
-        .gesture(DragGesture(minimumDistance: 0)
-            .onChanged { drag in
-                if !isDragging {
-                    isDragging = true
-                    model.isAdjusting = true
-                }
-                guard let stop = stop(at: drag.location) else { return }
-                pointedStop = stop
-                if stop != value {
-                    value = stop
-                }
-            }
-            .onEnded { drag in
-                endDrag()
-                // Hovering may have ended on the way: where the drag ends says whether the pointer
-                // is still in the area that keeps the stopwatch out. The face is the button and the
-                // case's width from the area's corner.
-                let inArea = CGPoint(x: drag.location.x + Self.caseWidth,
-                                     y: drag.location.y + Self.buttonHeight + Self.caseWidth)
-                isHovered = CGRect(origin: .zero, size: Self.area).contains(inArea)
-            })
-        .onChange(of: value) { _, value in
-            withAnimation(.smooth(duration: 0.3)) {
-                // The shorter way round: the gap as a part of a turn, half of one at most.
-                handMinutes += (value - handMinutes).remainder(dividingBy: Self.turn)
-            }
-        }
-        .sensoryFeedback(.alignment, trigger: value) { _, _ in isDragging }
-        // A drag cut off as the face goes (its window closed, say) never ends otherwise.
-        .onDisappear {
-            if isDragging {
-                endDrag()
-            }
-        }
-        .focusable(interactions: .activate)
-        .focused($focus, equals: .face)
-        .onMoveCommand { direction in
-            switch direction {
-            case .left, .down: step(by: -1)
-            case .right, .up: step(by: 1)
-            default: break
-            }
-        }
-        // Accessibility finds the AppKit slider behind it instead.
-        .accessibilityHidden(true)
-        .background {
-            SliderElement(title: title, value: value, range: stops[0]...stops[stops.count - 1], valueText: valueText,
-                          set: { asked in
-                              // Never empty: a stock with a choice of times has at least two.
-                              value = stops.min { abs($0 - asked) < abs($1 - asked) }!
-                          },
-                          move: { step(by: $0 ? 1 : -1) })
-        }
-    }
-
-    /// A stop on for a scroll up or away, or back for one down or towards, whichever way the
-    /// system scrolls a page: for each notch of a mouse's wheel, or each `scrollPerStop` points on
-    /// a trackpad.
-    private func scroll(_ event: NSEvent) {
-        // The glide after the fingers leave the trackpad would run on through the stops.
-        guard event.momentumPhase.isEmpty else { return }
-        if event.phase == .began {
-            scrolled = 0
-        }
-        let up = event.isDirectionInvertedFromDevice ? -event.scrollingDeltaY : event.scrollingDeltaY
-        if event.hasPreciseScrollingDeltas {
-            scrolled += up
-            if abs(scrolled) >= Self.scrollPerStop {
-                scrolledStops += scrolled > 0 ? 1 : -1
-                scrolled = 0
-            }
-        } else if up != 0 {
-            scrolledStops += up > 0 ? 1 : -1
-        }
-    }
-
-    private func stopWatchingScrolling() {
-        if let scrollMonitor {
-            NSEvent.removeMonitor(scrollMonitor)
-            self.scrollMonitor = nil
-        }
-    }
-
-    /// To the stop `places` on from the value, round from the last to the first and back from the
-    /// first to the last: the button on top's, and scrolling's.
-    private func goRound(by places: Int) {
-        guard let index = stops.firstIndex(of: value) else { return }
-        let target = ((index + places) % stops.count + stops.count) % stops.count
-        if target != index {
-            value = stops[target]
-        }
-    }
-
-    /// The button on top's look: pressed, it goes in, as a stopwatch's does. A plain button's
-    /// would only dim.
-    private struct PushedIn: ButtonStyle {
-        func makeBody(configuration: Configuration) -> some View {
-            configuration.label
-                .offset(y: configuration.isPressed ? 1.5 : 0)
-        }
-    }
-
-    /// The stop nearest the direction of `location` from the face's centre. None at the centre: the
-    /// pointer has no direction there, and a tremble would spin the hand.
-    private func stop(at location: CGPoint) -> Double? {
-        let across = location.x - Self.radius, down = location.y - Self.radius
-        guard hypot(across, down) >= 6 else { return nil }
-        return nearestStop(to: atan2(across, -down) / (2 * .pi) * Self.turn)
-    }
-
-    /// Of the stops, the one nearest `minutes` around the face, where a turn's end is its start.
-    private func nearestStop(to minutes: Double) -> Double {
-        // Never empty, as for the slider.
-        stops.min { abs(($0 - minutes).remainder(dividingBy: Self.turn)) < abs(($1 - minutes).remainder(dividingBy: Self.turn)) }!
-    }
-
-    /// To the stop `places` on from the value, if there is one.
-    private func step(by places: Int) {
-        guard let index = stops.firstIndex(of: value), stops.indices.contains(index + places) else { return }
-        value = stops[index + places]
-    }
-
-    private func endDrag() {
-        isDragging = false
-        model.isAdjusting = false
     }
 }
 

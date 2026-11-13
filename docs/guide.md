@@ -170,10 +170,7 @@ curves were measured at. Longer gives a more contrasty negative, as in a darkroo
 are developed one way, and have no such setting.
 
 The row shows the time. Click it to show a segmented picker with a segment for each time, a dot under the standard
-one, and click it again to hide the picker. Or choose **View › Development Control › Stopwatch** for a stopwatch of 12 minutes, with an orange mark
-at each time. It lies on its side, half in the window's right edge, till the pointer comes to it; then it slides out
-upright. Click a mark, drag the hand round to it, scroll over it (up for longer, round past the ends), or press the
-button on top for the next time. The app keeps the control you choose for the next launch.
+one, and click it again to hide the picker.
 
 <table>
   <tr>
