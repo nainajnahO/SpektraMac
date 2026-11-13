@@ -420,12 +420,16 @@ final class SpektraMacUITests: XCTestCase {
     }
 
     /// Brings the Development dial out of the window's edge, where it's tucked till the pointer
-    /// comes to it, leaving the pointer in the margin right of it, off the face (#352).
+    /// comes to it, leaving the pointer in the margin right of it, off the face (#352). The pointer
+    /// goes across the tucked half in sight to the margin in 6-point steps, as a hand moves a
+    /// mouse: XCUITest moves it in a few jumps, and the app doesn't always hear the last. One hover
+    /// in the margin was seen to leave it tucked in a whole run.
     @MainActor private func bringOut(_ dial: XCUIElement) {
-        // The face's centre is at one height, tucked or out: the slider's middle.
-        panel.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0))
-            .withOffset(CGVector(dx: -10, dy: dial.frame.midY - panel.frame.minY))
-            .hover()
+        let edge = panel.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0))
+        for inset in stride(from: 40.0, through: 10.0, by: -6.0) {
+            // The face's centre is at one height, tucked or out: the slider's middle.
+            edge.withOffset(CGVector(dx: -inset, dy: dial.frame.midY - panel.frame.minY)).hover()
+        }
         // Till it has slid out.
         Thread.sleep(forTimeInterval: 1)
     }
