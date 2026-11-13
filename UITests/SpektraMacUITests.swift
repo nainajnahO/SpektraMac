@@ -398,8 +398,7 @@ final class SpektraMacUITests: XCTestCase {
             ?? app.radioGroups["Show"]
     }
 
-    /// Chooses the Development row's control in View › Development Control, a temporary switch
-    /// (#365).
+    /// Chooses the Development row's control in View › Development Control (#365).
     @MainActor private func use(_ control: String) {
         app.menuBarItems["View"].click()
         app.menuBarItems["View"].menuItems["Development Control"].click()

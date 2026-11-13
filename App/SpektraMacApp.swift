@@ -121,10 +121,9 @@ struct ViewCommands: Commands {
                 .keyboardShortcut("m", modifiers: [])
                 .disabled(model.original == nil)
             Divider()
-            // Temporary, for #365.
             Picker("Development Control", selection: Binding { model.developmentControl } set: { model.developmentControl = $0 }) {
                 ForEach(DevelopmentControl.allCases, id: \.self) { control in
-                    Text(control.rawValue).tag(control)
+                    Text(control.name).tag(control)
                 }
             }
             Divider()

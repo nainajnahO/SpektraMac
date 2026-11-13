@@ -166,11 +166,14 @@ Otherwise the settings stay as they are.
 ### Development
 
 Under Kodak Double-X, how long the film is developed for: 4, 5, 6.5 (the standard), 9 or 12 minutes, the times its
-curves were measured at. Longer gives a more contrasty negative, as in a darkroom. Set it on the dial, a stopwatch of
-12 minutes with an orange mark at each time. It lies on its side, half in the window's right edge, till the pointer
-comes to it; then it slides out upright. Click a mark, drag the hand round to it, scroll over it (up for longer, round past the ends), or
-press the button on top for the next time. Colour films, and Tri-X Reversal, are developed one way, and have no such
-dial.
+curves were measured at. Longer gives a more contrasty negative, as in a darkroom. Colour films, and Tri-X Reversal,
+are developed one way, and have no such setting.
+
+The row shows the time. Click it to show a segmented picker with a segment for each time, and click it again to hide
+the picker. Or choose **View › Development Control › Stopwatch** for a stopwatch of 12 minutes, with an orange mark
+at each time. It lies on its side, half in the window's right edge, till the pointer comes to it; then it slides out
+upright. Click a mark, drag the hand round to it, scroll over it (up for longer, round past the ends), or press the
+button on top for the next time. The app keeps the control you choose for the next launch.
 
 <table>
   <tr>
@@ -225,7 +228,7 @@ paper takes a tint from the enlarger's filters, and a colour negative on the bla
 
 ### Development
 
-Under Kodak Print Film 2302, the black-and-white print film, how long it's developed for, on a dial like the film's:
+Under Kodak Print Film 2302, the black-and-white print film, how long it's developed for, set as the film's is:
 2, 3.5, 5 (the standard), 7 or 9 minutes. Longer gives a more contrasty print. Choosing another paper goes back to
 the standard time.
 

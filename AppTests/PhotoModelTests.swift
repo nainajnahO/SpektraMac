@@ -363,6 +363,15 @@ final class PhotoModelTests {
         #expect(model.controls.filmDevelopmentTime == nil && model.isSlideFilm)
     }
 
+    /// The Development row's control is the segmented picker to begin with, and the one chosen in
+    /// View › Development Control is the next launch's (#365).
+    @Test func developmentControlIsKeptForTheNextLaunch() async throws {
+        let first = try await makeModel()
+        #expect(first.developmentControl == .segmented)
+        first.developmentControl = .stopwatch
+        #expect(try await makeModel().developmentControl == .stopwatch)
+    }
+
     // MARK: Timing the engine's work
 
     /// Work queued behind other work on the engine is timed from when the engine starts on it, and
