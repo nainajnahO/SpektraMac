@@ -62,22 +62,47 @@ final class SpektraMacUITests: XCTestCase {
 
     // MARK: Black-and-white film
 
-    /// A black-and-white film has a Development dial, as the print film it's printed on has, and
-    /// no Saturation, which is between a colour film's layers; a colour film, the reverse (#350).
+    /// A black-and-white film has a Development control, as the print film it's printed on has,
+    /// and no Saturation, which is between a colour film's layers; a colour film, the reverse
+    /// (#350). The control is the default, the time on a row that shows a segmented picker
+    /// (#365).
     @MainActor func testBlackAndWhiteFilmHasDevelopmentAndNoSaturation() throws {
         try launch()
         defer { quit() }
         showTab(.film)
         choose(film: "Kodak Double-X Negative Film 5222")
-        XCTAssert(panel.sliders["Development"].waitForExistence(timeout: 5), "Development on Double-X")
+        XCTAssert(panel.buttons["Development"].waitForExistence(timeout: 5), "Development on Double-X")
         XCTAssertFalse(panel.sliders["Saturation"].exists, "Saturation on Double-X")
         showTab(.print)
         XCTAssertEqual(app.popUpButtons["Paper"].value as? String, "Kodak Print Film 2302")
-        XCTAssert(panel.sliders["Development"].waitForExistence(timeout: 5), "Development on 2302")
+        XCTAssert(panel.buttons["Development"].waitForExistence(timeout: 5), "Development on 2302")
         showTab(.film)
         choose(film: "Kodak Portra 400")
         XCTAssert(panel.sliders["Saturation"].waitForExistence(timeout: 5), "Saturation on Portra 400")
-        XCTAssertFalse(panel.sliders["Development"].exists, "Development on Portra 400")
+        XCTAssertFalse(panel.buttons["Development"].exists, "Development on Portra 400")
+    }
+
+    /// The Development row's default: a click on the time shows a segmented picker, with a film's
+    /// standard time chosen to begin with; a click on a segment chooses its time, Undo puts back
+    /// the one before, and another click on the time hides the picker (#365).
+    @MainActor func testDevelopmentSegmentChoosesItsTime() throws {
+        try launch()
+        defer { quit() }
+        showTab(.film)
+        choose(film: "Kodak Double-X Negative Film 5222")
+        let row = panel.buttons["Development"], times = panel.radioGroups["Development"]
+        XCTAssert(row.waitForExistence(timeout: 5), "Development on Double-X")
+        XCTAssertFalse(times.exists, "the picker before a click on the time")
+        row.click()
+        XCTAssert(times.waitForExistence(timeout: 5), "the picker after a click on the time")
+        let standard = times.radioButtons[6.5.formatted()], nine = times.radioButtons["9"]
+        XCTAssertNotNil(value(of: standard) { $0 == 1 }, "the standard time chosen to begin with")
+        nine.click()
+        XCTAssertNotNil(value(of: nine) { $0 == 1 }, "9 chosen")
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertNotNil(value(of: standard) { $0 == 1 }, "the standard time after Undo")
+        row.click()
+        XCTAssert(times.waitForNonExistence(timeout: 5), "the picker after another click on the time")
     }
 
     /// The Development dial is a clock's face of 12 minutes, on a film's standard time to begin
@@ -88,6 +113,7 @@ final class SpektraMacUITests: XCTestCase {
         defer { quit() }
         showTab(.film)
         choose(film: "Kodak Double-X Negative Film 5222")
+        use("Stopwatch")
         let dial = panel.sliders["Development"]
         XCTAssert(dial.waitForExistence(timeout: 5), "Development on Double-X")
         bringOut(dial)
@@ -117,6 +143,7 @@ final class SpektraMacUITests: XCTestCase {
         defer { quit() }
         showTab(.film)
         choose(film: "Kodak Double-X Negative Film 5222")
+        use("Stopwatch")
         let dial = panel.sliders["Development"], next = panel.buttons["Next time"]
         XCTAssert(dial.waitForExistence(timeout: 5), "Development on Double-X")
         bringOut(dial)
@@ -208,9 +235,10 @@ final class SpektraMacUITests: XCTestCase {
     }
 
     /// The audit of the Film and Print tabs again under a black-and-white film and the print film it
-    /// brings with it, in light and in dark mode, for their Development dials, tucked into the
-    /// window's edge and out: the tabs' audit is of the films' default, a colour film, which has
-    /// none (#352).
+    /// brings with it, in light and in dark mode, for their Development controls: the time on a row,
+    /// with its segmented picker hidden and shown, and the stopwatch tucked into the window's edge
+    /// and out. The tabs' audit is of the
+    /// films' default, a colour film, which has none (#352, #365).
     @MainActor func testAccessibilityAuditOfTheDevelopmentDials() throws {
         var findings: [String] = []
         for appearance in ["light", "dark"] {
@@ -218,22 +246,30 @@ final class SpektraMacUITests: XCTestCase {
             defer { quit() }
             showTab(.film)
             choose(film: "Kodak Double-X Negative Film 5222")
-            // The pointer off the settings, where the menu leaves it: a help tag it brings up there
-            // is an element with no description to the audit.
-            app.windows["main"].coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).hover()
-            for tab in [Tab.film, .print] {
-                showTab(tab)
-                let dial = panel.sliders["Development"]
-                XCTAssert(dial.waitForExistence(timeout: 5), "Development on the \(tab) tab")
-                // Once the film's renders have landed, as for the tabs' audit.
-                Thread.sleep(forTimeInterval: 3)
-                for state in ["tucked", "out"] {
-                    if state == "out" {
-                        bringOut(dial)
-                    }
-                    try app.performAccessibilityAudit { issue in
-                        findings.append("\(appearance), \(tab) tab, \(state): \(Self.describe(issue))")
-                        return true
+            for control in ["Segmented Picker", "Stopwatch"] {
+                use(control)
+                // The pointer off the settings, where the menus leave it: a help tag it brings up
+                // there is an element with no description to the audit.
+                app.windows["main"].coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).hover()
+                for tab in [Tab.film, .print] {
+                    showTab(tab)
+                    let development = control == "Stopwatch" ? panel.sliders["Development"] : panel.buttons["Development"]
+                    XCTAssert(development.waitForExistence(timeout: 5), "Development on the \(tab) tab")
+                    // Once the film's renders have landed, as for the tabs' audit.
+                    Thread.sleep(forTimeInterval: 3)
+                    for state in control == "Stopwatch" ? ["stopwatch tucked", "stopwatch out"] : ["picker hidden", "picker shown"] {
+                        if state == "stopwatch out" {
+                            bringOut(development)
+                        } else if state == "picker shown" {
+                            development.click()
+                            XCTAssert(panel.radioGroups["Development"].waitForExistence(timeout: 5), "the picker on the \(tab) tab")
+                            // The pointer off the settings again, from the time.
+                            app.windows["main"].coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).hover()
+                        }
+                        try app.performAccessibilityAudit { issue in
+                            findings.append("\(appearance), \(tab) tab, \(state): \(Self.describe(issue))")
+                            return true
+                        }
                     }
                 }
             }
@@ -362,6 +398,14 @@ final class SpektraMacUITests: XCTestCase {
             ?? app.radioGroups["Show"]
     }
 
+    /// Chooses the Development row's control in View › Development Control, a temporary switch
+    /// (#365).
+    @MainActor private func use(_ control: String) {
+        app.menuBarItems["View"].click()
+        app.menuBarItems["View"].menuItems["Development Control"].click()
+        app.menuItems[control].click()
+    }
+
     @MainActor private func choose(film: String) {
         app.popUpButtons["Film"].click()
         app.menuItems[film].click()
@@ -383,8 +427,8 @@ final class SpektraMacUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
     }
 
-    /// A control's value (a strip's exposure in stops, the dial's time in minutes) once `condition`
-    /// holds for it, within 5 seconds; nil if it doesn't.
+    /// A control's value (a strip's exposure in stops, the dial's time in minutes, a segment's 1 when
+    /// chosen and 0 when not) once `condition` holds for it, within 5 seconds; nil if it doesn't.
     @MainActor private func value(of control: XCUIElement, where condition: (Double) -> Bool) -> Double? {
         let deadline = Date.now.addingTimeInterval(5)
         repeat {

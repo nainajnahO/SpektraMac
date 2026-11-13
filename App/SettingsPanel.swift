@@ -406,27 +406,9 @@ private struct DevelopmentRow: View {
                                   isCompact: model.developmentControl == .compact)
                     }
                 }
-            case .expandable:
-                ExpandableTimes(title: title, name: name, value: time, times: times.measured, standard: times.standard)
-            case .segmented:
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        title
-                        Spacer(minLength: 8)
-                        Text(name)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            // The picker says it.
-                            .accessibilityHidden(true)
-                    }
-                    Picker("Development", selection: time) {
-                        ForEach(times.measured, id: \.self) { minutes in
-                            Text(minutes.formatted()).tag(minutes)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                }
+            case .expandable, .segmented:
+                ExpandableTimes(title: title, name: name, value: time, times: times.measured, standard: times.standard,
+                                isSegmented: model.developmentControl == .segmented)
             }
         }
     }
@@ -460,22 +442,24 @@ private struct DevelopmentRow: View {
 /// Control, to try them side by side. Not kept between launches. The switch and the controls not
 /// chosen go before #358 merges.
 enum DevelopmentControl: String, CaseIterable {
+    case segmented = "Segmented Picker"
     case stopwatch = "Stopwatch"
     case expandable = "A · Expandable Times"
     case compact = "C · Compact Stopwatch"
     case wideClock = "C · Wide Clock Face"
     case scale = "C · Straight Scale"
-    case segmented = "Segmented Picker"
 }
 
-/// Temporary, for #365, A: the time on one row; a click on it shows the measured times below as
-/// buttons, the chosen one pressed and the standard one marked, and another hides them.
+/// Temporary, for #365, A and the segmented picker: the time on one row; a click on it shows the
+/// measured times below, and another hides them. For A they're buttons, the chosen one pressed
+/// and the standard one marked; otherwise a segmented picker, a segment for each.
 private struct ExpandableTimes<Title: View>: View {
     let title: Title
     let name: String
     @Binding var value: Double
     let times: [Double]
     let standard: Double
+    let isSegmented: Bool
     @State private var showsTimes = false
 
     var body: some View {
@@ -500,7 +484,15 @@ private struct ExpandableTimes<Title: View>: View {
                 .accessibilityLabel("Development")
                 .accessibilityValue(name)
             }
-            if showsTimes {
+            if showsTimes && isSegmented {
+                Picker("Development", selection: $value) {
+                    ForEach(times, id: \.self) { time in
+                        Text(time.formatted()).tag(time)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            } else if showsTimes {
                 HStack(spacing: 4) {
                     ForEach(times, id: \.self) { time in
                         VStack(spacing: 2) {

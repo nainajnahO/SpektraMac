@@ -51,7 +51,7 @@ final class PhotoModel {
     /// The canvas shows ``original`` in place of the edit, and the settings are greyed out.
     var showsOriginal = false
     /// Temporary, for #365: the Development row's control, chosen in View › Development Control.
-    var developmentControl = DevelopmentControl.stopwatch
+    var developmentControl = DevelopmentControl.segmented
     /// The photo's EXIF, GPS and IPTC records, for saved renderings.
     @ObservationIgnored private var metadata: PhotoMetadata?
     /// What the sidebar and the Print | Film switch set; every change re-renders the preview, and
