@@ -84,15 +84,15 @@ final class SpektraMacUITests: XCTestCase {
 
     /// A photo opens at its exposure as shot (#360). The pointer on a mark's dot opens a bubble
     /// under it saying what the mark meters, each mark's on a dot marks share, and a click there
-    /// puts the exposure on the first mark's reading, in one step to undo. The bubble closes as the
-    /// pointer leaves the dots (#353).
-    @MainActor func testClickingADotPutsTheExposureOnItsMark() throws {
+    /// puts the exposure on the dot, at the mean of its marks' readings (#359), in one step to undo.
+    /// The bubble closes as the pointer leaves the dots (#353).
+    @MainActor func testClickingADotPutsTheExposureOnIt() throws {
         try launch()
         defer { quit() }
         showTab(.camera)
         // The test's photo is a gradient: As shot reads it at 0 and Centre-weighted 0.016 stops
-        // over, a third of a point to its right on the strip, so they share a dot. Its range is
-        // −4…+8 stops. The strip's value is the exposure, in stops.
+        // over, a third of a point to its right on the strip, so they share a dot, at 0.008. Its
+        // range is −4…+8 stops. The strip's value is the exposure, in stops.
         let strip = panel.sliders["Exposure"]
         XCTAssert(strip.waitForExistence(timeout: 5), "the Exposure strip")
         XCTAssertNotNil(exposure(of: strip) { $0 == 0 }, "the photo opened as shot, at \(strip.value ?? "none")")
@@ -111,7 +111,7 @@ final class SpektraMacUITests: XCTestCase {
         }
         XCTAssertGreaterThanOrEqual(bubble.frame.minY, strip.frame.maxY, "the bubble under the strip")
         besideTheDot.click()
-        XCTAssertNotNil(exposure(of: strip) { $0 == 0 }, "the exposure on As shot, at \(strip.value ?? "none")")
+        XCTAssertNotNil(exposure(of: strip) { abs($0 - 0.008) < 0.001 }, "the exposure on the dot, at \(strip.value ?? "none")")
         let undo = undoItem()
         XCTAssert(undo.title.contains("Undo Exposure"), "Edit › Undo shows “\(undo.title)”")
         // The exposure back as it was, in one step.

@@ -542,11 +542,11 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
 }
 
 /// The exposure, in stops over the photo as shot, where each photo opens. Its dots are where each
-/// way of metering puts it for this photo (``MeteringMark``): a click on one puts the exposure on
-/// its mark. A dot is in the accent colour while the exposure is on it. With the pointer on a dot, a
+/// way of metering puts it for this photo (``MeteringMark``): a click on one puts the exposure
+/// there. A dot is in the accent colour while the exposure is on it. With the pointer on a dot, a
 /// bubble says what its mark meters, and the canvas tints the region it meters. As a drag passes a
-/// mark, the trackpad clicks. Marks whose dots would be less than a dot apart share one, whose
-/// bubble has each, and a click on it puts the exposure on the first's reading.
+/// dot, the trackpad clicks. Marks whose dots would be less than a dot apart share one, at the mean
+/// of their readings, whose bubble has each.
 struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
     /// The strip's width, for how near two readings put their dots.
@@ -558,8 +558,6 @@ struct ExposureStrip: View {
             MeteringMark.allCases.compactMap { mark in photo.metering.ev[mark.rawValue].map { (mark: mark, ev: $0) } }
         } ?? []
         let exposure = model.controls.exposureEV
-        // The marks the exposure is on: those whose reading is within half of a drag's step of it.
-        let here = readings.filter { abs($0.ev - exposure) < 0.05 }.map(\.mark)
         let range = model.exposureRange
         // Two dots' width, in stops: readings nearer than that would draw dots less than a dot apart,
         // which read as one, and a click between them could be for either. Before the strip is
@@ -567,9 +565,10 @@ struct ExposureStrip: View {
         let nearby = width > 0 ? 2 * ThumbnailStrip.dotSize / width * (range.upperBound - range.lowerBound) : 0
         let dots = Self.dots(of: readings, within: nearby)
         let marks = dots.map { dot in
+            // On it within half of a drag's step: a drag stops nearest it there.
             ThumbnailStrip.Mark(items: dot.marks.map { (systemImage: $0.systemImage, name: $0.name, about: $0.about) },
-                                value: dot.value, isOn: dot.marks.contains { here.contains($0) }) {
-                model.controls.exposureEV = readings.first { $0.mark == dot.marks[0] }!.ev
+                                value: dot.value, isOn: abs(exposure - dot.value) < 0.05) {
+                model.controls.exposureEV = dot.value
             }
         }
         // The dot under the pointer.
@@ -583,10 +582,10 @@ struct ExposureStrip: View {
             model.isAdjustingExposure = $0
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-        // A click as a drag passes a mark: a fast one jumps over the step nearest it between two of
-        // the pointer's moves, so a click on landing there would miss it.
+        // A click as a drag passes a dot, one for a dot marks share: a fast drag jumps over the
+        // step nearest it between two of the pointer's moves, so a click on landing there would miss it.
         .sensoryFeedback(.alignment, trigger: exposure) { old, new in
-            model.isAdjustingExposure && readings.contains { (old < $0.ev && $0.ev <= new) || (new <= $0.ev && $0.ev < old) }
+            model.isAdjustingExposure && dots.contains { (old < $0.value && $0.value <= new) || (new <= $0.value && $0.value < old) }
         }
         .disabled(model.photo == nil)
         // The pointer may be on a dot as the tab changes: no longer.
@@ -597,8 +596,8 @@ struct ExposureStrip: View {
         .sign(strategy: .always(includingZero: false))
 
     /// The dots of `readings`: one for each run of readings no more than `nearby` stops from the
-    /// one before, midway between its ends, with its marks in ``MeteringMark``'s order.
-    private static func dots(of readings: [(mark: MeteringMark, ev: Double)], within nearby: Double)
+    /// one before, at their mean, with its marks in ``MeteringMark``'s order.
+    static func dots(of readings: [(mark: MeteringMark, ev: Double)], within nearby: Double)
         -> [(marks: [MeteringMark], value: Double)] {
         var runs: [[(mark: MeteringMark, ev: Double)]] = []
         for reading in readings.sorted(by: { $0.ev < $1.ev }) {
@@ -609,7 +608,7 @@ struct ExposureStrip: View {
             }
         }
         return runs.map { run in
-            (marks: run.map(\.mark).sorted { $0.rawValue < $1.rawValue }, value: (run.first!.ev + run.last!.ev) / 2)
+            (marks: run.map(\.mark).sorted { $0.rawValue < $1.rawValue }, value: run.map(\.ev).reduce(0, +) / Double(run.count))
         }
     }
 }
