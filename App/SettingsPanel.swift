@@ -480,6 +480,8 @@ private struct SegmentedTimes<Title: View>: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                // Under the time, at the right.
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }
