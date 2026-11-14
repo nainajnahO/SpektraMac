@@ -13,6 +13,12 @@ enum SettingsCategory: String, CaseIterable {
 struct SettingsPanel: View {
     @Environment(PhotoModel.self) private var model
     let category: SettingsCategory
+    /// Whether the Film and Print tabs' Development rows show their pickers, kept here as a tab's
+    /// row goes when the other tab shows: each is as it was left while the window is open (#366).
+    /// Read here and handed down as a value: as a binding alone, a click after a switch of tabs
+    /// changed it without redrawing the row.
+    @State private var showsFilmTimes = false
+    @State private var showsPrintTimes = false
 
     var body: some View {
         @Bindable var model = model
@@ -34,7 +40,7 @@ struct SettingsPanel: View {
                 case .film:
                     ChoiceRow(title: "Film", sections: stockSections(model.films), selection: $model.film,
                               controls: $model.controls, choosing: model.controls(choosing:))
-                    DevelopmentRow(stock: model.controls.film, minutes: \.filmDevelopmentTime)
+                    DevelopmentRow(stock: model.controls.film, minutes: \.filmDevelopmentTime, showsTimes: showsFilmTimes) { showsFilmTimes.toggle() }
                     AdjustmentGroup("Halation", systemImage: "sun.haze", adjustment: .halation,
                                     isOn: $model.controls.halation) {
                         ValueSlider("Strength", value: $model.controls.halationAmount, in: Controls.range(\.halationAmount), step: 0.05, neutral: 1,
@@ -97,7 +103,7 @@ struct SettingsPanel: View {
                                   selection: Binding(get: { model.controls.paper },
                                                      set: { model.controls = model.controls.choosing(paper: $0) }),
                                   controls: $model.controls) { model.controls.choosing(paper: $0) }
-                        DevelopmentRow(stock: model.controls.paper, minutes: \.paperDevelopmentTime)
+                        DevelopmentRow(stock: model.controls.paper, minutes: \.paperDevelopmentTime, showsTimes: showsPrintTimes) { showsPrintTimes.toggle() }
                         AdjustmentGroup("Contrast", systemImage: "circle.lefthalf.filled", adjustment: .contrast) {
                             ToneGraphView()
                         } options: {
@@ -359,8 +365,9 @@ private struct ChoiceRow<Value: Hashable>: View {
 /// The Development row under a black-and-white film or print film with a choice of development
 /// times: those its curves were measured at, in minutes. It's the time, as that's seldom changed;
 /// a click on it shows a segmented picker of the times under it, a segment for each with a dot
-/// under the standard one, and another hides it (#352, #365). Choosing the standard one sets none,
-/// as the controls are before a choice. Under any other stock, nothing.
+/// under the standard one, and another hides it (#352, #365); the panel keeps which, for its tab
+/// (#366). Choosing the standard one sets none, as the controls are before a choice. Under any
+/// other stock, nothing.
 ///
 /// The picker's segments are all as wide, so the dot is under its segment in a row of as many
 /// columns, as wide as the picker.
@@ -368,7 +375,9 @@ private struct DevelopmentRow: View {
     @Environment(PhotoModel.self) private var model
     let stock: String
     let minutes: WritableKeyPath<Controls, Double?>
-    @State private var showsTimes = false
+    let showsTimes: Bool
+    /// Shows the picker, or hides it.
+    let toggleTimes: () -> Void
     @State private var showsHelp = false
 
     private static let help = "How long it's developed for, from the times its curves were measured at. Longer gives more contrast."
@@ -403,7 +412,7 @@ private struct DevelopmentRow: View {
                         }
                     }
                     Button {
-                        withAnimation(.snappy) { showsTimes.toggle() }
+                        withAnimation(.snappy) { toggleTimes() }
                     } label: {
                         HStack(spacing: 4) {
                             Spacer(minLength: 8)

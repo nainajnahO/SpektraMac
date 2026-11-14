@@ -170,7 +170,8 @@ curves were measured at. Longer gives a more contrasty negative, as in a darkroo
 are developed one way, and have no such setting.
 
 The row shows the time. Click it to show a segmented picker with a segment for each time, a dot under the standard
-one, and click it again to hide the picker.
+one, and click it again to hide the picker. The Film and Print tabs each keep their picker shown or hidden while the
+window is open, so comparing the two times doesn't mean opening both again.
 
 <table>
   <tr>
