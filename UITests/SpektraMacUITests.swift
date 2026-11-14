@@ -108,6 +108,41 @@ final class SpektraMacUITests: XCTestCase {
         XCTAssert(times.waitForNonExistence(timeout: 5), "the picker after another click on the time")
     }
 
+    /// The Film and Print tabs each keep their Development picker shown or hidden as it was left,
+    /// through a switch to another tab and through hiding the settings, and both start hidden (#366).
+    @MainActor func testEachTabKeepsItsDevelopmentPicker() throws {
+        try launch()
+        defer { quit() }
+        showTab(.film)
+        choose(film: "Kodak Double-X Negative Film 5222")
+        let row = panel.buttons["Development"], times = panel.radioGroups["Development"]
+        XCTAssert(row.waitForExistence(timeout: 5), "Development on Double-X")
+        row.click()
+        XCTAssert(times.waitForExistence(timeout: 5), "the film's picker after a click on its time")
+        showTab(.print)
+        XCTAssert(row.waitForExistence(timeout: 5), "Development on 2302")
+        XCTAssertFalse(times.exists, "the print's picker before a click on its time")
+        row.click()
+        XCTAssert(times.waitForExistence(timeout: 5), "the print's picker after a click on its time")
+        showTab(.camera)
+        showTab(.film)
+        XCTAssert(times.waitForExistence(timeout: 5), "the film's picker back on the Film tab")
+        // And through hiding the settings, with the toolbar's Adjust, and showing them again.
+        let adjust = app.windows["main"].toolbars.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == 'Adjust'")).firstMatch
+        adjust.click()
+        XCTAssert(row.waitForNonExistence(timeout: 5), "Development with the settings hidden")
+        adjust.click()
+        XCTAssert(times.waitForExistence(timeout: 5), "the film's picker after hiding and showing the settings")
+        row.click()
+        XCTAssert(times.waitForNonExistence(timeout: 5), "the film's picker after another click on its time")
+        showTab(.print)
+        XCTAssert(times.waitForExistence(timeout: 5), "the print's picker back on the Print tab")
+        showTab(.film)
+        XCTAssert(row.waitForExistence(timeout: 5), "Development back on the Film tab")
+        XCTAssertFalse(times.exists, "the film's picker, hidden, back on the Film tab")
+    }
+
     // MARK: Metering marks
 
     /// A photo opens at its exposure as shot (#360). The pointer on a mark's dot opens a bubble
