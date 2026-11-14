@@ -623,7 +623,8 @@ private struct ChoiceMenu<Value: Hashable>: NSViewRepresentable {
 /// there. A dot is in the accent colour while the exposure is on it. With the pointer on a dot, a
 /// bubble says what its mark meters, and the canvas tints the region it meters. As a drag passes a
 /// dot, the trackpad clicks. Marks whose dots would be less than a dot apart share one, at the mean
-/// of their readings, whose bubble has each.
+/// of their readings, whose bubble has each; at As shot's, if it's one of them, so a photo opens on
+/// its dot (#364).
 struct ExposureStrip: View {
     @Environment(PhotoModel.self) private var model
     /// The strip's width, for how near two readings put their dots.
@@ -673,7 +674,8 @@ struct ExposureStrip: View {
         .sign(strategy: .always(includingZero: false))
 
     /// The dots of `readings`: one for each run of readings no more than `nearby` stops from the
-    /// one before, at their mean, with its marks in ``MeteringMark``'s order.
+    /// one before, with its marks in ``MeteringMark``'s order. A run's dot is at As shot's reading
+    /// if it has As shot, where a photo opens, and otherwise at their mean.
     static func dots(of readings: [(mark: MeteringMark, ev: Double)], within nearby: Double)
         -> [(marks: [MeteringMark], value: Double)] {
         var runs: [[(mark: MeteringMark, ev: Double)]] = []
@@ -685,7 +687,9 @@ struct ExposureStrip: View {
             }
         }
         return runs.map { run in
-            (marks: run.map(\.mark).sorted { $0.rawValue < $1.rawValue }, value: run.map(\.ev).reduce(0, +) / Double(run.count))
+            let mean = run.map(\.ev).reduce(0, +) / Double(run.count)
+            return (marks: run.map(\.mark).sorted { $0.rawValue < $1.rawValue },
+                    value: run.first { $0.mark == .asShot }?.ev ?? mean)
         }
     }
 }

@@ -112,7 +112,8 @@ pink. Click the dot to put the exposure there. A dot is in the accent colour whi
 Apple's Vision finds the faces, people and objects when the photo opens.
 
 Marks that read the same, or so nearly that their dots would almost touch, share one dot, at the middle of their
-readings (their mean). Its bubble lists each of them.
+readings (their mean). Its bubble lists each of them. When As shot is one of them, the dot is on As shot instead, so a
+photo opens with the exposure on its dot.
 
 Dragging the strip doesn't stop at the dots. As a drag passes a dot, the trackpad clicks, once for a dot marks share.
 
