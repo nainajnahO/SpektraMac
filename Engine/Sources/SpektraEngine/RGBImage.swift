@@ -66,17 +66,21 @@ public struct RGBImage: Sendable {
     /// 8 bits per channel: Core Image reads them slowly otherwise, from the file or from ImageIO's
     /// image alike (8.5 s for a 24 MP 16-bit TIFF with deflate compression, against 0.35 s to
     /// decode it and 0.1 s to convert the copy, which converts the same).
+    ///
+    /// The copy is drawn as 16-bit RGBX (64 bits a pixel), not kept in the file's layout: Core Image
+    /// renders a 48-bit RGB image wrongly once it's large, each row showing its right half twice
+    /// (a 5504 × 8256 TIFF from Capture One; 1200 × 800 renders right).
     private static func plainImage(from source: CGImageSource, properties: [CFString: Any]) -> CIImage? {
         guard let decoded = CGImageSourceCreateImageAtIndex(source, 0, nil),
-              let space = decoded.colorSpace,
-              let pixels = decoded.dataProvider?.data,
-              let provider = CGDataProvider(data: pixels),
-              let copy = CGImage(width: decoded.width, height: decoded.height,
-                                 bitsPerComponent: decoded.bitsPerComponent, bitsPerPixel: decoded.bitsPerPixel,
-                                 bytesPerRow: decoded.bytesPerRow, space: space, bitmapInfo: decoded.bitmapInfo,
-                                 provider: provider, decode: decoded.decode,
-                                 shouldInterpolate: decoded.shouldInterpolate, intent: decoded.renderingIntent)
+              let space = decoded.colorSpace, space.model == .rgb,
+              let context = CGContext(data: nil, width: decoded.width, height: decoded.height, bitsPerComponent: 16,
+                                      bytesPerRow: 0, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+                                          | CGBitmapInfo.byteOrder16Little.rawValue)
         else { return nil }
+        context.interpolationQuality = .none
+        context.draw(decoded, in: CGRect(x: 0, y: 0, width: decoded.width, height: decoded.height))
+        guard let copy = context.makeImage() else { return nil }
         let orientation = (properties[kCGImagePropertyOrientation] as? UInt32)
             .flatMap(CGImagePropertyOrientation.init(rawValue:)) ?? .up
         return CIImage(cgImage: copy).oriented(orientation)

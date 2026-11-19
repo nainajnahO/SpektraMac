@@ -3,6 +3,7 @@ import CoreGraphics
 import CoreImage
 import Foundation
 import ImageIO
+import Metal
 import Testing
 import UniformTypeIdentifiers
 import simd
@@ -80,6 +81,54 @@ func tiffDecodesAsCoreImageReadsIt(bits: Int, tagged: Bool) throws {
                                   format: .RGBAf, colorSpace: RGBImage.workingColorSpace)
     let expected = (0..<(width * height)).flatMap { rgba[($0 * 4)..<($0 * 4 + 3)] }
     #expect(decoded.pixels.map(\.bitPattern) == expected.map(\.bitPattern))
+}
+
+/// A large 16-bit RGB TIFF, as Capture One's Edit With writes one (5504 × 8256, 48 bits a pixel),
+/// decodes with each row whole: Core Image, given that layout as it is, showed each row's right half
+/// twice. Red rises across the width, so every column decodes redder than the one before.
+@Test func largeSixteenBitTIFFDecodesWholeRows() throws {
+    let (width, height) = (5504, 8256)
+    var values = [UInt16](repeating: 0, count: width * height * 3)
+    for y in 0..<height {
+        for x in 0..<width {
+            values[(y * width + x) * 3] = UInt16(x * 65535 / (width - 1))
+            values[(y * width + x) * 3 + 1] = 20000
+            values[(y * width + x) * 3 + 2] = 20000
+        }
+    }
+    let data = values.withUnsafeBytes { Data($0) }
+    let image = CGImage(width: width, height: height, bitsPerComponent: 16, bitsPerPixel: 48, bytesPerRow: width * 6,
+                        space: CGColorSpace(name: CGColorSpace.adobeRGB1998)!, bitmapInfo: .byteOrder16Little,
+                        provider: CGDataProvider(data: data as CFData)!, decode: nil, shouldInterpolate: false,
+                        intent: .defaultIntent)!
+    let url = FileManager.default.temporaryDirectory.appending(component: "\(UUID()).tif")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.tiff.identifier as CFString, 1, nil)!
+    CGImageDestinationAddImage(destination, image, nil)
+    #expect(CGImageDestinationFinalize(destination))
+
+    // As Engine.open renders it: the whole image at once into a texture, by Core Image on the GPU.
+    let decoded = try RGBImage.decode(contentsOf: url)
+    #expect(decoded.extent.size == CGSize(width: width, height: height))
+    let device = try #require(MTLCreateSystemDefaultDevice())
+    let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: width, height: height,
+                                                              mipmapped: false)
+    descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
+    descriptor.storageMode = .shared
+    let texture = try #require(device.makeTexture(descriptor: descriptor))
+    let target = CIRenderDestination(mtlTexture: texture, commandBuffer: nil)
+    target.colorSpace = RGBImage.workingColorSpace
+    target.isFlipped = true
+    try RGBImage.makeContext(commandQueue: try #require(device.makeCommandQueue()))
+        .startTask(toRender: decoded, from: decoded.extent, to: target, at: .zero).waitUntilCompleted()
+    for y in [0, height / 2, height - 1] {
+        var row = [Float16](repeating: 0, count: width * 4)
+        texture.getBytes(&row, bytesPerRow: width * 8, from: MTLRegionMake2D(0, y, width, 1), mipmapLevel: 0)
+        let red = (0..<width).map { Float(row[$0 * 4]) }
+        // A row showing its right half twice has as much red at a quarter of the way as at three quarters.
+        #expect(red[width / 4] + 0.1 < red[width * 3 / 4], "row \(y)")
+        #expect(zip(red, red.dropFirst()).allSatisfy { $0 <= $1 }, "row \(y)")
+    }
 }
 
 extension PhotoOpeningTests {
