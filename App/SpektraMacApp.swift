@@ -68,7 +68,7 @@ struct SpektraMacApp: App {
         }
         .defaultSize(width: 420, height: 480)
         .restorationBehavior(AppDelegate.isUITesting ? .disabled : .automatic)
-        // Window › Log, as the toolbar's Log button.
+        // Window › Log: the Log has no button in the main window.
         .keyboardShortcut("l", modifiers: [.command, .option])
     }
 }

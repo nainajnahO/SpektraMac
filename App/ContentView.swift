@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Environment(PhotoModel.self) private var model
-    @Environment(\.openWindow) private var openWindow
     @Environment(\.undoManager) private var undoManager
     @SceneStorage("showsSettings") private var showsSettings = true
     @SceneStorage("settingsCategory") private var category = SettingsCategory.film
@@ -31,23 +30,30 @@ struct ContentView: View {
             .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
             // On the right over the photo, as Photos' Adjust panel: the photo fits beside it and
             // shows through the inspector's glass when zoomed or moved under it (``ImageCanvas``),
-            // as the inspector lies over the canvas rather than beside it.
+            // as the inspector lies over the canvas rather than beside it. View › Hide Inspector
+            // hides it (``InspectorCommands``): the toolbar has no button for it.
             .inspector(isPresented: $showsSettings) {
                 SettingsPanel(category: category)
                     .background(HostingViewName(name: "Settings"))
                     // Greyed out while the canvas shows the original: they set the edit.
                     .disabled(model.showsOriginal)
                     .inspectorColumnWidth(290)
-                    // In the inspector's own part of the toolbar, so centred over the panel.
+                    // A fixed width still lets a drag on the inspector's edge hide it, under a
+                    // pointer that promises a resize: View › Hide Inspector is the way to hide it.
+                    .interactiveDismissDisabled()
+                    // In the inspector's own part of the toolbar, so centred over the panel. Only
+                    // while it shows: macOS keeps a hidden inspector's toolbar items in the toolbar.
                     .toolbar {
-                        ToolbarSpacer(.flexible)
-                        ToolbarItem {
-                            Picker("Settings", selection: $category) {
-                                ForEach(SettingsCategory.allCases, id: \.self) { Text($0.rawValue) }
+                        if showsSettings {
+                            ToolbarSpacer(.flexible)
+                            ToolbarItem {
+                                Picker("Settings", selection: $category) {
+                                    ForEach(SettingsCategory.allCases, id: \.self) { Text($0.rawValue) }
+                                }
+                                .pickerStyle(.segmented)
                             }
-                            .pickerStyle(.segmented)
+                            ToolbarSpacer(.flexible)
                         }
-                        ToolbarSpacer(.flexible)
                     }
             }
             // The window's content, around the photo's column and the inspector's.
@@ -100,9 +106,6 @@ struct ContentView: View {
             Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
                 .disabled(!model.canSave)
             shareButton
-            Button("Log", systemImage: "list.bullet.rectangle") { openWindow(id: "log") }
-            Toggle("Adjust", systemImage: "slider.horizontal.3", isOn: $showsSettings)
-                .help("Show or hide the settings")
         }
     }
 

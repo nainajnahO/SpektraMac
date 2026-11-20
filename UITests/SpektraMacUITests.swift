@@ -127,12 +127,10 @@ final class SpektraMacUITests: XCTestCase {
         showTab(.camera)
         showTab(.film)
         XCTAssert(times.waitForExistence(timeout: 5), "the film's picker back on the Film tab")
-        // And through hiding the settings, with the toolbar's Adjust, and showing them again.
-        let adjust = app.windows["main"].toolbars.descendants(matching: .any)
-            .matching(NSPredicate(format: "label == 'Adjust'")).firstMatch
-        adjust.click()
+        // And through hiding the settings, with View › Hide Inspector (⌃⌘I), and showing them again.
+        app.typeKey("i", modifierFlags: [.command, .control])
         XCTAssert(row.waitForNonExistence(timeout: 5), "Development with the settings hidden")
-        adjust.click()
+        app.typeKey("i", modifierFlags: [.command, .control])
         XCTAssert(times.waitForExistence(timeout: 5), "the film's picker after hiding and showing the settings")
         row.click()
         XCTAssert(times.waitForNonExistence(timeout: 5), "the film's picker after another click on its time")
