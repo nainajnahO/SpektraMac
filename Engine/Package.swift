@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "SpektraEngine",
-    platforms: [.macOS("26.5")],
+    platforms: [.macOS("27.0")],
     products: [
         .library(name: "SpektraEngine", targets: ["SpektraEngine"]),
         .executable(name: "spektra-cli", targets: ["spektra-cli"]),
