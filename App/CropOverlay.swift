@@ -23,20 +23,34 @@ enum CropShape: String, CaseIterable {
 }
 
 /// The part of the photo to keep, marked on the whole photo in crop mode: the rest is dimmed, and
-/// the frame is dragged by its corners and edges, or moved by its middle.
+/// the frame is dragged by its corners and edges. A drag on the photo moves the frame, or, as in
+/// Photos, the photo under the frame.
 ///
 /// Drawn and dragged here: SwiftUI and AppKit have no crop control. ImageKit's `IKImageView` has a
 /// crop tool, but it's a view of its own image that crops it itself, so it can't mark a crop on
 /// the canvas's render.
-struct CropOverlay: View {
+struct CropOverlay: View, Animatable {
     /// The part to keep, in the photo's pixels from its top left.
     @Binding var selection: CGRect
     /// The photo's size in pixels.
     let whole: CGSize
+    /// Where all of the photo is, in the overlay's coordinates: the canvas's.
+    var photoFrame: CGRect
     /// Width over height the selection keeps to, if any.
     let ratio: CGFloat?
+    /// A drag on the photo moves the photo under the frame, rather than the frame over it.
+    let movesPhoto: Bool
+    /// While a corner or edge is dragged with the photo moving: the selection the canvas stays laid
+    /// out around, so the frame follows the pointer. Let go, the canvas fits the frame again.
+    @Binding var held: CGRect?
     /// The selection as the drag under way found it.
     @State private var start: CGRect?
+
+    /// The frame and the dimming follow the photo as it moves to fit the frame.
+    var animatableData: CGRect.AnimatableData {
+        get { photoFrame.animatableData }
+        set { photoFrame.animatableData = newValue }
+    }
 
     /// Where the frame is held to change its size: its corners and edges.
     private enum Handle: CaseIterable {
@@ -95,11 +109,13 @@ struct CropOverlay: View {
     var body: some View {
         GeometryReader { geometry in
             // Points to a pixel.
-            let scale = geometry.size.width / whole.width
-            let frame = CGRect(x: selection.minX * scale, y: selection.minY * scale,
+            let scale = photoFrame.width / whole.width
+            let frame = CGRect(x: photoFrame.minX + selection.minX * scale, y: photoFrame.minY + selection.minY * scale,
                                width: selection.width * scale, height: selection.height * scale)
+            // Where a drag moves what's moved: the frame, or the photo where it's on the canvas.
+            let moveArea = movesPhoto ? photoFrame.intersection(CGRect(origin: .zero, size: geometry.size)) : frame
             ZStack {
-                marks(of: frame, in: geometry.size)
+                marks(of: frame)
                 // The size marked, in pixels, in the frame's corner where there's room for it.
                 if frame.width >= 120, frame.height >= 44 {
                     let size = "\(Int(selection.width.rounded()).formatted()) × \(Int(selection.height.rounded()).formatted())"
@@ -117,9 +133,10 @@ struct CropOverlay: View {
                 }
                 Color.clear
                     .contentShape(Rectangle())
-                    .frame(width: frame.width, height: frame.height)
-                    .position(x: frame.midX, y: frame.midY)
-                    .gesture(drag(scale: scale) { moved($0, by: $1) })
+                    .frame(width: moveArea.width, height: moveArea.height)
+                    .position(x: moveArea.midX, y: moveArea.midY)
+                    // The photo goes with the pointer: the part marked, the other way.
+                    .gesture(drag(scale: scale) { moved($0, by: movesPhoto ? CGSize(width: -$1.width, height: -$1.height) : $1) })
                     .pointerStyle(start == nil ? .grabIdle : .grabActive)
                     .accessibilityHidden(true)
                 ForEach(Handle.allCases, id: \.self) { handle in
@@ -128,7 +145,7 @@ struct CropOverlay: View {
                         .contentShape(Rectangle())
                         .frame(width: area.width, height: area.height)
                         .position(x: area.midX, y: area.midY)
-                        .gesture(drag(scale: scale) { resized($0, by: $1, at: handle, scale: scale) })
+                        .gesture(drag(scale: scale, holdsCanvas: movesPhoto) { resized($0, by: $1, at: handle, scale: scale) })
                         .pointerStyle(.frameResize(position: handle.position))
                         .accessibilityElement()
                         .accessibilityHidden(handle.edge == nil)
@@ -144,7 +161,8 @@ struct CropOverlay: View {
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
-            // The handles move as they're dragged: the drag is measured on the photo, which doesn't.
+            // The handles and the photo move as they're dragged: the drag is measured on the
+            // canvas, which doesn't.
             .coordinateSpace(.named("crop"))
         }
     }
@@ -161,9 +179,9 @@ struct CropOverlay: View {
 
     /// The photo dimmed outside `frame`, and the frame: its outline, the thirds, and a mark on each
     /// corner and edge.
-    private func marks(of frame: CGRect, in size: CGSize) -> some View {
+    private func marks(of frame: CGRect) -> some View {
         Canvas { context, _ in
-            var outside = Path(CGRect(origin: .zero, size: size))
+            var outside = Path(photoFrame)
             outside.addRect(frame)
             context.fill(outside, with: .color(.black.opacity(0.6)), style: FillStyle(eoFill: true))
             // White lines on a pale photo show by their shadow.
@@ -201,15 +219,23 @@ struct CropOverlay: View {
     }
 
     /// A drag that sets the selection to what `change` makes of it as the drag began and how far the
-    /// drag has gone, in pixels.
-    private func drag(scale: CGFloat, _ change: @escaping (CGRect, CGSize) -> CGRect) -> some Gesture {
+    /// drag has gone, in pixels: holding the canvas where it is till it ends, if `holdsCanvas`.
+    private func drag(scale: CGFloat, holdsCanvas: Bool = false,
+                      _ change: @escaping (CGRect, CGSize) -> CGRect) -> some Gesture {
         DragGesture(minimumDistance: 1, coordinateSpace: .named("crop"))
             .onChanged { drag in
                 let from = start ?? selection
+                if start == nil, holdsCanvas {
+                    held = from
+                }
                 start = from
                 selection = change(from, CGSize(width: drag.translation.width / scale, height: drag.translation.height / scale))
             }
-            .onEnded { _ in start = nil }
+            .onEnded { _ in
+                start = nil
+                guard held != nil else { return }
+                withAnimation(.snappy(duration: 0.3)) { held = nil }
+            }
     }
 
     /// `start` moved by `offset`, inside the photo.
