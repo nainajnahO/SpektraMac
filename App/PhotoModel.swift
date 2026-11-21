@@ -419,7 +419,7 @@ final class PhotoModel {
     /// The part marked to keep while cropping, in the pixels of the photo as it opened, from its top
     /// left: what the canvas's handles move.
     var cropSelection = CGRect.zero
-    /// The shape the part marked keeps to: free as crop mode starts, and after Reset.
+    /// The shape the part marked keeps to: free as crop mode starts.
     var cropShape = CropShape.free
     /// The photo's crop as crop mode began: what Cancel goes back to, and Undo once the crop is kept.
     @ObservationIgnored private var cropBeforeCropping: CGRect?
@@ -442,17 +442,17 @@ final class PhotoModel {
         cropShape = .free
     }
 
-    /// Something to reset: the part marked isn't all of the photo.
+    /// Something to reset: the photo is cropped, or the part marked isn't all of it.
     var canResetCrop: Bool {
         guard isCropping, !isLeavingCropMode, let photo else { return false }
-        return cropSelection != photo.wholeBounds
+        return cropBeforeCropping != nil || cropSelection != photo.wholeBounds
     }
 
-    /// Marks all of the photo, in any shape.
+    /// Ends crop mode with all of the photo kept: one step to undo, as ``endCropping()``. The frame
+    /// stays as marked until the photo shows, so Done doesn't start to grow out of Crop meanwhile.
     func resetCrop() {
-        guard canResetCrop, let photo else { return }
-        cropShape = .free
-        cropSelection = photo.wholeBounds
+        guard canResetCrop else { return }
+        setCrop(nil, from: cropBeforeCropping)
     }
 
     /// The part marked differs from the crop as crop mode began: ``endCropping()`` would change it.
