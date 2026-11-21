@@ -129,6 +129,7 @@ struct ContentView: View {
         // titles would draw each on its own.
         if model.isCropping {
             ToolbarItem {
+                // Spaced as macOS spaces it: padding a title moves it off its hover highlight.
                 ControlGroup {
                     Button("Reset") { model.resetCrop() }
                         .disabled(!model.canResetCrop)
