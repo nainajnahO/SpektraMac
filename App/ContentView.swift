@@ -861,9 +861,10 @@ private struct ImageCanvas: View {
 
 /// Straightening in crop mode, as a fighter's head-up display shows its speed and height: an
 /// upright tape of degrees in fine lines on the photo, one at each side of the canvas, its ticks
-/// reaching out from a spine, which isn't drawn, toward the photo's middle. It slides past a box
-/// reading the angle as it's dragged or scrolled over: down, the degrees above come to the box,
-/// turning the photo to the right. A double-click straightens it to 0°. On the spine, as the
+/// reaching out from a spine, which isn't drawn, toward the photo's middle. It turns, as the edge
+/// of a wheel, past a needle with the angle beside it as it's dragged or scrolled over: down the
+/// right tape, the degrees above come to the needle, turning the photo to the right, and down the
+/// left one, to the left. A double-click straightens it to 0°. Beside the spine, as the
 /// exposure's strip has the metering marks' dots, is a
 /// dot at the angle that levels the horizon Vision finds: a click on it straightens the photo
 /// there, and with the pointer on it, the same bubble as theirs says what it is, opening towards
@@ -893,7 +894,7 @@ private struct StraighteningRuler: View {
     /// The pointer is on the horizon's dot.
     @State private var isOnDot = false
 
-    /// Points to a degree on the tape, and of a drag, which the tape follows.
+    /// Points to a degree at the tape's middle, and of a drag, which the tape follows there.
     static let spacing: CGFloat = 8
     /// Points of a trackpad's scroll to a degree: five times a drag's, so a short scroll reaches
     /// tenths of a degree, the tape sliding slower than the fingers.
@@ -922,10 +923,11 @@ private struct StraighteningRuler: View {
         let degrees = "\(angle.formatted(.number.precision(.fractionLength(1))))°"
         ZStack(alignment: .topLeading) {
             // Both, one faded in over the other as the photo under it turns bright or dark.
-            tape(at: angle, reading: degrees, ink: .white, shadow: .black.opacity(0.6))
+            tape(at: angle, ink: .white, shadow: .black.opacity(0.6))
                 .opacity(isOnBright ? 0 : 1)
-            tape(at: angle, reading: degrees, ink: .black, shadow: .white.opacity(0.7))
+            tape(at: angle, ink: .black, shadow: .white.opacity(0.7))
                 .opacity(isOnBright ? 1 : 0)
+            needle(reading: degrees)
             if let dot = dotCentre(at: angle), let horizon = model.horizonAngle {
                 horizonDot(isOn: abs(angle - horizon) < 0.05)
                     .position(dot)
@@ -942,10 +944,6 @@ private struct StraighteningRuler: View {
                 }
             }
             .frame(width: Self.width, height: height)
-            // Fading out at its ends.
-            .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.15),
-                                         .init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
-                                 startPoint: .top, endPoint: .bottom))
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 1)
                 .onChanged { drag in
@@ -1016,13 +1014,14 @@ private struct StraighteningRuler: View {
     private static let horizon = (systemImage: "level", name: "Horizon",
                                   about: "levels the horizon Vision finds in the photo")
 
-    /// Where the horizon's dot is on the spine, with the tape at `angle`: none until Vision has found
-    /// it, or where it's faded out at the tape's ends.
+    /// Where the horizon's dot is beside the spine, with the tape at `angle`: none until Vision has
+    /// found it, or where it's faded out at the tape's ends.
     private func dotCentre(at angle: Double) -> CGPoint? {
-        guard let horizon = model.horizonAngle else { return nil }
-        let y = height / 2 - turn * (horizon - angle) * Self.spacing
+        guard let horizon = model.horizonAngle, let y = place(of: horizon, at: angle)?.y else { return nil }
         guard y > height * 0.15, y < height * 0.85 else { return nil }
-        return CGPoint(x: side == .leading ? Self.width - Self.spineInset : Self.spineInset, y: y)
+        // Beside the spine, on the numbers' side, clear of the ticks.
+        let beside = Self.spineInset + 14
+        return CGPoint(x: side == .leading ? Self.width - beside : beside, y: y)
     }
 
     /// `location`, in the tape, is on the horizon's dot, with the tape at `angle`.
@@ -1050,11 +1049,11 @@ private struct StraighteningRuler: View {
             }
     }
 
-    /// A tick every degree, centred on the spine, longer every 5 and numbered every 10, and the box
-    /// reading `degrees`, pointing at `angle`: fine lines in `ink`, with a `shadow` to show where the
-    /// photo is as light or dark as they are. The degrees to the right run up the right tape and
-    /// down the left one.
-    private func tape(at angle: Double, reading degrees: String, ink: Color, shadow: Color) -> some View {
+    /// A tick every degree, centred on the spine, longer every 5 and numbered every 10, on the edge
+    /// of a wheel (``place(of:at:)``): they close up and fade toward the tape's ends, the numbers
+    /// squashed. Fine lines in `ink`, with a `shadow` to show where the photo is as light or dark as
+    /// they are. The degrees to the right run up the right tape and down the left one.
+    private func tape(at angle: Double, ink: Color, shadow: Color) -> some View {
         Canvas { context, size in
             // Outwards from the spine, which faces the photo's middle.
             let outwards: CGFloat = side == .leading ? -1 : 1
@@ -1062,35 +1061,56 @@ private struct StraighteningRuler: View {
             let x = { (offset: CGFloat) in spine + outwards * offset }
             let anchor: UnitPoint = side == .leading ? .trailing : .leading
             let middle = size.height / 2
-            let box = CGSize(width: 58, height: 20)
             context.addFilter(.shadow(color: shadow, radius: 1))
-            var lines = Path()
             for degree in -45...45 {
-                let y = middle - turn * (Double(degree) - angle) * Self.spacing
-                guard y > -12, y < size.height + 12 else { continue }
+                guard let spot = place(of: Double(degree), at: angle) else { continue }
                 let length: CGFloat = degree.isMultiple(of: 10) ? 12 : degree.isMultiple(of: 5) ? 8 : 4
-                lines.move(to: CGPoint(x: x(-length / 2), y: y))
-                lines.addLine(to: CGPoint(x: x(length / 2), y: y))
-                // Not behind the box.
-                if degree.isMultiple(of: 10), abs(y - middle) > box.height {
-                    context.draw(Text(degree.formatted()).font(.system(size: 11, design: .monospaced)).foregroundStyle(ink),
-                                 at: CGPoint(x: x(12), y: y), anchor: anchor)
+                var tick = Path()
+                tick.move(to: CGPoint(x: x(-length / 2), y: spot.y))
+                tick.addLine(to: CGPoint(x: x(length / 2), y: spot.y))
+                context.stroke(tick, with: .color(ink.opacity(spot.facing)), lineWidth: 0.75)
+                // Not beside the needle's reading, nor turned almost out of sight.
+                if degree.isMultiple(of: 10), abs(spot.y - middle) > 20, spot.facing > 0.1 {
+                    var label = context
+                    label.opacity = spot.facing
+                    label.translateBy(x: x(12), y: spot.y)
+                    label.scaleBy(x: 1, y: spot.facing)
+                    label.draw(Text(degree.formatted()).font(.system(size: 11, design: .monospaced)).foregroundStyle(ink),
+                               at: .zero, anchor: anchor)
                 }
             }
-            context.stroke(lines, with: .color(ink), lineWidth: 0.75)
-            // The box, its point just past the longest ticks.
-            let (near, far) = (x(14), x(14 + box.width))
-            var reading = Path()
-            reading.move(to: CGPoint(x: x(8), y: middle))
-            reading.addLine(to: CGPoint(x: near, y: middle - box.height / 2))
-            reading.addLine(to: CGPoint(x: far, y: middle - box.height / 2))
-            reading.addLine(to: CGPoint(x: far, y: middle + box.height / 2))
-            reading.addLine(to: CGPoint(x: near, y: middle + box.height / 2))
-            reading.closeSubpath()
-            context.stroke(reading, with: .color(ink), lineWidth: 1)
-            context.draw(Text(degrees).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(ink),
-                         at: CGPoint(x: (near + far) / 2, y: middle))
         }
+    }
+
+    /// A needle across the tape's middle in yellow, as the Camera app on iPhone marks its setting,
+    /// and `degrees` beside it, with a dark shadow to show on a bright photo. Drawn once over both
+    /// of the tape's inks.
+    private func needle(reading degrees: String) -> some View {
+        Canvas { context, size in
+            // Outwards from the spine.
+            let outwards: CGFloat = side == .leading ? -1 : 1
+            let spine = side == .leading ? size.width - Self.spineInset : Self.spineInset
+            let x = { (offset: CGFloat) in spine + outwards * offset }
+            let middle = size.height / 2
+            context.addFilter(.shadow(color: .black.opacity(0.6), radius: 1))
+            var needle = Path()
+            needle.move(to: CGPoint(x: x(-8), y: middle))
+            needle.addLine(to: CGPoint(x: x(14), y: middle))
+            context.stroke(needle, with: .color(.yellow), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            context.draw(Text(degrees).font(.system(size: 13, weight: .semibold, design: .monospaced)).foregroundStyle(.yellow),
+                         at: CGPoint(x: x(20), y: middle), anchor: side == .leading ? .trailing : .leading)
+        }
+    }
+
+    /// Where `degree` is down the tape, with the tape at `angle`, and how far it faces out of the
+    /// screen, from 1 at the middle toward 0. The tape is the edge of a wheel as tall as it is: the
+    /// degrees close up and turn away toward its ends, and past them are out of sight (nil). A drag
+    /// or scroll keeps up with them only at the middle.
+    private func place(of degree: Double, at angle: Double) -> (y: CGFloat, facing: CGFloat)? {
+        let radius = height / 2
+        let turned = turn * (degree - angle) * Self.spacing / radius
+        guard abs(turned) < .pi / 2 else { return nil }
+        return (radius - radius * sin(turned), cos(turned))
     }
 }
 
