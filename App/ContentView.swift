@@ -109,26 +109,26 @@ struct ContentView: View {
             ToolbarItem {
                 // The toolbar sizes an item, and its glass, to the new width at once. So the buttons
                 // have glass of their own, and while cropping the item is as wide as they are with
-                // Done from the start: Crop, at its right, grows to the left into it, and Rotate Left
-                // beside it moves along. As toolbar items of their own, Rotate Left stood apart from
-                // Crop by the width kept for Done.
+                // Done from the start: Rotate Left stays at its right, and Crop beside it grows to
+                // the left into it. As toolbar items of their own, Rotate Left stood apart from Crop
+                // by the width kept for Done.
                 ZStack(alignment: .trailing) {
                     if model.isCropping {
                         HStack(spacing: Self.toolbarGlassSpacing) {
-                            rotateLeftButton
                             cropToggle(showsDone: true)
+                            rotateLeftButton
                         }
                         .hidden()
                         .accessibilityHidden(true)
                     }
                     HStack(spacing: Self.toolbarGlassSpacing) {
-                        if model.isCropping {
-                            rotateLeftButton
-                        }
                         // C as well as the Image menu's ⌘K, as in Photos: a menu item has one
                         // shortcut.
                         cropToggle(showsDone: model.hasCropChanges)
                             .keyboardShortcut("c", modifiers: [])
+                        if model.isCropping {
+                            rotateLeftButton
+                        }
                     }
                 }
                 // Not as crop mode ends, when the toolbar changes around it at once.
