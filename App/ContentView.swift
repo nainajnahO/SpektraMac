@@ -907,6 +907,10 @@ private struct StraighteningRuler: View {
     private static let spineInset: CGFloat = 8
     /// How far from the dot's middle, in points, the pointer is on it: the dot is 6 across.
     private static let dotReach: CGFloat = 8
+    /// How far up or down from the needle, in points, the horizon's dot is hidden: 1°, where it
+    /// clears the needle with a gap. It fades in over the next 4, to 1.5°. Beside the needle, it's
+    /// clear of the angle's text.
+    private static let needleClearance: CGFloat = 8
 
     /// Which way a degree down the tape on `side` turns the photo: 1 to the right, −1 to the left.
     /// The tapes move as the photo's edges beside them do, as if they were the two sides of one
@@ -929,11 +933,19 @@ private struct StraighteningRuler: View {
                 .opacity(isOnBright ? 1 : 0)
             needle(reading: degrees)
                 .shadow(color: isOnBright ? .white.opacity(0.7) : .black.opacity(0.6), radius: 1)
-            if let dot = dotCentre(at: angle), let horizon = model.horizonAngle {
-                horizonDot(isOn: abs(angle - horizon) < 0.05)
+            if let dot = dotCentre(at: angle) {
+                // Fading in as it leaves the needle.
+                horizonDot
+                    .opacity(min(1, (abs(dot.y - height / 2) - Self.needleClearance) / 4))
                     .position(dot)
             }
         }
+            // Gone at the horizon's angle, the pointer is no longer on it.
+            .onChange(of: dotCentre(at: angle) == nil) { _, isGone in
+                if isGone {
+                    isOnDot = false
+                }
+            }
             .animation(.easeInOut(duration: 0.25), value: isOnBright)
             // A little either side of the middle, so it doesn't flicker as the photo turns under
             // it with its brightness there.
@@ -1016,10 +1028,11 @@ private struct StraighteningRuler: View {
                                   about: "levels the horizon Vision finds in the photo")
 
     /// Where the horizon's dot is beside the spine, with the tape at `angle`: none until Vision has
-    /// found it, or where it's faded out at the tape's ends.
+    /// found it, near the needle and the angle beside it (``needleClearance``), or where it's faded
+    /// out at the tape's ends.
     private func dotCentre(at angle: Double) -> CGPoint? {
         guard let horizon = model.horizonAngle, let y = place(of: horizon, at: angle)?.y else { return nil }
-        guard y > height * 0.15, y < height * 0.85 else { return nil }
+        guard abs(y - height / 2) > Self.needleClearance, y > height * 0.15, y < height * 0.85 else { return nil }
         // Beside the spine, on the numbers' side, clear of the ticks.
         let beside = Self.spineInset + 14
         return CGPoint(x: side == .leading ? Self.width - beside : beside, y: y)
@@ -1030,13 +1043,12 @@ private struct StraighteningRuler: View {
         dotCentre(at: angle).map { hypot($0.x - location.x, $0.y - location.y) <= Self.dotReach } ?? false
     }
 
-    /// The horizon's dot, in the accent colour while the photo is straightened there, and its bubble
-    /// with the pointer on it, opening towards the photo.
-    private func horizonDot(isOn: Bool) -> some View {
+    /// The horizon's dot, and its bubble with the pointer on it, opening towards the photo.
+    private var horizonDot: some View {
         let size: CGFloat = isOnDot ? 8 : 6
         let towardsPhoto: Edge = side == .leading ? .trailing : .leading
         return Circle()
-            .fill(isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(isOnBright ? .black : .white))
+            .fill(isOnBright ? .black : .white)
             .shadow(color: isOnBright ? .white.opacity(0.7) : .black.opacity(0.6), radius: 1)
             .frame(width: size, height: size)
             .popover(isPresented: Binding { isOnDot && dragStart == nil } set: { isPresented in
