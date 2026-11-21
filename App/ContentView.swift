@@ -124,20 +124,23 @@ struct ContentView: View {
             .sharedBackgroundVisibility(.hidden)
             ToolbarSpacer(.fixed)
         }
-        // While cropping, in place of Open, Save and Share, which wait for the crop: Reset, and
-        // Cancel, which leaves the photo as it was. One control, as a toolbar group of buttons with
-        // titles would draw each on its own.
+        // While cropping, in place of Open, Save and Share, which wait for the crop: Reset, which
+        // throws away the crop marked, and Cancel, which leaves the photo as it was. In one group of
+        // glass, spaced as Print and Film are.
         if model.isCropping {
             ToolbarItem {
-                // Spaced as macOS spaces it: padding a title moves it off its hover highlight.
-                ControlGroup {
-                    Button("Reset") { model.resetCrop() }
+                HStack(spacing: 3) {
+                    Button("Reset", role: .destructive) { model.resetCrop() }
                         .disabled(!model.canResetCrop)
                     Button("Cancel") { model.cancelCropping() }
                         .keyboardShortcut(.cancelAction)
                         .disabled(model.isLeavingCropMode)
                 }
+                .buttonStyle(ToolbarGroupButtonStyle())
+                .padding(4)
+                .glassEffect(in: .capsule)
             }
+            .sharedBackgroundVisibility(.hidden)
         } else {
             ToolbarItemGroup {
                 Button("Open…", systemImage: "folder") { model.isImporting = true }
@@ -699,6 +702,43 @@ private struct ImageCanvas: View {
                            height: max(0, (fitted.height * zoom - visibleSize.height) / 2))
         return CGSize(width: min(max(offset.width, -slack.width), slack.width),
                       height: min(max(offset.height, -slack.height), slack.height))
+    }
+}
+
+/// A title in a group of buttons in the toolbar, on a capsule under the pointer as the toolbar's
+/// own are: grey, or for a button that throws something away, a faint red with the title red.
+///
+/// Drawn here: the toolbar's own group of buttons (`ControlGroup`) has its hover grey whatever a
+/// button's role or tint, and its spacing its own. SwiftUI has no hover effects on macOS.
+private struct ToolbarGroupButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Title(configuration: configuration)
+    }
+
+    private struct Title: View {
+        let configuration: ButtonStyleConfiguration
+        @State private var isHovered = false
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            let isLit = isEnabled && (isHovered || configuration.isPressed)
+            let isDestructive = configuration.role == .destructive
+            configuration.label
+                .foregroundStyle(isLit && isDestructive ? AnyShapeStyle(.red)
+                                 : isEnabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                // As far from the capsule's ends as Print and Film's titles are from theirs.
+                .padding(.horizontal, 9.5)
+                .frame(height: 28)
+                .background {
+                    if isLit {
+                        Capsule()
+                            .fill(isDestructive ? AnyShapeStyle(.red.opacity(0.15)) : AnyShapeStyle(.quaternary))
+                            .opacity(configuration.isPressed ? 0.8 : 1)
+                    }
+                }
+                .contentShape(.capsule)
+                .onHover { isHovered = $0 }
+        }
     }
 }
 
