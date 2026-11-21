@@ -499,6 +499,8 @@ public actor Engine {
 
     /// The open photo on the GPU, at full size, as its preview and as its thumbnail.
     private struct Photo {
+        /// All of the photo as it opened: `full`'s texture, unless it's cropped (``crop(to:)``).
+        let whole: any MTLTexture
         var full: PhotoImage
         var preview: PhotoImage
         /// Made for the first thumbnail render rather than as the photo opens: the strips render
@@ -571,8 +573,34 @@ public actor Engine {
         let extent = image.extent.integral
         let (width, height) = (Int(extent.width), Int(extent.height))
         guard max(width, height) <= Self.maxSide else { throw PhotoTooLargeError(width: width, height: height) }
-        let full = gpu.makeReadableTexture(width: width, height: height)
-        try render(image, from: extent, into: full)
+        let whole = gpu.makeReadableTexture(width: width, height: height)
+        try render(image, from: extent, into: whole)
+        return try work(on: whole, of: whole)
+    }
+
+    /// Crops the open photo to `rect`, in the pixels of the photo as it opened, from its top left
+    /// (taken to whole pixels, inside the photo), or shows all of it again for `nil`. The crop is
+    /// then the photo renders work on, as if framed that way in the camera: it fills the film's
+    /// frame, so grain and halation are as fine as on the whole photo, and it's metered on its own.
+    /// The whole photo stays on the GPU beside it (16 bytes a pixel), to crop again from. A crop
+    /// that fails leaves the photo as it was.
+    public func crop(to rect: CGRect?) throws -> OpenedPhoto {
+        guard let whole = photo?.whole else { preconditionFailure("Cropping before a photo is open") }
+        let bounds = CGRect(x: 0, y: 0, width: whole.width, height: whole.height)
+        let region = rect.map { $0.integral.intersection(bounds) } ?? bounds
+        // All of it is the texture it opened into, so its renders are as before any crop.
+        guard region != bounds, !region.isEmpty else { return try work(on: whole, of: whole) }
+        let cropped = gpu.makeReadableTexture(width: Int(region.width), height: Int(region.height))
+        // Core Image puts a texture's first row at the bottom, and measures up from there.
+        let upright = CIImage(mtlTexture: whole, options: [.colorSpace: RGBImage.workingColorSpace])!.oriented(.downMirrored)
+        try render(upright, from: region.offsetBy(dx: 0, dy: bounds.height - region.maxY - region.minY), into: cropped)
+        return try work(on: cropped, of: whole)
+    }
+
+    /// Makes `full`, all or a part of the photo opened into `whole`, the photo renders work on:
+    /// the rest of ``open(_:)``.
+    private func work(on full: any MTLTexture, of whole: any MTLTexture) throws -> OpenedPhoto {
+        let (width, height) = (full.width, full.height)
         let preview = try scaled(full, toLongSide: previewMaxSize)
         // Auto-exposure is metered the same way in every mode (input space, no CCTF decoding).
         let space = tables.colourSpaces[Self.inputColorSpace]!
@@ -588,8 +616,8 @@ public actor Engine {
         let metering = MeteringReadings(luminance: luminance.y, width: luminance.width, height: luminance.height,
                                         regions: regions)
         let previewImage = PhotoImage(texture: preview)
-        photo = Photo(full: full === preview ? previewImage : PhotoImage(texture: full), preview: previewImage,
-                      reduced: previewImage)
+        photo = Photo(whole: whole, full: full === preview ? previewImage : PhotoImage(texture: full),
+                      preview: previewImage, reduced: previewImage)
         return OpenedPhoto(width: width, height: height, previewWidth: preview.width, previewHeight: preview.height,
                            metering: metering, meteringOverlays: regions.overlays(for: metering, width: width, height: height))
     }

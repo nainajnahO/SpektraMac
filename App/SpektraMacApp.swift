@@ -47,6 +47,14 @@ struct SpektraMacApp: App {
                 Link("SpektraMac Help", destination: URL(string: "https://github.com/nainajnahO/SpektraMac/blob/main/docs/guide.md")!)
                     .keyboardShortcut("?", modifiers: .command)
             }
+            // The toolbar's Crop: ⌘K, as in Preview. Off keeps the crop.
+            CommandMenu("Image") {
+                Toggle("Crop", isOn: Binding { model.isCropping } set: { crops in
+                    if crops { model.beginCropping() } else { model.endCropping() }
+                })
+                .keyboardShortcut("k")
+                .disabled(!model.canCrop)
+            }
             CommandMenu("Preset") {
                 Group {
                     Button("Open Preset…") { model.isImportingPreset = true }
@@ -88,12 +96,12 @@ struct ViewCommands: Commands {
                 if model.showsFilm { model.controls.scanFilm = false }
             })
                 .keyboardShortcut("1")
-                .disabled(model.isSlideFilm || model.showsOriginal)
+                .disabled(model.isSlideFilm || model.showsOriginal || model.isCropping)
             Toggle("Film", isOn: Binding { model.showsFilm } set: { _ in
                 if !model.showsFilm { model.controls.scanFilm = true }
             })
                 .keyboardShortcut("2")
-                .disabled(model.showsOriginal)
+                .disabled(model.showsOriginal || model.isCropping)
             Divider()
             ForEach(Array(SettingsCategory.allCases.enumerated()), id: \.element) { index, tab in
                 // Choosing a tab shows the settings, if they're hidden.
@@ -119,7 +127,7 @@ struct ViewCommands: Commands {
             // switches.
             Toggle("Show Original", isOn: Binding { model.showsOriginal } set: { model.showsOriginal = $0 })
                 .keyboardShortcut("m", modifiers: [])
-                .disabled(model.original == nil)
+                .disabled(model.original == nil || model.isCropping)
             Divider()
         }
     }
