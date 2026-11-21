@@ -928,6 +928,7 @@ private struct StraighteningRuler: View {
             tape(at: angle, ink: .black, shadow: .white.opacity(0.7))
                 .opacity(isOnBright ? 1 : 0)
             needle(reading: degrees)
+                .shadow(color: isOnBright ? .white.opacity(0.7) : .black.opacity(0.6), radius: 1)
             if let dot = dotCentre(at: angle), let horizon = model.horizonAngle {
                 horizonDot(isOn: abs(angle - horizon) < 0.05)
                     .position(dot)
@@ -1083,8 +1084,8 @@ private struct StraighteningRuler: View {
     }
 
     /// A needle across the tape's middle in yellow, as the Camera app on iPhone marks its setting,
-    /// and `degrees` beside it, with a dark shadow to show on a bright photo. Drawn once over both
-    /// of the tape's inks.
+    /// and `degrees` beside it. Drawn once over both of the tape's inks, with the shadow of the one
+    /// showing (``body``).
     private func needle(reading degrees: String) -> some View {
         Canvas { context, size in
             // Outwards from the spine.
@@ -1092,7 +1093,6 @@ private struct StraighteningRuler: View {
             let spine = side == .leading ? size.width - Self.spineInset : Self.spineInset
             let x = { (offset: CGFloat) in spine + outwards * offset }
             let middle = size.height / 2
-            context.addFilter(.shadow(color: .black.opacity(0.6), radius: 1))
             var needle = Path()
             needle.move(to: CGPoint(x: x(-8), y: middle))
             needle.addLine(to: CGPoint(x: x(14), y: middle))
