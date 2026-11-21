@@ -125,8 +125,8 @@ struct ContentView: View {
             ToolbarSpacer(.fixed)
         }
         // While cropping, in place of Open, Save and Share, which wait for the crop: Reset, which
-        // throws away the crop marked, and Cancel, which leaves the photo as it was. In one group of
-        // glass, spaced as Print and Film are.
+        // keeps all of the photo, and Cancel, which leaves the photo as it was. Both end crop mode.
+        // In one group of glass, spaced as Print and Film are.
         if model.isCropping {
             ToolbarItem {
                 HStack(spacing: 3) {
