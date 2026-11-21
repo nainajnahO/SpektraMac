@@ -37,7 +37,7 @@ the interface alike.
 
 ## Build and test
 
-Build and run the app as in the README's [Build from source](README.md#build-from-source): macOS 26.5 or newer,
+Build and run the app as in the README's [Build from source](README.md#build-from-source): macOS 27 or newer,
 Xcode 27, and your own signing team or **Sign to Run Locally**.
 
 Run the engine's tests with:

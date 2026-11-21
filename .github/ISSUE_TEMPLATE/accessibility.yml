@@ -42,6 +42,6 @@ body:
     attributes:
       label: macOS version
       description: In Apple menu › About This Mac.
-      placeholder: "26.5"
+      placeholder: "27.2"
     validations:
       required: true
