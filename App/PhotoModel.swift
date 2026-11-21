@@ -62,8 +62,8 @@ final class PhotoModel {
     /// The open photo as macOS shows it, upright and at full size (``loadOriginal(of:)``), cropped
     /// as the photo is: what a click on the canvas shows in place of the edit.
     private(set) var original: CGImage?
-    /// All of it: ``original`` is cut from it.
-    @ObservationIgnored private var wholeOriginal: CGImage?
+    /// All of it: ``original`` is cut from it, and crop mode shows it.
+    private(set) var wholeOriginal: CGImage?
     /// The canvas shows ``original`` in place of the edit, and the settings are greyed out.
     var showsOriginal = false
     /// The photo's EXIF, GPS and IPTC records, for saved renderings.
@@ -406,52 +406,81 @@ final class PhotoModel {
 
     // MARK: Cropping
 
-    /// Crop mode: the canvas shows all of the photo with the part to keep marked on it
+    /// Crop mode: the canvas shows all of the original with the part to keep marked on it
     /// (``cropSelection``), and the settings wait. ``endCropping()`` keeps that part and
     /// ``cancelCropping()`` leaves the photo as it was.
+    ///
+    /// The original, not the film: grain is the frame's, so a render of all of the photo, zoomed
+    /// into, shows the grain larger than the crop will have it.
     private(set) var isCropping = false
-    /// Crop mode is ending, once the engine has the crop: the frame stays as it was marked until
-    /// the cropped photo is there to show in its place.
+    /// Crop mode is ending with the crop kept, once the engine has it: the frame stays as it was
+    /// marked until the cropped photo is there to show in its place.
     private(set) var isLeavingCropMode = false
     /// The part marked to keep while cropping, in the pixels of the photo as it opened, from its top
     /// left: what the canvas's handles move.
     var cropSelection = CGRect.zero
-    /// The photo's crop as crop mode began: what Cancel goes back to, and Undo after Done.
+    /// The shape the part marked keeps to: free as crop mode starts, and after Reset.
+    var cropShape = CropShape.free
+    /// The photo's crop as crop mode began: what Cancel goes back to, and Undo once the crop is kept.
     @ObservationIgnored private var cropBeforeCropping: CGRect?
     /// The crop last asked of the engine for the open photo, which ``photo`` has once it's made.
     @ObservationIgnored private var askedCrop: CGRect?
     /// How many crops have been asked of the engine: the newest one's photo is the one that shows.
     @ObservationIgnored private var cropsStarted = 0
 
-    /// Not while a photo opens, which the engine would crop in place of this one, or one saves.
-    var canCrop: Bool { photo != nil && engine != nil && !isLoading && savePhase == nil }
+    /// Once the original, which crop mode shows, has loaded. Not while a photo opens, which the
+    /// engine would crop in place of this one, or one saves.
+    var canCrop: Bool { photo != nil && wholeOriginal != nil && engine != nil && !isLoading && savePhase == nil }
 
-    /// Starts crop mode, on all of the photo: a cropped photo shows whole again, with its crop
-    /// marked.
+    /// Starts crop mode, on all of the original: a cropped photo shows whole, with its crop marked.
     func beginCropping() {
         guard canCrop, !isCropping, let photo else { return }
         isCropping = true
         showsOriginal = false
         cropBeforeCropping = photo.crop
         cropSelection = photo.crop ?? photo.wholeBounds
-        applyCrop(nil, leavingCropMode: false)
+        cropShape = .free
+    }
+
+    /// Something to reset: the part marked isn't all of the photo.
+    var canResetCrop: Bool {
+        guard isCropping, !isLeavingCropMode, let photo else { return false }
+        return cropSelection != photo.wholeBounds
+    }
+
+    /// Marks all of the photo, in any shape.
+    func resetCrop() {
+        guard canResetCrop, let photo else { return }
+        cropShape = .free
+        cropSelection = photo.wholeBounds
+    }
+
+    /// The part marked differs from the crop as crop mode began: ``endCropping()`` would change it.
+    var hasCropChanges: Bool {
+        isCropping && cropToKeep != cropBeforeCropping
     }
 
     /// Ends crop mode, cropping the photo to ``cropSelection`` in whole pixels: one step to undo.
     func endCropping() {
-        guard isCropping, !isLeavingCropMode, let photo else { return }
+        guard isCropping, !isLeavingCropMode else { return }
+        setCrop(cropToKeep, from: cropBeforeCropping)
+    }
+
+    /// ``cropSelection`` in whole pixels, in the photo: nil for all of it.
+    private var cropToKeep: CGRect? {
+        guard let photo else { return nil }
         // The size before the place, so a square stays one.
         let size = CGSize(width: max(1, cropSelection.width.rounded()), height: max(1, cropSelection.height.rounded()))
         let origin = CGPoint(x: min(max(0, cropSelection.minX.rounded()), CGFloat(photo.wholeWidth) - size.width),
                              y: min(max(0, cropSelection.minY.rounded()), CGFloat(photo.wholeHeight) - size.height))
         let kept = CGRect(origin: origin, size: size).intersection(photo.wholeBounds)
-        setCrop(kept == photo.wholeBounds ? nil : kept, from: cropBeforeCropping)
+        return kept == photo.wholeBounds ? nil : kept
     }
 
-    /// Ends crop mode with the photo cropped as it was before.
+    /// Ends crop mode with the photo cropped as it was before: not once the crop is being kept.
     func cancelCropping() {
-        guard isCropping else { return }
-        applyCrop(cropBeforeCropping)
+        guard isCropping, !isLeavingCropMode else { return }
+        isCropping = false
     }
 
     /// Crops the photo to `crop` (all of it for nil), which Undo sets back to `previous`.
@@ -471,18 +500,16 @@ final class PhotoModel {
 
     /// Has the engine crop the photo to `crop`, or show all of it for nil, and shows the result:
     /// metered again, at the exposure it had. The newest of several asked for is the one that shows.
-    /// Crop mode ends with it, unless it's the mode's own start (`leavingCropMode`).
-    private func applyCrop(_ crop: CGRect?, leavingCropMode: Bool = true) {
+    /// Crop mode ends with it.
+    private func applyCrop(_ crop: CGRect?) {
         guard let engine, let photo, crop != askedCrop else {
-            if leavingCropMode {
-                isCropping = false
-            }
+            isCropping = false
             return
         }
         askedCrop = crop
         cropsStarted += 1
         let generation = cropsStarted
-        isLeavingCropMode = isCropping && leavingCropMode
+        isLeavingCropMode = isCropping
         // The engine crops once it's done rendering: stop that.
         stopRendering()
         stripTask?.cancel()
@@ -491,20 +518,20 @@ final class PhotoModel {
         Task {
             do {
                 let (opened, time) = try await EngineTime.measure(on: engine) { try $0.crop(to: crop) }
-                // A crop asked for since shows instead, and ends the mode if this one would have.
+                // A crop asked for since shows instead.
                 guard generation == cropsStarted else { return }
-                if leavingCropMode {
-                    isCropping = false
-                }
+                isCropping = false
                 isLeavingCropMode = false
                 // As does another photo.
                 guard let shown = self.photo, shown.id == photo.id else { return }
                 // Until its first render, the canvas shows the last one in the crop's shape: cut
-                // from the whole photo's render where that's what is on screen, else nothing.
-                if let display = displayImage, shown.crop == nil, let crop {
-                    let scale = CGAffineTransform(scaleX: CGFloat(display.width) / CGFloat(shown.wholeWidth),
-                                                  y: CGFloat(display.height) / CGFloat(shown.wholeHeight))
-                    displayImage = display.cropping(to: crop.applying(scale).integral)
+                // from it where it shows all of the crop, else nothing.
+                let rendered = shown.crop ?? shown.wholeBounds
+                if let display = displayImage, let crop, rendered.contains(crop) {
+                    let scale = CGAffineTransform(scaleX: CGFloat(display.width) / rendered.width,
+                                                  y: CGFloat(display.height) / rendered.height)
+                    displayImage = display.cropping(to: crop.offsetBy(dx: -rendered.minX, dy: -rendered.minY)
+                                                        .applying(scale).integral)
                 } else {
                     displayImage = nil
                 }
@@ -516,9 +543,7 @@ final class PhotoModel {
                                  : "Cropped \(shown.name) to \(opened.width) × \(opened.height) \(time.formatted())")
             } catch {
                 guard generation == cropsStarted else { return }
-                if leavingCropMode {
-                    isCropping = false
-                }
+                isCropping = false
                 isLeavingCropMode = false
                 guard self.photo?.id == photo.id else { return }
                 // The engine keeps the photo as it was: its renders, stopped above, start again.

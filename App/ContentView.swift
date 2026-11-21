@@ -103,25 +103,87 @@ struct ContentView: View {
             ShowPicker()
         }
         // Crop is of a photo, so it's there once one is open: a group of its own, as it changes the
-        // photo where the others open and send it. On, the canvas is in crop mode; off leaves the
-        // mode with the photo as it was, as Cancel: only Done keeps the crop.
+        // photo where the others open and send it. On, the canvas is in crop mode; off keeps the
+        // crop.
         if model.photo != nil {
             ToolbarItem {
-                Toggle("Crop", systemImage: "crop", isOn: Binding { model.isCropping } set: { crops in
-                    if crops { model.beginCropping() } else { model.cancelCropping() }
-                })
-                .disabled(!model.canCrop)
-                .help("Crop the photo")
+                // The toolbar sizes an item, and its glass, to the new width at once. So the button
+                // has glass of its own, and while cropping the item is as wide as the button with
+                // Done from the start: the button, at its right, grows to the left into it.
+                ZStack(alignment: .trailing) {
+                    if model.isCropping {
+                        cropToggle(showsDone: true)
+                            .hidden()
+                            .accessibilityHidden(true)
+                    }
+                    cropToggle(showsDone: model.hasCropChanges)
+                }
+                // Not as crop mode ends, when the toolbar changes around it at once.
+                .animation(model.isCropping ? .snappy(duration: 0.3) : nil, value: model.hasCropChanges)
             }
+            .sharedBackgroundVisibility(.hidden)
             ToolbarSpacer(.fixed)
         }
-        ToolbarItemGroup {
-            Button("Open…", systemImage: "folder") { model.isImporting = true }
-            Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
-                .disabled(!model.canSave)
-            shareButton
+        // While cropping, in place of Open, Save and Share, which wait for the crop: Reset, and
+        // Cancel, which leaves the photo as it was. One control, as a toolbar group of buttons with
+        // titles would draw each on its own.
+        if model.isCropping {
+            ToolbarItem {
+                ControlGroup {
+                    Button("Reset") { model.resetCrop() }
+                        .disabled(!model.canResetCrop)
+                    Button("Cancel") { model.cancelCropping() }
+                        .keyboardShortcut(.cancelAction)
+                        .disabled(model.isLeavingCropMode)
+                }
+            }
+        } else {
+            ToolbarItemGroup {
+                Button("Open…", systemImage: "folder") { model.isImporting = true }
+                Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
+                    .disabled(!model.canSave)
+                shareButton
+            }
         }
     }
+
+    /// Crop in the toolbar, in glass, blue while cropping: on, the canvas is in crop mode; off keeps
+    /// the crop. With Done beside the icon if `showsDone`: the one icon throughout, so as the
+    /// button grows, the icon goes with its left edge while Done fades in.
+    ///
+    /// Its glass is drawn here rather than by a glass button style, whose padding is its own: the
+    /// icon is at the toolbar's size in a square as high as the button, a circle without Done, and
+    /// Done is as far from the edge as the toolbar's titles are.
+    private func cropToggle(showsDone: Bool) -> some View {
+        Toggle(isOn: Binding { model.isCropping } set: { crops in
+            if crops { model.beginCropping() } else { model.endCropping() }
+        }) {
+            HStack(spacing: 0) {
+                Image(systemName: "crop")
+                    .imageScale(.large)
+                    .frame(width: Self.toolbarButtonHeight, height: Self.toolbarButtonHeight)
+                if showsDone {
+                    // Once the button has grown, and gone before it shrinks.
+                    Text("Done")
+                        .padding(.trailing, 12.5)
+                        .transition(.asymmetric(insertion: .opacity.animation(.easeIn(duration: 0.15).delay(0.25)),
+                                                removal: .identity))
+                }
+            }
+            .foregroundStyle(model.isCropping ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+            .contentShape(.capsule)
+            .glassEffect(model.isCropping ? .regular.tint(.accentColor).interactive() : .regular.interactive(),
+                         in: .capsule)
+        }
+        .toggleStyle(.button)
+        .buttonStyle(.plain)
+        .accessibilityLabel(showsDone ? "Done" : "Crop")
+        .disabled(!model.canCrop)
+        .help(model.isCropping ? "Keep the crop" : "Crop the photo")
+    }
+
+    /// How tall the toolbar's buttons are.
+    private static let toolbarButtonHeight: CGFloat = 36
 
     /// Whether the alert shows: while there's a failure, which dismissing it clears.
     private var showsFailure: Binding<Bool> {
@@ -254,10 +316,15 @@ private struct ImageCanvas: View {
     @State private var dragStart: CGSize?
     @State private var pinched: CGFloat = 1
     @State private var scrollMonitor: Any?
-    /// In crop mode: the shape the crop keeps to, and its width over height as it was chosen, if it
-    /// has one.
-    @State private var cropShape = CropShape.free
+    /// In crop mode: the width over height of the shape the crop keeps to as it was chosen, if it
+    /// has one (``PhotoModel/cropShape``).
     @State private var cropRatio: CGFloat?
+    /// In crop mode, a drag moves the photo under a frame fixed in the middle, as in Photos, rather
+    /// than the frame over the photo: as it was chosen last, while the app is open.
+    @State private var cropMovesPhoto = false
+    /// While a corner or edge of the frame is dragged with the photo moving: the part marked the
+    /// canvas stays laid out around (``CropOverlay/held``).
+    @State private var heldCrop: CGRect?
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
@@ -277,7 +344,7 @@ private struct ImageCanvas: View {
             .overlay { canvas.ignoresSafeArea(.container, edges: [.top, .trailing]) }
             // Over the canvas below the toolbar and beside the panel, so centred there.
             .overlay {
-                if model.displayImage == nil {
+                if shownImage == nil {
                     if let failure = model.engineFailure {
                         ContentUnavailableView("Metal is unavailable", systemImage: "exclamationmark.triangle",
                                                description: Text("SpektraMac simulates film on the graphics processor, through Metal. \(failure)."))
@@ -321,49 +388,33 @@ private struct ImageCanvas: View {
     }
 
     /// In crop mode, on the canvas over the foot of the photo, in glass as the toolbar's buttons
-    /// are: the shapes to keep to in one group, Reset on its own, and the ways out in another.
-    /// Return keeps the crop and Escape leaves the photo as it was.
+    /// are: what a drag moves, and the shapes to keep to. Reset and Cancel are in the toolbar.
     private func cropControls(for photo: PhotoModel.Photo) -> some View {
         // Glass near glass is drawn together.
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
-                // Segments, not a menu: a SwiftUI menu has no action for assistive apps to press on
-                // macOS 27, which fails the accessibility audit (#314).
-                Picker("Shape", selection: $cropShape) {
-                    ForEach(CropShape.allCases, id: \.self) { Text($0.rawValue) }
+                Picker("Drag", selection: $cropMovesPhoto.animation(.snappy(duration: 0.3))) {
+                    Label("Move Frame", systemImage: "crop").tag(false)
+                    Label("Move Photo", systemImage: "photo").tag(true)
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.tabs)
+                .controlSize(.extraLarge)
+                .labelStyle(.iconOnly)
                 .labelsHidden()
                 .fixedSize()
-                .padding(.horizontal, 4)
-                .frame(height: Self.cropControlHeight)
                 .glassEffect()
-                Button {
-                    cropShape = .free
-                    model.cropSelection = photo.wholeBounds
-                } label: {
-                    cropControlLabel("Reset")
-                }
-                .disabled(model.cropSelection == photo.wholeBounds)
-                .glassEffect(.regular.interactive())
-                HStack(spacing: 0) {
-                    Button { model.cancelCropping() } label: { cropControlLabel("Cancel") }
-                        .keyboardShortcut(.cancelAction)
-                    Button { model.endCropping() } label: { cropControlLabel("Done").fontWeight(.semibold) }
-                        .keyboardShortcut(.defaultAction)
-                }
-                .glassEffect(.regular.interactive())
+                .help("Drag the frame over the photo, or the photo under the frame")
+                cropShapes
             }
-            .buttonStyle(.plain)
         }
-        // Once it's done or cancelled, they wait with the frame for the engine's crop.
+        // Once the crop is kept, they wait with the frame for the engine's crop.
         .disabled(model.isLeavingCropMode)
         // Clear of the frame's foot where it's the photo's: its edge is held below them.
         .padding(.bottom, 24)
-        .onChange(of: cropShape) {
+        .onChange(of: model.cropShape) {
             // The largest part of that shape in what's marked, about the same middle.
             let marked = model.cropSelection
-            cropRatio = cropShape.ratio(of: marked.size, in: photo.wholeBounds.size)
+            cropRatio = model.cropShape.ratio(of: marked.size, in: photo.wholeBounds.size)
             guard let cropRatio else { return }
             let width = min(marked.width, marked.height * cropRatio)
             model.cropSelection = CGRect(x: marked.midX - width / 2, y: marked.midY - width / cropRatio / 2,
@@ -371,41 +422,46 @@ private struct ImageCanvas: View {
         }
     }
 
-    /// How tall each group of the crop's controls is.
-    private static let cropControlHeight: CGFloat = 32
-
-    /// A crop button's title, filling its part of the glass: all of that is the button.
-    private func cropControlLabel(_ title: String) -> some View {
-        Text(title)
-            .padding(.horizontal, 14)
-            .frame(height: Self.cropControlHeight)
-            .contentShape(Rectangle())
+    /// The crop's shapes in one group of glass, looking as the toolbar's Camera, Film and Print do:
+    /// the shape chosen on a grey capsule.
+    ///
+    /// That look off the toolbar is the `.tabs` picker style at the toolbar's size: `.segmented`
+    /// there has dividers and its choice in the accent colour. With `.tabs`, VoiceOver announces
+    /// the shapes as tabs. Not a menu: a SwiftUI menu has no action for assistive apps to press on
+    /// macOS 27, which fails the accessibility audit (#314).
+    private var cropShapes: some View {
+        Picker("Shape", selection: Binding { model.cropShape } set: { model.cropShape = $0 }) {
+            ForEach(CropShape.allCases, id: \.self) { Text($0.rawValue) }
+        }
+        .pickerStyle(.tabs)
+        .controlSize(.extraLarge)
+        .labelsHidden()
+        .fixedSize()
+        .glassEffect()
     }
 
     private var canvas: some View {
         // A stack, not a group: without a photo, the canvas is still there to measure and to shade.
         ZStack {
-            if let image = model.displayImage {
+            if let image = shownImage {
                 // The reader takes the canvas's size and passes nothing back: a frame sized by the
                 // photo would make that the window's minimum.
                 GeometryReader { _ in
-                    let fitted = fittedSize(in: visibleSize)
-                    Image(model.showsOriginal ? model.original ?? image : image, scale: 1, label: Text(photoDescription))
+                    let shown = photoRect
+                    Image(image, scale: 1, label: Text(photoDescription))
                         .resizable()
                         .interpolation(.high)
                         .overlay { meteringOverlay }
                         .overlay { burnOverlay }
-                        .overlay {
-                            // Once all of the photo shows: a cropped one is whole again a moment
-                            // after crop mode begins.
-                            if model.isCropping, let photo = model.photo, photo.crop == nil {
-                                CropOverlay(selection: Binding { model.cropSelection } set: { model.cropSelection = $0 },
-                                            whole: photo.wholeBounds.size, ratio: cropRatio)
-                                    .allowsHitTesting(!model.isLeavingCropMode)
-                            }
-                        }
-                        .frame(width: fitted.width * zoom, height: fitted.height * zoom)
-                        .position(x: visibleCentre.x + offset.width, y: visibleCentre.y + offset.height)
+                        .frame(width: shown.width, height: shown.height)
+                        .position(x: shown.midX, y: shown.midY)
+                    // On the canvas, not the photo, which moves under it as it's dragged.
+                    if model.isCropping, let photo = model.photo {
+                        CropOverlay(selection: Binding { model.cropSelection } set: { model.cropSelection = $0 },
+                                    whole: photo.wholeBounds.size, photoFrame: shown, ratio: cropRatio,
+                                    movesPhoto: cropMovesPhoto, held: $heldCrop)
+                            .allowsHitTesting(!model.isLeavingCropMode)
+                    }
                 }
                 .contentShape(Rectangle())
                 .gesture(DragGesture()
@@ -480,8 +536,8 @@ private struct ImageCanvas: View {
         .onChange(of: model.isCropping) {
             zoom = 1
             offset = .zero
-            cropShape = .free
             cropRatio = nil
+            heldCrop = nil
         }
         .focusedSceneValue(\.canvasZoom, model.photo == nil || model.isCropping ? nil : CanvasZoom(
             zoomIn: zoom < maxZoom ? { zoom(by: 2, at: visibleCentre) } : nil,
@@ -493,6 +549,55 @@ private struct ImageCanvas: View {
         .onChange(of: zoom > 1, initial: true) { _, wants in
             model.wantsFullResolution = wants
         }
+    }
+
+    /// What the canvas shows: the render, or the original while it's asked for, or while cropping,
+    /// all of the original.
+    private var shownImage: CGImage? {
+        if model.isCropping {
+            return model.wholeOriginal
+        }
+        guard let render = model.displayImage else { return nil }
+        return model.showsOriginal ? model.original ?? render : render
+    }
+
+    /// Where all of the photo is on the canvas: fitted, zoomed and moved, or in crop mode, placed
+    /// so the part it's laid out around fills a frame fitted in the middle.
+    private var photoRect: CGRect {
+        if let marked = cropLaidOutAround, let photo = model.photo, marked.width > 0 {
+            let frame = Self.fitted(marked.size, in: visibleSize)
+            let scale = frame.width / marked.width
+            return CGRect(x: visibleCentre.x - marked.midX * scale, y: visibleCentre.y - marked.midY * scale,
+                          width: photo.wholeBounds.width * scale, height: photo.wholeBounds.height * scale)
+        }
+        let fitted = fittedSize(in: visibleSize)
+        return CGRect(x: visibleCentre.x + offset.width - fitted.width * zoom / 2,
+                      y: visibleCentre.y + offset.height - fitted.height * zoom / 2,
+                      width: fitted.width * zoom, height: fitted.height * zoom)
+    }
+
+    /// In crop mode, what the canvas is laid out around: all of the photo, or with the photo moving,
+    /// the part marked, held while a corner or edge is dragged.
+    private var cropLaidOutAround: CGRect? {
+        guard model.isCropping, let photo = model.photo else { return nil }
+        return cropMovesPhoto ? heldCrop ?? model.cropSelection : photo.wholeBounds
+    }
+
+    /// Zooms the photo under the crop's frame by `factor`, about the frame's middle: the part marked
+    /// shrinks as the photo grows, staying in the photo, down to 4 points a pixel.
+    private func zoomUnderFrame(by factor: CGFloat) {
+        guard heldCrop == nil, let photo = model.photo else { return }
+        let marked = model.cropSelection
+        let whole = photo.wholeBounds.size
+        let frame = Self.fitted(marked.size, in: visibleSize)
+        guard marked.width > 0, frame.width > 0 else { return }
+        let least = min(1, frame.width / 4 / marked.width)
+        let most = min(whole.width / marked.width, whole.height / marked.height)
+        let scale = min(max(1 / factor, least), most)
+        let size = CGSize(width: marked.width * scale, height: marked.height * scale)
+        model.cropSelection = CGRect(x: min(max(0, marked.midX - size.width / 2), whole.width - size.width),
+                                     y: min(max(0, marked.midY - size.height / 2), whole.height - size.height),
+                                     width: size.width, height: size.height)
     }
 
     /// The canvas below the toolbar and beside the panel.
@@ -532,7 +637,7 @@ private struct ImageCanvas: View {
     /// What VoiceOver reads for the photo: its name and what it shows.
     private var photoDescription: String {
         let name = model.photo?.name ?? "Photo"
-        if model.showsOriginal, model.original != nil {
+        if model.showsOriginal || model.isCropping, model.original != nil {
             return "\(name), the original"
         }
         return model.showsFilm ? "\(name) on \(model.filmName)" : "\(name) on \(model.filmName), printed on \(model.paperName)"
@@ -542,10 +647,14 @@ private struct ImageCanvas: View {
     /// render is shown, so swapping renders can't move it.
     private func fittedSize(in size: CGSize) -> CGSize {
         guard let photo = model.photo else { return .zero }
+        return Self.fitted(CGSize(width: photo.width, height: photo.height), in: size)
+    }
+
+    /// `content` scaled to fit `size`, with a margin.
+    private static func fitted(_ content: CGSize, in size: CGSize) -> CGSize {
         let inset: CGFloat = 12
-        let scale = max(0, min((size.width - 2 * inset) / CGFloat(photo.width),
-                               (size.height - 2 * inset) / CGFloat(photo.height)))
-        return CGSize(width: CGFloat(photo.width) * scale, height: CGFloat(photo.height) * scale)
+        let scale = max(0, min((size.width - 2 * inset) / content.width, (size.height - 2 * inset) / content.height))
+        return CGSize(width: content.width * scale, height: content.height * scale)
     }
 
     /// The fitted photo's long side in screen pixels.
@@ -564,8 +673,14 @@ private struct ImageCanvas: View {
     /// Zooms by `factor`, keeping the photo's point under `anchor` (canvas coordinates) where it
     /// is: from all of the photo to ``maxZoom``.
     private func zoom(by factor: CGFloat, at anchor: CGPoint) {
-        // Crop mode keeps all of the photo in sight.
-        guard fittedSize(in: visibleSize).width > 0, !model.isCropping else { return }
+        // Crop mode keeps all of the photo in sight, unless it moves under the frame.
+        if model.isCropping {
+            if cropMovesPhoto {
+                zoomUnderFrame(by: factor)
+            }
+            return
+        }
+        guard fittedSize(in: visibleSize).width > 0 else { return }
         let newZoom = min(max(zoom * factor, 1), maxZoom)
         let applied = newZoom / zoom
         // The anchor's distance from the photo's centre scales with the zoom.
