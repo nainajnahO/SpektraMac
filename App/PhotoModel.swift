@@ -622,9 +622,12 @@ final class PhotoModel {
         guard isCropping, let whole = wholeOriginal, let photo, !horizonsLookedFor.contains(turns) else { return }
         horizonsLookedFor.insert(turns)
         Task {
-            let found = await Task.detached(priority: .userInitiated) {
-                Result { try Self.levellingAngle(of: whole, turnedLeft: turns) }
-            }.value
+            let found: Result<Double?, any Error>
+            do {
+                found = .success(try await Self.levellingAngle(of: whole, turnedLeft: turns))
+            } catch {
+                found = .failure(error)
+            }
             guard self.photo?.id == photo.id else { return }
             switch found {
             case .success(let angle?):
@@ -639,17 +642,20 @@ final class PhotoModel {
     }
 
     /// The degrees to the right that level the horizon Vision finds in `image` turned `quarters` to
-    /// the left: nil where it finds none. Vision looks at it 1024 pixels on the long side.
-    nonisolated private static func levellingAngle(of image: CGImage, turnedLeft quarters: Int) throws -> Double? {
+    /// the left: nil where it finds none, as where it's level already. Vision looks at it 1024
+    /// pixels on the long side, away from the main actor.
+    @concurrent nonisolated private static func levellingAngle(of image: CGImage, turnedLeft quarters: Int) async throws -> Double? {
         let scale = min(1, 1024 / CGFloat(max(image.width, image.height)))
-        let small = CIImage(cgImage: image).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        let turned = Framing(quarterTurns: quarters).applied(to: small, size: small.extent.size)
-        guard let view = imageContext.createCGImage(turned, from: turned.extent.integral) else { return nil }
-        let request = VNDetectHorizonRequest()
-        try VNImageRequestHandler(cgImage: view).perform([request])
+        // In whole pixels: with a fraction of one at an edge, Vision found no horizon in photos
+        // where it finds one otherwise.
+        let size = CGSize(width: (CGFloat(image.width) * scale).rounded(), height: (CGFloat(image.height) * scale).rounded())
+        let small = CIImage(cgImage: image).transformed(by: CGAffineTransform(scaleX: size.width / CGFloat(image.width),
+                                                                                y: size.height / CGFloat(image.height)))
+        let turned = Framing(quarterTurns: quarters).applied(to: small, size: size)
+        guard let horizon = try await DetectHorizonRequest().perform(on: turned) else { return nil }
         // Vision's angle turns the photo anticlockwise to level it: a photo turned 2° clockwise
         // reads +2°.
-        return request.results?.first.map { -$0.angle * 180 / .pi }
+        return -horizon.angle.converted(to: .degrees).value
     }
 
     /// Something to reset: the photo is framed, or what's marked isn't all of it.
