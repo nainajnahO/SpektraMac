@@ -1000,20 +1000,21 @@ private struct ValueSlider: View {
     }
 }
 
-/// A ``ValueSlider`` or a ``ThumbnailStrip`` as accessibility sees it: a horizontal slider, reading
-/// the value as the control shows it. VoiceOver's increment and decrement move it as the arrow keys
-/// do, a slider a line and a strip a step; an assistive app that sets the value, such as Voice
-/// Control, sets it to the nearest step, as typing or a drag does. An AppKit view, as SwiftUI can't
-/// give an element an orientation: its stand-in, a `Slider` in `accessibilityRepresentation`, has
-/// none, and assistive apps and XCUITest's `adjust(toNormalizedSliderPosition:)` need it to know
-/// which way the slider runs (#317, #339).
-private struct SliderElement: NSViewRepresentable {
+/// A ``ValueSlider``, a ``ThumbnailStrip`` or crop mode's straightening ruler as accessibility sees
+/// it: a slider, horizontal or upright, reading the value as the control shows it. VoiceOver's
+/// increment and decrement move it as the arrow keys do, a slider a line and a strip a step; an
+/// assistive app that sets the value, such as Voice Control, sets it to the nearest step, as typing
+/// or a drag does. An AppKit view, as SwiftUI can't give an element an orientation: its stand-in, a
+/// `Slider` in `accessibilityRepresentation`, has none, and assistive apps and XCUITest's
+/// `adjust(toNormalizedSliderPosition:)` need it to know which way the slider runs (#317, #339).
+struct SliderElement: NSViewRepresentable {
     let title: String
     let value: Double
     let range: ClosedRange<Double>
     let valueText: String
     let set: (Double) -> Void
     let move: (_ upward: Bool) -> Void
+    var orientation = NSAccessibilityOrientation.horizontal
 
     func makeNSView(context: Context) -> Element { Element() }
 
@@ -1035,7 +1036,7 @@ private struct SliderElement: NSViewRepresentable {
 
         override func isAccessibilityElement() -> Bool { true }
         override func accessibilityRole() -> NSAccessibility.Role? { .slider }
-        override func accessibilityOrientation() -> NSAccessibilityOrientation { .horizontal }
+        override func accessibilityOrientation() -> NSAccessibilityOrientation { slider?.orientation ?? .horizontal }
         override func accessibilityLabel() -> String? { slider?.title }
         override func accessibilityValue() -> Any? { slider?.value }
         override func accessibilityValueDescription() -> String? { slider?.valueText }
@@ -1056,6 +1057,32 @@ private struct SliderElement: NSViewRepresentable {
             action(slider)
             return true
         }
+    }
+}
+
+/// What a dot's bubble shows, on the exposure's strip or crop mode's straightening tapes: each thing
+/// it stands for, its symbol beside its name and what it is.
+struct DotBubble: View {
+    let items: [(systemImage: String, name: String, about: String)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(items, id: \.name) { item in
+                HStack(spacing: 10) {
+                    Image(systemName: item.systemImage)
+                        .font(.title)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name)
+                            .fontWeight(.semibold)
+                        Text("\(item.about.prefix(1).uppercased())\(item.about.dropFirst()).")
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(width: 240, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -1182,7 +1209,7 @@ private struct ThumbnailStrip: View {
                                     hoveredMark = nil
                                 }
                             }, attachmentAnchor: .point(.bottom), arrowEdge: .bottom) {
-                                bubble(for: mark)
+                                DotBubble(items: mark.items)
                                     // It follows the pointer: a click outside it is for the strip.
                                     .interactiveDismissDisabled()
                             }
@@ -1236,28 +1263,6 @@ private struct ThumbnailStrip: View {
 
     private func moveOneStep(upward: Bool) {
         value = range.stepped(value + (upward ? step : -step), by: step)
-    }
-
-    /// What a dot's bubble shows: each thing it stands for, its symbol beside its name and what it
-    /// is.
-    private func bubble(for mark: Mark) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(mark.items, id: \.name) { item in
-                HStack(spacing: 10) {
-                    Image(systemName: item.systemImage)
-                        .font(.title)
-                        .frame(width: 32)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name)
-                            .fontWeight(.semibold)
-                        Text("\(item.about.prefix(1).uppercased())\(item.about.dropFirst()).")
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .frame(width: 240, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// The mark whose dot is nearest `x`, within ``dotReach``.

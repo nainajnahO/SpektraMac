@@ -106,6 +106,15 @@ struct ContentView: View {
         // photo where the others open and send it. On, the canvas is in crop mode; off keeps the
         // crop.
         if model.photo != nil {
+            // While cropping, beside Crop: the photo turns as marked. The Image menu turns it either
+            // way, in crop mode or not.
+            if model.isCropping {
+                ToolbarItem {
+                    Button("Rotate Left", systemImage: "rotate.left") { model.turn(left: 1) }
+                        .disabled(!model.canTurn)
+                        .help("Turn the photo a quarter to the left")
+                }
+            }
             ToolbarItem {
                 // The toolbar sizes an item, and its glass, to the new width at once. So the button
                 // has glass of its own, and while cropping the item is as wide as the button with
@@ -116,7 +125,9 @@ struct ContentView: View {
                             .hidden()
                             .accessibilityHidden(true)
                     }
+                    // C as well as the Image menu's ⌘K, as in Photos: a menu item has one shortcut.
                     cropToggle(showsDone: model.hasCropChanges)
+                        .keyboardShortcut("c", modifiers: [])
                 }
                 // Not as crop mode ends, when the toolbar changes around it at once.
                 .animation(model.isCropping ? .snappy(duration: 0.3) : nil, value: model.hasCropChanges)
@@ -320,15 +331,17 @@ private struct ImageCanvas: View {
     @State private var dragStart: CGSize?
     @State private var pinched: CGFloat = 1
     @State private var scrollMonitor: Any?
-    /// In crop mode: the width over height of the shape the crop keeps to as it was chosen, if it
-    /// has one (``PhotoModel/cropShape``).
-    @State private var cropRatio: CGFloat?
     /// In crop mode, a drag moves the photo under a frame fixed in the middle, as in Photos, rather
     /// than the frame over the photo: as it was chosen last, while the app is open.
     @State private var cropMovesPhoto = false
     /// While a corner or edge of the frame is dragged with the photo moving: the part marked the
     /// canvas stays laid out around (``CropOverlay/held``).
     @State private var heldCrop: CGRect?
+    /// In crop mode, the pointer is over a straightening tape: scrolling turns the photo.
+    @State private var isOverRuler = false
+    /// While a trackpad's scroll over a tape is under way: the angle as it began, and the degrees
+    /// scrolled since.
+    @State private var scrollStraightening: (start: Double, degrees: Double)?
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
@@ -385,15 +398,55 @@ private struct ImageCanvas: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if model.isCropping, let photo = model.photo {
-                    cropControls(for: photo)
+                if model.isCropping {
+                    cropControls
                 }
+            }
+            // A tape at each side, clear of the frame's edges where they're the photo's, and of the
+            // controls below.
+            .overlay {
+                if model.isCropping {
+                    let height = min(280, max(120, visibleSize.height - 200))
+                    HStack {
+                        StraighteningRuler(side: .leading, height: height, isPrimary: true, isPointerOver: $isOverRuler)
+                        Spacer()
+                        StraighteningRuler(side: .trailing, height: height, isPrimary: false, isPointerOver: $isOverRuler)
+                    }
+                    .padding(.horizontal, 32)
+                    .disabled(model.isLeavingCropMode)
+                }
+            }
+            // A scroll that leaves the tape before it ends ends there: the grid goes.
+            .onChange(of: isOverRuler) { _, isOver in
+                if !isOver, scrollStraightening != nil {
+                    scrollStraightening = nil
+                    model.endStraightening()
+                }
+            }
+            // A click on the trackpad at each tenth of a degree a drag or scroll of a tape passes,
+            // a rumble as it goes, and a firmer one at 0° and every 10°, as the settings' sliders
+            // click at their lines. A Mac's trackpad plays only these two, so a whole degree clicks
+            // as a tenth does. Not as Auto or a double-click sets the angle.
+            .sensoryFeedback(trigger: model.markedFraming.angle) { old, new in
+                guard model.isStraightening else { return nil }
+                let passed = { (degree: Int) in
+                    (old < Double(degree) && Double(degree) <= new) || (new <= Double(degree) && Double(degree) < old)
+                }
+                let degrees = Int(min(old, new).rounded(.down))...Int(max(old, new).rounded(.up))
+                if degrees.contains(where: { $0.isMultiple(of: 10) && passed($0) }) { return .levelChange }
+                // As at the exposure's dots, the firmer one at the horizon's.
+                if let horizon = model.horizonAngle, (old < horizon && horizon <= new) || (new <= horizon && horizon < old) {
+                    return .levelChange
+                }
+                // Each change of the angle is a tenth or more: it's to a tenth.
+                return .alignment
             }
     }
 
     /// In crop mode, on the canvas over the foot of the photo, in glass as the toolbar's buttons
-    /// are: what a drag moves, and the shapes to keep to. Reset and Cancel are in the toolbar.
-    private func cropControls(for photo: PhotoModel.Photo) -> some View {
+    /// are: what a drag moves, and the shapes to keep to. The straightening tapes are at the
+    /// canvas's sides; Rotate, Reset and Cancel are in the toolbar.
+    private var cropControls: some View {
         // Glass near glass is drawn together.
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
@@ -415,15 +468,6 @@ private struct ImageCanvas: View {
         .disabled(model.isLeavingCropMode)
         // Clear of the frame's foot where it's the photo's: its edge is held below them.
         .padding(.bottom, 24)
-        .onChange(of: model.cropShape) {
-            // The largest part of that shape in what's marked, about the same middle.
-            let marked = model.cropSelection
-            cropRatio = model.cropShape.ratio(of: marked.size, in: photo.wholeBounds.size)
-            guard let cropRatio else { return }
-            let width = min(marked.width, marked.height * cropRatio)
-            model.cropSelection = CGRect(x: marked.midX - width / 2, y: marked.midY - width / cropRatio / 2,
-                                         width: width, height: width / cropRatio)
-        }
     }
 
     /// The crop's shapes in one group of glass, looking as the toolbar's Camera, Film and Print do:
@@ -434,7 +478,7 @@ private struct ImageCanvas: View {
     /// the shapes as tabs. Not a menu: a SwiftUI menu has no action for assistive apps to press on
     /// macOS 27, which fails the accessibility audit (#314).
     private var cropShapes: some View {
-        Picker("Shape", selection: Binding { model.cropShape } set: { model.cropShape = $0 }) {
+        Picker("Shape", selection: Binding { model.cropShape } set: { model.chooseCropShape($0) }) {
             ForEach(CropShape.allCases, id: \.self) { Text($0.rawValue) }
         }
         .pickerStyle(.tabs)
@@ -452,18 +496,24 @@ private struct ImageCanvas: View {
                 // photo would make that the window's minimum.
                 GeometryReader { _ in
                     let shown = photoRect
+                    // In crop mode, all of the original turned and straightened as marked: laid out
+                    // unturned about the middle of where it lies turned.
+                    let framing = model.isCropping ? model.markedFraming : .whole
+                    let unturned = framing.quarterTurns.isMultiple(of: 2) ? shown.size : CGSize(width: shown.height, height: shown.width)
                     Image(image, scale: 1, label: Text(photoDescription))
                         .resizable()
                         .interpolation(.high)
                         .overlay { meteringOverlay }
                         .overlay { burnOverlay }
-                        .frame(width: shown.width, height: shown.height)
+                        .frame(width: unturned.width, height: unturned.height)
+                        .rotationEffect(.degrees(framing.angle - 90 * Double(framing.quarterTurns)))
                         .position(x: shown.midX, y: shown.midY)
                     // On the canvas, not the photo, which moves under it as it's dragged.
-                    if model.isCropping, let photo = model.photo {
+                    if model.isCropping {
                         CropOverlay(selection: Binding { model.cropSelection } set: { model.cropSelection = $0 },
-                                    whole: photo.wholeBounds.size, photoFrame: shown, ratio: cropRatio,
-                                    movesPhoto: cropMovesPhoto, held: $heldCrop)
+                                    whole: model.cropBounds.size, angle: model.markedFraming.angle, photoFrame: shown,
+                                    ratio: model.cropRatio, movesPhoto: cropMovesPhoto,
+                                    showsFineGrid: model.isStraightening, held: $heldCrop)
                             .allowsHitTesting(!model.isLeavingCropMode)
                     }
                 }
@@ -513,6 +563,10 @@ private struct ImageCanvas: View {
                     // photo, scrolling zooms instead of scrolling. A trackpad's momentum after
                     // the fingers lift is left out, so the zoom stops with them.
                     scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+                        if isOverRuler, model.isCropping {
+                            straighten(byScrolling: event)
+                            return nil
+                        }
                         guard let pointer else { return event }
                         if event.momentumPhase.isEmpty {
                             let step = event.hasPreciseScrollingDeltas ? 0.01 : 0.15  // points, or wheel lines
@@ -540,7 +594,6 @@ private struct ImageCanvas: View {
         .onChange(of: model.isCropping) {
             zoom = 1
             offset = .zero
-            cropRatio = nil
             heldCrop = nil
         }
         .focusedSceneValue(\.canvasZoom, model.photo == nil || model.isCropping ? nil : CanvasZoom(
@@ -568,11 +621,12 @@ private struct ImageCanvas: View {
     /// Where all of the photo is on the canvas: fitted, zoomed and moved, or in crop mode, placed
     /// so the part it's laid out around fills a frame fitted in the middle.
     private var photoRect: CGRect {
-        if let marked = cropLaidOutAround, let photo = model.photo, marked.width > 0 {
+        if let marked = cropLaidOutAround, marked.width > 0 {
             let frame = Self.fitted(marked.size, in: visibleSize)
             let scale = frame.width / marked.width
+            let bounds = model.cropBounds
             return CGRect(x: visibleCentre.x - marked.midX * scale, y: visibleCentre.y - marked.midY * scale,
-                          width: photo.wholeBounds.width * scale, height: photo.wholeBounds.height * scale)
+                          width: bounds.width * scale, height: bounds.height * scale)
         }
         let fitted = fittedSize(in: visibleSize)
         return CGRect(x: visibleCentre.x + offset.width - fitted.width * zoom / 2,
@@ -580,28 +634,51 @@ private struct ImageCanvas: View {
                       width: fitted.width * zoom, height: fitted.height * zoom)
     }
 
-    /// In crop mode, what the canvas is laid out around: all of the photo, or with the photo moving,
-    /// the part marked, held while a corner or edge is dragged.
+    /// In crop mode, what the canvas is laid out around: all of the photo turned as marked, or with
+    /// the photo moving, the part marked, held while a corner or edge is dragged.
     private var cropLaidOutAround: CGRect? {
-        guard model.isCropping, let photo = model.photo else { return nil }
-        return cropMovesPhoto ? heldCrop ?? model.cropSelection : photo.wholeBounds
+        guard model.isCropping else { return nil }
+        return cropMovesPhoto ? heldCrop ?? model.cropSelection : model.cropBounds
+    }
+
+    /// Turns the photo by a scroll over a straightening tape, as dragging the tape does: a
+    /// trackpad's scroll as one drag, from the angle as it began, with the fine grid; a mouse's
+    /// wheel, which has no such start and end, from where the photo is, a tenth of a degree a line. A
+    /// trackpad's momentum after the fingers lift is left out, so the photo stops turning with them.
+    private func straighten(byScrolling event: NSEvent) {
+        guard !model.isLeavingCropMode, event.momentumPhase.isEmpty else { return }
+        let degrees = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY / StraighteningRuler.scrollSpacing
+                                                      : event.scrollingDeltaY / 10
+        guard !event.phase.isEmpty else {
+            model.straighten(to: model.markedFraming.angle + degrees)
+            return
+        }
+        if event.phase.contains(.began) || scrollStraightening == nil {
+            scrollStraightening = (model.markedFraming.angle, 0)
+            model.beginStraightening()
+        }
+        if var scroll = scrollStraightening {
+            scroll.degrees += degrees
+            scrollStraightening = scroll
+            model.straighten(to: scroll.start + scroll.degrees)
+        }
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+            scrollStraightening = nil
+            model.endStraightening()
+        }
     }
 
     /// Zooms the photo under the crop's frame by `factor`, about the frame's middle: the part marked
     /// shrinks as the photo grows, staying in the photo, down to 4 points a pixel.
     private func zoomUnderFrame(by factor: CGFloat) {
-        guard heldCrop == nil, let photo = model.photo else { return }
+        guard heldCrop == nil else { return }
         let marked = model.cropSelection
-        let whole = photo.wholeBounds.size
         let frame = Self.fitted(marked.size, in: visibleSize)
         guard marked.width > 0, frame.width > 0 else { return }
-        let least = min(1, frame.width / 4 / marked.width)
-        let most = min(whole.width / marked.width, whole.height / marked.height)
-        let scale = min(max(1 / factor, least), most)
+        let scale = max(1 / factor, min(1, frame.width / 4 / marked.width))
         let size = CGSize(width: marked.width * scale, height: marked.height * scale)
-        model.cropSelection = CGRect(x: min(max(0, marked.midX - size.width / 2), whole.width - size.width),
-                                     y: min(max(0, marked.midY - size.height / 2), whole.height - size.height),
-                                     width: size.width, height: size.height)
+        model.cropSelection = model.straightenedPhoto.fitted(CGRect(x: marked.midX - size.width / 2, y: marked.midY - size.height / 2,
+                                                                    width: size.width, height: size.height))
     }
 
     /// The canvas below the toolbar and beside the panel.
@@ -702,6 +779,204 @@ private struct ImageCanvas: View {
                            height: max(0, (fitted.height * zoom - visibleSize.height) / 2))
         return CGSize(width: min(max(offset.width, -slack.width), slack.width),
                       height: min(max(offset.height, -slack.height), slack.height))
+    }
+}
+
+/// Straightening in crop mode, as a fighter's head-up display shows its speed and height: an
+/// upright tape of degrees in fine lines on the photo, one at each side of the canvas, its ticks
+/// reaching out from a spine, which isn't drawn, toward the photo's middle. It slides past a box
+/// reading the angle as it's dragged or scrolled over: down, the degrees above come to the box,
+/// turning the photo to the right. A double-click straightens it to 0°. On the spine, as the
+/// exposure's strip has the metering marks' dots, is a
+/// dot at the angle that levels the horizon Vision finds: a click on it straightens the photo
+/// there, and with the pointer on it, the same bubble as theirs says what it is, opening towards
+/// the photo. With Full Keyboard Access the arrow keys step the primary tape a tenth of a degree,
+/// and accessibility finds an upright slider in its place (``SliderElement``), stepping it a degree,
+/// with an action for the horizon; the other is the same again, so they leave it out.
+///
+/// Drawn here: SwiftUI and AppKit have no ruler, tape or dial, and AppKit's slider stood upright has
+/// a knob that moves along a track, with no numbers on its scale.
+private struct StraighteningRuler: View {
+    @Environment(PhotoModel.self) private var model
+    /// The side of the canvas it's on.
+    let side: HorizontalEdge
+    /// How tall the tape is.
+    let height: CGFloat
+    /// The one the keyboard and assistive apps reach.
+    let isPrimary: Bool
+    /// The pointer is over it: the canvas turns scrolling there into turns of the photo.
+    @Binding var isPointerOver: Bool
+    /// The angle as the drag began.
+    @State private var dragStart: Double?
+    /// The pointer is on the horizon's dot.
+    @State private var isOnDot = false
+
+    /// Points to a degree on the tape, and of a drag, which the tape follows.
+    static let spacing: CGFloat = 8
+    /// Points of a trackpad's scroll to a degree: five times a drag's, so a short scroll reaches
+    /// tenths of a degree, the tape sliding slower than the fingers.
+    static let scrollSpacing: CGFloat = 40
+    private static let width: CGFloat = 96
+    /// How far in from the tape's inner edge its spine is: room for the ticks centred on it, and
+    /// the dot.
+    private static let spineInset: CGFloat = 8
+    /// How far from the dot's middle, in points, the pointer is on it: the dot is 6 across.
+    private static let dotReach: CGFloat = 8
+
+    var body: some View {
+        let angle = model.markedFraming.angle
+        let degrees = "\(angle.formatted(.number.precision(.fractionLength(1))))°"
+        ZStack(alignment: .topLeading) {
+            tape(at: angle, reading: degrees)
+            if let dot = dotCentre(at: angle), let horizon = model.horizonAngle {
+                horizonDot(isOn: abs(angle - horizon) < 0.05)
+                    .position(dot)
+            }
+        }
+            .frame(width: Self.width, height: height)
+            // Fading out at its ends.
+            .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.15),
+                                         .init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
+                                 startPoint: .top, endPoint: .bottom))
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 1)
+                .onChanged { drag in
+                    let start = dragStart ?? angle
+                    if dragStart == nil {
+                        dragStart = start
+                        model.beginStraightening()
+                    }
+                    model.straighten(to: start + drag.translation.height / Self.spacing)
+                }
+                .onEnded { _ in
+                    dragStart = nil
+                    model.endStraightening()
+                })
+            // Each click of a double-click is a click too: the first may be on the dot. Where the
+            // click is, rather than the hover: a scroll can slide the dot under a still pointer.
+            .onTapGesture { location in
+                if NSApp.currentEvent?.clickCount == 2 {
+                    model.straighten(to: 0)
+                } else if isOnDot(location, at: angle) {
+                    model.straightenByHorizon()
+                }
+            }
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    isPointerOver = true
+                    let isOn = isOnDot(location, at: angle)
+                    if isOn != isOnDot {
+                        isOnDot = isOn
+                    }
+                case .ended:
+                    isPointerOver = false
+                    isOnDot = false
+                }
+            }
+            .pointerStyle(isOnDot ? .link : dragStart == nil ? .grabIdle : .grabActive)
+            .focusable(isPrimary, interactions: .activate)
+            .onMoveCommand { direction in
+                switch direction {
+                case .up: model.straighten(to: angle + 0.1)
+                case .down: model.straighten(to: angle - 0.1)
+                default: break
+                }
+            }
+            .accessibilityHidden(true)
+            .background {
+                if isPrimary {
+                    SliderElement(title: "Straighten", value: angle, range: -45...45, valueText: "\(degrees) to the right",
+                                  set: { model.straighten(to: $0) }, move: { model.straighten(to: angle + ($0 ? 1 : -1)) },
+                                  orientation: .vertical)
+                        .accessibilityActions {
+                            if model.horizonAngle != nil {
+                                Button(Self.horizon.name) { model.straightenByHorizon() }
+                            }
+                        }
+                }
+            }
+            .help("Drag or scroll to straighten the photo; double-click for 0°")
+    }
+
+    /// What the horizon's dot stands for, in its bubble.
+    private static let horizon = (systemImage: "level", name: "Horizon",
+                                  about: "levels the horizon Vision finds in the photo")
+
+    /// Where the horizon's dot is on the spine, with the tape at `angle`: none until Vision has found
+    /// it, or where it's faded out at the tape's ends.
+    private func dotCentre(at angle: Double) -> CGPoint? {
+        guard let horizon = model.horizonAngle else { return nil }
+        let y = height / 2 - (horizon - angle) * Self.spacing
+        guard y > height * 0.15, y < height * 0.85 else { return nil }
+        return CGPoint(x: side == .leading ? Self.width - Self.spineInset : Self.spineInset, y: y)
+    }
+
+    /// `location`, in the tape, is on the horizon's dot, with the tape at `angle`.
+    private func isOnDot(_ location: CGPoint, at angle: Double) -> Bool {
+        dotCentre(at: angle).map { hypot($0.x - location.x, $0.y - location.y) <= Self.dotReach } ?? false
+    }
+
+    /// The horizon's dot, in the accent colour while the photo is straightened there, and its bubble
+    /// with the pointer on it, opening towards the photo.
+    private func horizonDot(isOn: Bool) -> some View {
+        let size: CGFloat = isOnDot ? 8 : 6
+        let towardsPhoto: Edge = side == .leading ? .trailing : .leading
+        return Circle()
+            .fill(isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.white))
+            .shadow(color: .black.opacity(0.6), radius: 1)
+            .frame(width: size, height: size)
+            .popover(isPresented: Binding { isOnDot && dragStart == nil } set: { isPresented in
+                if !isPresented {
+                    isOnDot = false
+                }
+            }, attachmentAnchor: .point(towardsPhoto == .trailing ? .trailing : .leading), arrowEdge: towardsPhoto) {
+                DotBubble(items: [Self.horizon])
+                    // It follows the pointer: a click outside it is for the tape.
+                    .interactiveDismissDisabled()
+            }
+    }
+
+    /// A tick every degree, centred on the spine, longer every 5 and numbered every 10, and the box
+    /// reading `degrees`, pointing at `angle`: white lines, shadowed to show on a pale photo, as the
+    /// crop frame's are.
+    private func tape(at angle: Double, reading degrees: String) -> some View {
+        Canvas { context, size in
+            // Outwards from the spine, which faces the photo's middle.
+            let outwards: CGFloat = side == .leading ? -1 : 1
+            let spine = side == .leading ? size.width - Self.spineInset : Self.spineInset
+            let x = { (offset: CGFloat) in spine + outwards * offset }
+            let anchor: UnitPoint = side == .leading ? .trailing : .leading
+            let middle = size.height / 2
+            let box = CGSize(width: 58, height: 20)
+            context.addFilter(.shadow(color: .black.opacity(0.6), radius: 1))
+            var lines = Path()
+            for degree in -45...45 {
+                let y = middle - (Double(degree) - angle) * Self.spacing
+                guard y > -12, y < size.height + 12 else { continue }
+                let length: CGFloat = degree.isMultiple(of: 10) ? 12 : degree.isMultiple(of: 5) ? 8 : 4
+                lines.move(to: CGPoint(x: x(-length / 2), y: y))
+                lines.addLine(to: CGPoint(x: x(length / 2), y: y))
+                // Not behind the box.
+                if degree.isMultiple(of: 10), abs(y - middle) > box.height {
+                    context.draw(Text(degree.formatted()).font(.system(size: 11, design: .monospaced)).foregroundStyle(.white),
+                                 at: CGPoint(x: x(12), y: y), anchor: anchor)
+                }
+            }
+            context.stroke(lines, with: .color(.white), lineWidth: 0.75)
+            // The box, its point just past the longest ticks.
+            let (near, far) = (x(14), x(14 + box.width))
+            var reading = Path()
+            reading.move(to: CGPoint(x: x(8), y: middle))
+            reading.addLine(to: CGPoint(x: near, y: middle - box.height / 2))
+            reading.addLine(to: CGPoint(x: far, y: middle - box.height / 2))
+            reading.addLine(to: CGPoint(x: far, y: middle + box.height / 2))
+            reading.addLine(to: CGPoint(x: near, y: middle + box.height / 2))
+            reading.closeSubpath()
+            context.stroke(reading, with: .color(.white), lineWidth: 1)
+            context.draw(Text(degrees).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(.white),
+                         at: CGPoint(x: (near + far) / 2, y: middle))
+        }
     }
 }
 

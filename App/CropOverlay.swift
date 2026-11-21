@@ -8,17 +8,80 @@ enum CropShape: String, CaseIterable {
     case fourFive = "4:5"
     case square = "1:1"
 
-    /// Width over height for a selection of `selection`'s size in a photo of `whole`'s: nil for any.
-    /// 3:2 and 4:5 lie as the selection does, on its side or upright.
-    func ratio(of selection: CGSize, in whole: CGSize) -> CGFloat? {
-        let upright = selection.height > selection.width
-        return switch self {
+    /// Width over height for a part of a photo of `whole`'s size: nil for any. 3:2 and 4:5 stand
+    /// upright if `upright`, and otherwise lie on their side.
+    func ratio(upright: Bool, in whole: CGSize) -> CGFloat? {
+        switch self {
         case .free: nil
         case .asShot: whole.width / whole.height
         case .threeTwo: upright ? 2.0 / 3 : 3.0 / 2
         case .fourFive: upright ? 4.0 / 5 : 5.0 / 4
         case .square: 1
         }
+    }
+}
+
+/// All of the photo as crop mode marks a part of it: its size turned, and turned `angle` degrees
+/// to the right about its middle to straighten it. The part marked keeps inside it.
+struct StraightenedPhoto {
+    /// Its size, turned: where it lies, unstraightened, from the top left.
+    let size: CGSize
+    let angle: Double
+
+    /// Where `point` of the photo unstraightened lies straightened: turned clockwise about the
+    /// middle, measuring down.
+    func straightened(_ point: CGPoint) -> CGPoint {
+        turned(point, by: angle)
+    }
+
+    /// Where `point` is on the photo unstraightened.
+    func unstraightened(_ point: CGPoint) -> CGPoint {
+        turned(point, by: -angle)
+    }
+
+    /// Its corners, straightened.
+    var corners: [CGPoint] {
+        [CGPoint.zero, CGPoint(x: size.width, y: 0), CGPoint(x: size.width, y: size.height), CGPoint(x: 0, y: size.height)]
+            .map(straightened)
+    }
+
+    /// `rect` is inside it, to a hundredth of a pixel.
+    func contains(_ rect: CGRect) -> Bool {
+        let reach = reach(of: rect.size)
+        let middle = unstraightened(CGPoint(x: rect.midX, y: rect.midY))
+        let slack = 0.01
+        return middle.x - reach.width >= -slack && middle.x + reach.width <= size.width + slack
+            && middle.y - reach.height >= -slack && middle.y + reach.height <= size.height + slack
+    }
+
+    /// `rect` inside it: made smaller about its middle if it's too large to go in, then moved the
+    /// least way across and down the photo. Unstraightened, that's within the photo's edges.
+    func fitted(_ rect: CGRect) -> CGRect {
+        var reach = reach(of: rect.size)
+        let scale = min(1, size.width / 2 / reach.width, size.height / 2 / reach.height)
+        reach = CGSize(width: reach.width * scale, height: reach.height * scale)
+        var middle = unstraightened(CGPoint(x: rect.midX, y: rect.midY))
+        middle.x = min(max(middle.x, reach.width), size.width - reach.width)
+        middle.y = min(max(middle.y, reach.height), size.height - reach.height)
+        let centre = straightened(middle)
+        let fitted = CGSize(width: rect.width * scale, height: rect.height * scale)
+        return CGRect(x: centre.x - fitted.width / 2, y: centre.y - fitted.height / 2,
+                      width: fitted.width, height: fitted.height)
+    }
+
+    /// How far a part of `size` reaches from its middle across and down the photo unstraightened:
+    /// half the width and height of what it covers there.
+    private func reach(of size: CGSize) -> CGSize {
+        let radians = angle * .pi / 180
+        let (cos, sin) = (abs(Foundation.cos(radians)), abs(Foundation.sin(radians)))
+        return CGSize(width: (cos * size.width + sin * size.height) / 2, height: (sin * size.width + cos * size.height) / 2)
+    }
+
+    private func turned(_ point: CGPoint, by degrees: Double) -> CGPoint {
+        let radians = degrees * .pi / 180
+        let (cos, sin) = (Foundation.cos(radians), Foundation.sin(radians))
+        let (x, y) = (point.x - size.width / 2, point.y - size.height / 2)
+        return CGPoint(x: size.width / 2 + x * cos - y * sin, y: size.height / 2 + x * sin + y * cos)
     }
 }
 
@@ -32,14 +95,19 @@ enum CropShape: String, CaseIterable {
 struct CropOverlay: View, Animatable {
     /// The part to keep, in the photo's pixels from its top left.
     @Binding var selection: CGRect
-    /// The photo's size in pixels.
+    /// The photo's size in pixels, turned as it's marked.
     let whole: CGSize
-    /// Where all of the photo is, in the overlay's coordinates: the canvas's.
+    /// Degrees the photo is turned to the right to straighten it.
+    let angle: Double
+    /// Where all of the photo turned is, unstraightened, in the overlay's coordinates: the canvas's.
     var photoFrame: CGRect
     /// Width over height the selection keeps to, if any.
     let ratio: CGFloat?
     /// A drag on the photo moves the photo under the frame, rather than the frame over it.
     let movesPhoto: Bool
+    /// While the photo is being straightened: a fine grid in the frame, in place of the thirds, to
+    /// line things up with.
+    let showsFineGrid: Bool
     /// While a corner or edge is dragged with the photo moving: the selection the canvas stays laid
     /// out around, so the frame follows the pointer. Let go, the canvas fits the frame again.
     @Binding var held: CGRect?
@@ -112,10 +180,13 @@ struct CropOverlay: View, Animatable {
             let scale = photoFrame.width / whole.width
             let frame = CGRect(x: photoFrame.minX + selection.minX * scale, y: photoFrame.minY + selection.minY * scale,
                                width: selection.width * scale, height: selection.height * scale)
+            // The photo's edges, straightened, on the canvas.
+            let outline = photo.corners.map { CGPoint(x: photoFrame.minX + $0.x * scale, y: photoFrame.minY + $0.y * scale) }
             // Where a drag moves what's moved: the frame, or the photo where it's on the canvas.
-            let moveArea = movesPhoto ? photoFrame.intersection(CGRect(origin: .zero, size: geometry.size)) : frame
+            let moveArea = movesPhoto ? Path { $0.addLines(outline) }.boundingRect.intersection(CGRect(origin: .zero, size: geometry.size))
+                                      : frame
             ZStack {
-                marks(of: frame)
+                marks(of: frame, in: outline)
                 // The size marked, in pixels, in the frame's corner where there's room for it.
                 if frame.width >= 120, frame.height >= 44 {
                     let size = "\(Int(selection.width.rounded()).formatted()) × \(Int(selection.height.rounded()).formatted())"
@@ -177,23 +248,31 @@ struct CropOverlay: View, Animatable {
         }
     }
 
-    /// The photo dimmed outside `frame`, and the frame: its outline, the thirds, and a mark on each
-    /// corner and edge.
-    private func marks(of frame: CGRect) -> some View {
+    /// The photo, whose edges are `outline`, dimmed outside `frame`, and the frame: its outline, the
+    /// thirds or the fine grid, and a mark on each corner and edge.
+    private func marks(of frame: CGRect, in outline: [CGPoint]) -> some View {
         Canvas { context, _ in
-            var outside = Path(photoFrame)
+            var outside = Path { $0.addLines(outline) }
             outside.addRect(frame)
             context.fill(outside, with: .color(.black.opacity(0.6)), style: FillStyle(eoFill: true))
             // White lines on a pale photo show by their shadow.
             context.addFilter(.shadow(color: .black.opacity(0.5), radius: 1))
-            var thirds = Path()
-            for third in [1.0 / 3, 2.0 / 3] {
-                thirds.move(to: CGPoint(x: frame.minX + frame.width * third, y: frame.minY))
-                thirds.addLine(to: CGPoint(x: frame.minX + frame.width * third, y: frame.maxY))
-                thirds.move(to: CGPoint(x: frame.minX, y: frame.minY + frame.height * third))
-                thirds.addLine(to: CGPoint(x: frame.maxX, y: frame.minY + frame.height * third))
+            var lines = Path()
+            // Square, about the frame's middle, eight across its short side.
+            let step = showsFineGrid ? max(12, min(frame.width, frame.height) / 8) : 0
+            let xs = showsFineGrid ? Self.lines(across: frame.minX...frame.maxX, every: step)
+                                   : [frame.minX + frame.width / 3, frame.minX + frame.width * 2 / 3]
+            let ys = showsFineGrid ? Self.lines(across: frame.minY...frame.maxY, every: step)
+                                   : [frame.minY + frame.height / 3, frame.minY + frame.height * 2 / 3]
+            for x in xs {
+                lines.move(to: CGPoint(x: x, y: frame.minY))
+                lines.addLine(to: CGPoint(x: x, y: frame.maxY))
             }
-            context.stroke(thirds, with: .color(.white.opacity(0.5)), lineWidth: 0.5)
+            for y in ys {
+                lines.move(to: CGPoint(x: frame.minX, y: y))
+                lines.addLine(to: CGPoint(x: frame.maxX, y: y))
+            }
+            context.stroke(lines, with: .color(.white.opacity(0.5)), lineWidth: 0.5)
             context.stroke(Path(frame), with: .color(.white), lineWidth: 1)
             var holds = Path()
             let length = min(20, frame.width / 4, frame.height / 4)
@@ -218,6 +297,17 @@ struct CropOverlay: View, Animatable {
         .allowsHitTesting(false)
     }
 
+    /// Lines `step` apart inside `span`, placed about its middle.
+    private static func lines(across span: ClosedRange<CGFloat>, every step: CGFloat) -> [CGFloat] {
+        let middle = (span.lowerBound + span.upperBound) / 2
+        let count = Int(((span.upperBound - span.lowerBound) / 2 / step).rounded(.down))
+        return (-count...count).map { middle + CGFloat($0) * step }
+            .filter { $0 > span.lowerBound + 1 && $0 < span.upperBound - 1 }
+    }
+
+    /// The photo the selection keeps inside.
+    private var photo: StraightenedPhoto { StraightenedPhoto(size: whole, angle: angle) }
+
     /// A drag that sets the selection to what `change` makes of it as the drag began and how far the
     /// drag has gone, in pixels: holding the canvas where it is till it ends, if `holdsCanvas`.
     private func drag(scale: CGFloat, holdsCanvas: Bool = false,
@@ -238,47 +328,65 @@ struct CropOverlay: View, Animatable {
             }
     }
 
-    /// `start` moved by `offset`, inside the photo.
+    /// `start` moved by `offset`, inside the photo: along its edge, where it meets one.
     private func moved(_ start: CGRect, by offset: CGSize) -> CGRect {
-        CGRect(x: min(max(0, start.minX + offset.width), whole.width - start.width),
-               y: min(max(0, start.minY + offset.height), whole.height - start.height),
-               width: start.width, height: start.height)
+        photo.fitted(start.offsetBy(dx: offset.width, dy: offset.height))
     }
 
     /// `start` with `handle` moved by `offset`, inside the photo and no smaller than can be held.
-    /// Keeping to ``ratio``, a corner leaves the opposite corner where it is, and an edge the
-    /// middle of the opposite edge.
+    /// Past the photo's edge it goes as far as the photo reaches, a corner as far across and then
+    /// as far down as it can.
     private func resized(_ start: CGRect, by offset: CGSize, at handle: Handle, scale: CGFloat) -> CGRect {
+        let photo = photo
+        let all = reshaped(start, by: offset, at: handle, scale: scale)
+        guard !photo.contains(all) else { return all }
+        let across = Self.largest { photo.contains(reshaped(start, by: CGSize(width: offset.width * $0, height: 0),
+                                                            at: handle, scale: scale)) }
+        let down = Self.largest { photo.contains(reshaped(start, by: CGSize(width: offset.width * across, height: offset.height * $0),
+                                                          at: handle, scale: scale)) }
+        return reshaped(start, by: CGSize(width: offset.width * across, height: offset.height * down), at: handle, scale: scale)
+    }
+
+    /// The largest share of the way, from none to all, for which `fits`: it fits for none, and past
+    /// where it stops fitting, no more.
+    private static func largest(_ fits: (CGFloat) -> Bool) -> CGFloat {
+        var (fitting, not): (CGFloat, CGFloat) = (0, 1)
+        guard !fits(1) else { return 1 }
+        // To a millionth of the way.
+        for _ in 0..<20 {
+            let half = (fitting + not) / 2
+            if fits(half) { fitting = half } else { not = half }
+        }
+        return fitting
+    }
+
+    /// `start` with `handle` moved by `offset`, no smaller than can be held, wherever the photo is.
+    /// Keeping to ``ratio``, a corner leaves the opposite corner where it is, and an edge the middle
+    /// of the opposite edge.
+    private func reshaped(_ start: CGRect, by offset: CGSize, at handle: Handle, scale: CGFloat) -> CGRect {
         let unit = handle.unit
         // The shortest a side gets: 32 points on screen.
         let least = min(32 / scale, whole.width, whole.height)
         var (left, right, top, bottom) = (start.minX, start.maxX, start.minY, start.maxY)
-        if unit.x == 0 { left = min(max(0, left + offset.width), right - least) }
-        if unit.x == 1 { right = max(min(whole.width, right + offset.width), left + least) }
-        if unit.y == 0 { top = min(max(0, top + offset.height), bottom - least) }
-        if unit.y == 1 { bottom = max(min(whole.height, bottom + offset.height), top + least) }
+        if unit.x == 0 { left = min(left + offset.width, right - least) }
+        if unit.x == 1 { right = max(right + offset.width, left + least) }
+        if unit.y == 0 { top = min(top + offset.height, bottom - least) }
+        if unit.y == 1 { bottom = max(bottom + offset.height, top + least) }
         var size = CGSize(width: right - left, height: bottom - top)
         guard let ratio else { return CGRect(x: left, y: top, width: size.width, height: size.height) }
         if unit.y == 0.5 {
-            // As tall as the width asks, about the same middle: no taller than the photo has room.
-            let room = 2 * min(start.midY, whole.height - start.midY)
-            size.width = min(size.width, room * ratio)
+            // As tall as the width asks, about the same middle.
             size.height = size.width / ratio
             return CGRect(x: unit.x == 0 ? start.maxX - size.width : start.minX, y: start.midY - size.height / 2,
                           width: size.width, height: size.height)
         }
         if unit.x == 0.5 {
-            let room = 2 * min(start.midX, whole.width - start.midX)
-            size.height = min(size.height, room / ratio)
             size.width = size.height * ratio
             return CGRect(x: start.midX - size.width / 2, y: unit.y == 0 ? start.maxY - size.height : start.minY,
                           width: size.width, height: size.height)
         }
-        // A corner follows the pointer on the side it has gone further, as far as the photo reaches
-        // from the opposite corner.
-        let room = CGSize(width: unit.x == 0 ? start.maxX : whole.width - start.minX,
-                          height: unit.y == 0 ? start.maxY : whole.height - start.minY)
-        size.width = min(max(size.width, size.height * ratio), room.width, room.height * ratio)
+        // A corner follows the pointer on the side it has gone further.
+        size.width = max(size.width, size.height * ratio)
         size.height = size.width / ratio
         return CGRect(x: unit.x == 0 ? start.maxX - size.width : start.minX,
                       y: unit.y == 0 ? start.maxY - size.height : start.minY, width: size.width, height: size.height)

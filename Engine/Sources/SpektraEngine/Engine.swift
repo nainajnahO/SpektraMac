@@ -499,7 +499,7 @@ public actor Engine {
 
     /// The open photo on the GPU, at full size, as its preview and as its thumbnail.
     private struct Photo {
-        /// All of the photo as it opened: `full`'s texture, unless it's cropped (``crop(to:)``).
+        /// All of the photo as it opened: `full`'s texture, unless it's framed (``frame(_:)``).
         let whole: any MTLTexture
         var full: PhotoImage
         var preview: PhotoImage
@@ -578,23 +578,29 @@ public actor Engine {
         return try work(on: whole, of: whole)
     }
 
-    /// Crops the open photo to `rect`, in the pixels of the photo as it opened, from its top left
-    /// (taken to whole pixels, inside the photo), or shows all of it again for `nil`. The crop is
-    /// then the photo renders work on, as if framed that way in the camera: it fills the film's
-    /// frame, so grain and halation are as fine as on the whole photo, and it's metered on its own.
-    /// The whole photo stays on the GPU beside it (16 bytes a pixel), to crop again from. A crop
-    /// that fails leaves the photo as it was.
-    public func crop(to rect: CGRect?) throws -> OpenedPhoto {
-        guard let whole = photo?.whole else { preconditionFailure("Cropping before a photo is open") }
-        let bounds = CGRect(x: 0, y: 0, width: whole.width, height: whole.height)
-        let region = rect.map { $0.integral.intersection(bounds) } ?? bounds
-        // All of it is the texture it opened into, so its renders are as before any crop.
-        guard region != bounds, !region.isEmpty else { return try work(on: whole, of: whole) }
-        let cropped = gpu.makeReadableTexture(width: Int(region.width), height: Int(region.height))
+    /// Frames the open photo as `framing` has it, from all of it as it opened: turned, straightened
+    /// and cropped (to whole pixels; unstraightened, inside all of it turned). That's then the photo
+    /// renders work on, as if framed that way in the camera: it fills the film's frame, so grain and
+    /// halation are as fine as on the whole photo, and it's metered on its own. The whole photo stays
+    /// on the GPU beside it (16 bytes a pixel), to frame again from. Framing that fails leaves the
+    /// photo as it was.
+    public func frame(_ framing: Framing) throws -> OpenedPhoto {
+        guard let whole = photo?.whole else { preconditionFailure("Framing before a photo is open") }
+        let size = CGSize(width: whole.width, height: whole.height)
+        let bounds = CGRect(origin: .zero, size: framing.turned(size))
+        let crop = framing.crop.map { framing.angle == 0 ? $0.integral.intersection(bounds) : $0.integral } ?? bounds
+        let region = crop.isEmpty ? bounds : crop
+        // All of it as it opened is the texture it opened into, so its renders are as before.
+        if framing.quarterTurns == 0, framing.angle == 0, region == bounds {
+            return try work(on: whole, of: whole)
+        }
+        let framed = gpu.makeReadableTexture(width: Int(region.width), height: Int(region.height))
         // Core Image puts a texture's first row at the bottom, and measures up from there.
         let upright = CIImage(mtlTexture: whole, options: [.colorSpace: RGBImage.workingColorSpace])!.oriented(.downMirrored)
-        try render(upright, from: region.offsetBy(dx: 0, dy: bounds.height - region.maxY - region.minY), into: cropped)
-        return try work(on: cropped, of: whole)
+        try render(framing.applied(to: upright, size: size),
+                   from: CGRect(x: region.minX, y: bounds.height - region.maxY, width: region.width, height: region.height),
+                   into: framed)
+        return try work(on: framed, of: whole)
     }
 
     /// Makes `full`, all or a part of the photo opened into `whole`, the photo renders work on:
