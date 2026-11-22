@@ -414,7 +414,7 @@ final class PhotoModelTests {
         let model = try await openedModel()
         model.beginCropping()
         #expect(model.cropShape == .asShot)
-        model.typeCropRatio(CGSize(width: 16, height: 9), in: model.cropSelection)
+        model.typeCropRatio(CGSize(width: 16, height: 9))
         #expect(model.cropShape == .custom)
         #expect(model.cropSelection.width == 1200 && abs(model.cropSelection.height - 675) < 0.001)
 

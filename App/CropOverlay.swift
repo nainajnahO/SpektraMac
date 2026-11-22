@@ -106,8 +106,8 @@ struct CropOverlay: View, Animatable {
     let ratio: CGFloat?
     /// A drag on the photo moves the photo under the frame, rather than the frame over it.
     let movesPhoto: Bool
-    /// While the photo is being straightened: a fine grid in the frame, in place of the thirds, to
-    /// line things up with.
+    /// While the photo is being straightened: a fine grid over all of the photo, in place of the
+    /// frame's thirds, to line things up with.
     let showsFineGrid: Bool
     /// While a corner or edge is dragged with the photo moving: the selection the canvas stays laid
     /// out around, so the frame follows the pointer. Let go, the canvas fits the frame again.
@@ -249,31 +249,41 @@ struct CropOverlay: View, Animatable {
         }
     }
 
-    /// The photo, whose edges are `outline`, dimmed outside `frame`, and the frame: its outline, the
-    /// thirds or the fine grid, and a mark on each corner and edge.
+    /// The photo, whose edges are `outline`, dimmed outside `frame`, and the frame: its outline, its
+    /// thirds or the fine grid over the photo, and a mark on each corner and edge.
     private func marks(of frame: CGRect, in outline: [CGPoint]) -> some View {
         Canvas { context, _ in
-            var outside = Path { $0.addLines(outline) }
+            let edges = Path { $0.addLines(outline) }
+            var outside = edges
             outside.addRect(frame)
-            context.fill(outside, with: .color(.black.opacity(0.6)), style: FillStyle(eoFill: true))
+            let dimming = 0.6
+            context.fill(outside, with: .color(.black.opacity(dimming)), style: FillStyle(eoFill: true))
             // White lines on a pale photo show by their shadow.
             context.addFilter(.shadow(color: .black.opacity(0.5), radius: 1))
             var lines = Path()
-            // Square, about the frame's middle, eight across its short side.
-            let step = showsFineGrid ? max(12, min(frame.width, frame.height) / 8) : 0
-            let xs = showsFineGrid ? Self.lines(across: frame.minX...frame.maxX, every: step)
+            // The fine grid is over all of the photo, so what's outside the frame lines up with it
+            // too: level, with a line each way through the frame's middle.
+            let area = showsFineGrid ? edges.boundingRect : frame
+            let xs = showsFineGrid ? Self.lines(across: area.minX...area.maxX, through: frame.midX)
                                    : [frame.minX + frame.width / 3, frame.minX + frame.width * 2 / 3]
-            let ys = showsFineGrid ? Self.lines(across: frame.minY...frame.maxY, every: step)
+            let ys = showsFineGrid ? Self.lines(across: area.minY...area.maxY, through: frame.midY)
                                    : [frame.minY + frame.height / 3, frame.minY + frame.height * 2 / 3]
             for x in xs {
-                lines.move(to: CGPoint(x: x, y: frame.minY))
-                lines.addLine(to: CGPoint(x: x, y: frame.maxY))
+                lines.move(to: CGPoint(x: x, y: area.minY))
+                lines.addLine(to: CGPoint(x: x, y: area.maxY))
             }
             for y in ys {
-                lines.move(to: CGPoint(x: frame.minX, y: y))
-                lines.addLine(to: CGPoint(x: frame.maxX, y: y))
+                lines.move(to: CGPoint(x: area.minX, y: y))
+                lines.addLine(to: CGPoint(x: area.maxX, y: y))
             }
-            context.stroke(lines, with: .color(.white.opacity(0.5)), lineWidth: 0.5)
+            // In the frame, as the thirds are. Outside it, as far as the photo's edges, dimmed as
+            // the photo is there.
+            var inFrame = context
+            inFrame.clip(to: Path(frame))
+            inFrame.stroke(lines, with: .color(.white.opacity(0.5)), lineWidth: 0.5)
+            var outsideFrame = context
+            outsideFrame.clip(to: outside, style: FillStyle(eoFill: true))
+            outsideFrame.stroke(lines, with: .color(.white.opacity(0.5 * (1 - dimming))), lineWidth: 0.5)
             context.stroke(Path(frame), with: .color(.white), lineWidth: 1)
             var holds = Path()
             let length = min(20, frame.width / 4, frame.height / 4)
@@ -298,12 +308,11 @@ struct CropOverlay: View, Animatable {
         .allowsHitTesting(false)
     }
 
-    /// Lines `step` apart inside `span`, placed about its middle.
-    private static func lines(across span: ClosedRange<CGFloat>, every step: CGFloat) -> [CGFloat] {
-        let middle = (span.lowerBound + span.upperBound) / 2
-        let count = Int(((span.upperBound - span.lowerBound) / 2 / step).rounded(.down))
-        return (-count...count).map { middle + CGFloat($0) * step }
-            .filter { $0 > span.lowerBound + 1 && $0 < span.upperBound - 1 }
+    /// The fine grid's lines across `span`: 40 points apart, one of them through `middle`.
+    private static func lines(across span: ClosedRange<CGFloat>, through middle: CGFloat) -> [CGFloat] {
+        let step: CGFloat = 40
+        let first = middle - ((middle - span.lowerBound) / step).rounded(.down) * step
+        return Array(stride(from: first, through: span.upperBound, by: step))
     }
 
     /// The photo the selection keeps inside.

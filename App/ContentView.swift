@@ -10,9 +10,13 @@ struct ContentView: View {
     @SceneStorage("settingsCategory") private var category = SettingsCategory.film
     @FocusState private var focus: Focus?
 
-    /// What has the keyboard: the canvas, or in crop mode the ratio typed for Custom.
+    /// What has the keyboard: the canvas, or in crop mode the ratio typed for Custom, or the angle
+    /// typed beside the straightening tape on one side.
     enum Focus: Hashable {
-        case canvas, cropRatio
+        case canvas, cropRatio, cropAngle(HorizontalEdge)
+
+        /// A field that's typed in, where C and Esc are the field's own.
+        var isField: Bool { self != .canvas }
     }
 
     var body: some View {
@@ -133,9 +137,10 @@ struct ContentView: View {
                     }
                     HStack(spacing: Self.toolbarGlassSpacing) {
                         // C as well as the Image menu's ⌘K, as in Photos: a menu item has one
-                        // shortcut. Not while a ratio's typed, as a C there would be a typo.
+                        // shortcut. Not while a ratio or an angle is typed, as a C there would be
+                        // a typo.
                         cropToggle(showsDone: model.hasCropChanges)
-                            .keyboardShortcut(focus == .cropRatio ? nil : KeyboardShortcut("c", modifiers: []))
+                            .keyboardShortcut(focus?.isField == true ? nil : KeyboardShortcut("c", modifiers: []))
                         if model.isCropping {
                             rotateLeftButton
                         }
@@ -156,8 +161,8 @@ struct ContentView: View {
                     Button("Reset", role: .destructive) { model.resetCrop() }
                         .disabled(!model.canResetCrop)
                     Button("Cancel") { model.cancelCropping() }
-                        // While a ratio's typed, Esc leaves the field, not crop mode.
-                        .keyboardShortcut(focus == .cropRatio ? nil : .cancelAction)
+                        // While a ratio or an angle is typed, Esc leaves the field, not crop mode.
+                        .keyboardShortcut(focus?.isField == true ? nil : .cancelAction)
                         .disabled(model.isLeavingCropMode)
                 }
                 .buttonStyle(ToolbarGroupButtonStyle())
@@ -350,7 +355,7 @@ private struct HostingViewName: NSViewRepresentable {
 /// reaches under the toolbar and the panel, so a zoomed photo shows through them, as in Photos.
 private struct ImageCanvas: View {
     @Environment(PhotoModel.self) private var model
-    /// The window's keyboard focus: the canvas, or the ratio typed for Custom.
+    /// The window's keyboard focus: the canvas, or a ratio or an angle typed.
     var focus: FocusState<ContentView.Focus?>.Binding
     /// Magnification over the photo fitted to the canvas (1 shows all of it), and how far the
     /// zoomed photo is moved from the centre, in points.
@@ -372,14 +377,9 @@ private struct ImageCanvas: View {
     /// What's in Custom's field, and where it's selected.
     @State private var typedRatio = ""
     @State private var typedRatioSelection: TextSelection?
-    /// Custom's field holds the ratio suggested selected, as it was clicked into empty: Return or
-    /// Tab keeps the frame to it, and typing replaces it.
-    @State private var suggestsRatio = false
-    /// The ratio Custom's field suggests: the last one typed while the app is open, 16:9 until one
-    /// is. As typed, not as turned since.
+    /// The ratio Custom's field holds as it's clicked into empty: the last one kept while the app
+    /// is open, 16:9 until one is. As typed, not as turned since.
     @State private var suggestedRatio = "16:9"
-    /// The frame as marked before a ratio typed reshaped it, and as it reshaped it.
-    @State private var typing: (before: CGRect, after: CGRect)?
     /// While a corner or edge of the frame is dragged with the photo moving: the part marked the
     /// canvas stays laid out around (``CropOverlay/held``).
     @State private var heldCrop: CGRect?
@@ -459,11 +459,11 @@ private struct ImageCanvas: View {
                     HStack {
                         StraighteningRuler(side: .leading, height: height, isPrimary: true,
                                            brightness: brightness(underTapeOn: .leading, height: height),
-                                           tapeUnderPointer: $tapeUnderPointer)
+                                           tapeUnderPointer: $tapeUnderPointer, focus: focus)
                         Spacer()
                         StraighteningRuler(side: .trailing, height: height, isPrimary: false,
                                            brightness: brightness(underTapeOn: .trailing, height: height),
-                                           tapeUnderPointer: $tapeUnderPointer)
+                                           tapeUnderPointer: $tapeUnderPointer, focus: focus)
                     }
                     .padding(.horizontal, StraighteningRuler.inset)
                     .disabled(model.isLeavingCropMode)
@@ -566,10 +566,12 @@ private struct ImageCanvas: View {
         .glassEffect()
     }
 
-    /// Custom, a field for a ratio to keep the frame to: clicked into, the frame is free, and it
-    /// takes each ratio as it's typed. Clicked into empty, it holds the last ratio typed (16:9 at
-    /// first) selected, which Return or Tab keeps. Emptied, the frame is free again. Return and Esc
-    /// leave the field, as choosing another shape does.
+    /// Custom, a field for a ratio to keep the frame to, typed as the angle beside the tapes is
+    /// (``StraighteningRuler/reading(_:)``). Clicked into, the frame is free, and the field holds
+    /// its ratio selected, for typing to replace: empty, the last ratio kept (16:9 at first).
+    /// Return keeps the frame to the ratio in it, or frees it for none, and leaves the field. Esc
+    /// and Tab leave the field without that, what was typed dropped, and so does choosing another
+    /// shape.
     ///
     /// A field throughout, not a button that turns into one: SwiftUI didn't give the keyboard to
     /// a field as it appeared, from the button's action or the field's `onAppear`.
@@ -593,16 +595,21 @@ private struct ImageCanvas: View {
             }
             .focused(focus, equals: .cropRatio)
             .onSubmit {
-                keepSuggestedRatio()
+                // Emptied, the frame is free again. Not a ratio yet, as 16:, it's left as it was.
+                let ratio = Self.ratio(from: typedRatio)
+                if ratio != model.typedCropRatio, ratio != nil || typedRatio.isEmpty {
+                    model.typeCropRatio(ratio)
+                    if let ratio { suggestedRatio = Self.text(of: ratio) }
+                }
                 focus.wrappedValue = .canvas
             }
-            .onKeyPress(.tab) {
-                guard suggestsRatio else { return .ignored }
-                keepSuggestedRatio()
-                typedRatioSelection = TextSelection(insertionPoint: typedRatio.endIndex)
+            .onExitCommand { focus.wrappedValue = .canvas }
+            // Tab leaves the field as Esc does. Left to macOS, it went on to the next field typed
+            // in: from the angle beside a tape to this one, which chose Custom.
+            .onKeyPress(keys: [.tab, backTab]) { _ in
+                focus.wrappedValue = .canvas
                 return .handled
             }
-            .onExitCommand { focus.wrappedValue = .canvas }
             .padding(.horizontal, 4)
             .onChange(of: typedRatio) { typed, text in
                 let formatted = Self.formatted(text, typedAfter: typed)
@@ -611,9 +618,6 @@ private struct ImageCanvas: View {
                 if formatted != text {
                     typedRatio = formatted
                     typedRatioSelection = TextSelection(insertionPoint: typedRatio.endIndex)
-                } else if !(suggestsRatio && text == suggestedRatio) {
-                    suggestsRatio = false
-                    keepToTypedRatio()
                 }
             }
             // As turned, and as crop mode starts at a ratio typed before.
@@ -623,39 +627,13 @@ private struct ImageCanvas: View {
             .onChange(of: focus.wrappedValue) { _, focus in
                 if focus == .cropRatio {
                     if model.cropShape != .custom { model.chooseCropShape(.custom) }
-                    // Typing begins at the frame as it is.
-                    typing = nil
-                    if typedRatio.isEmpty {
-                        suggestsRatio = true
-                        typedRatio = suggestedRatio
-                        typedRatioSelection = TextSelection(range: typedRatio.startIndex..<typedRatio.endIndex)
-                    }
+                    if typedRatio.isEmpty { typedRatio = suggestedRatio }
+                    selectAllOnceClicked()
                 } else {
-                    // Left partway, as at 16:, it shows the ratio kept, and without Return or
-                    // Tab, not the ratio suggested.
-                    suggestsRatio = false
+                    // Left without Return, it shows the ratio the frame keeps to, not what was typed.
                     typedRatio = Self.text(of: model.typedCropRatio)
                 }
             }
-    }
-
-    /// Keeps the frame to the ratio suggested, if the field suggests it.
-    private func keepSuggestedRatio() {
-        guard suggestsRatio else { return }
-        suggestsRatio = false
-        keepToTypedRatio()
-    }
-
-    /// Keeps the frame to the ratio in Custom's field, once it's one, or free once it's empty. Each is
-    /// fitted to the frame as it was before typing began, so 16:10 isn't fitted in 16:1 on the way
-    /// to it, unless something else has moved the frame since.
-    private func keepToTypedRatio() {
-        let ratio = Self.ratio(from: typedRatio)
-        guard ratio != model.typedCropRatio, ratio != nil || typedRatio.isEmpty else { return }
-        let marked = typing.flatMap { $0.after == model.cropSelection ? $0.before : nil } ?? model.cropSelection
-        model.typeCropRatio(ratio, in: marked)
-        typing = (marked, model.cropSelection)
-        if let ratio { suggestedRatio = Self.text(of: ratio) }
     }
 
     /// `text` as Custom's field takes it, changed from `typed`: two digits at most each side of one
@@ -1032,12 +1010,29 @@ private struct ImageCanvas: View {
     }
 }
 
+/// Shift-Tab, which reaches a field's `onKeyPress` as this character, not as Tab with Shift held:
+/// with Tab alone handled, Shift-Tab still went from the angle beside a tape to Custom's ratio.
+private let backTab = KeyEquivalent("\u{19}")
+
+/// Selects all of the field the keyboard has just come to, the ratio's or the angle's, for typing
+/// to replace: once the click that brought it is over, when the main run loop is back in its
+/// default mode. Selected through a field's `selection`, at once or a turn later, the caret was
+/// still where the click fell.
+private func selectAllOnceClicked() {
+    RunLoop.main.perform(inModes: [.default]) {
+        MainActor.assumeIsolated {
+            _ = NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+        }
+    }
+}
+
 /// Straightening in crop mode, as a fighter's head-up display shows its speed and height: an
 /// upright tape of degrees in fine lines on the photo, one at each side of the canvas, its ticks
 /// reaching out from a spine, which isn't drawn, toward the photo's middle. It turns, as the edge
 /// of a wheel, past a needle with the angle beside it as it's dragged or scrolled over: down the
 /// right tape, the degrees above come to the needle, turning the photo to the right, and down the
-/// left one, to the left. A double-click straightens it to 0°. Beside the spine, as the
+/// left one, to the left. A double-click straightens it to 0°. The angle beside the needle is a
+/// field, to type an angle into (``reading(_:)``). Beside the spine, as the
 /// exposure's strip has the metering marks' dots, is a
 /// dot at the angle that levels the horizon Vision finds: a click on it straightens the photo
 /// there, and with the pointer on it, the same bubble as theirs says what it is, opening towards
@@ -1060,12 +1055,16 @@ private struct StraighteningRuler: View {
     /// The tape the pointer is over, this one or the other: the canvas turns scrolling there into
     /// turns of the photo.
     @Binding var tapeUnderPointer: HorizontalEdge?
+    /// The window's keyboard focus: this tape's angle, while it's typed.
+    var focus: FocusState<ContentView.Focus?>.Binding
     /// Drawn in black with a white shadow, over a bright photo, rather than white with a black one.
     @State private var isOnBright = false
     /// The angle as the drag began.
     @State private var dragStart: Double?
     /// The pointer is on the horizon's dot.
     @State private var isOnDot = false
+    /// What's in the angle's field while it's typed in.
+    @State private var typedAngle = ""
 
     /// Points to a degree at the tape's middle, and of a drag, which the tape follows there.
     static let spacing: CGFloat = 8
@@ -1073,6 +1072,8 @@ private struct StraighteningRuler: View {
     /// tenths of a degree, the tape sliding slower than the fingers.
     static let scrollSpacing: CGFloat = 40
     static let width: CGFloat = 96
+    /// How wide the angle's field beside the needle is: room for −45.0°.
+    private static let readingWidth: CGFloat = 56
     /// How far in from the canvas's sides the tapes are.
     static let inset: CGFloat = 32
     /// How far in from the tape's inner edge its spine is: room for the ticks centred on it, and
@@ -1098,14 +1099,19 @@ private struct StraighteningRuler: View {
     var body: some View {
         let angle = model.markedFraming.angle
         let degrees = "\(angle.formatted(.number.precision(.fractionLength(1))))°"
+        // The reading starts 20 points out from the spine, past the needle.
+        let readingStart = Self.spineInset + 20 + Self.readingWidth / 2
         ZStack(alignment: .topLeading) {
             // Both, one faded in over the other as the photo under it turns bright or dark.
             tape(at: angle, ink: .white, shadow: .black.opacity(0.6))
                 .opacity(isOnBright ? 0 : 1)
             tape(at: angle, ink: .black, shadow: .white.opacity(0.7))
                 .opacity(isOnBright ? 1 : 0)
-            needle(reading: degrees)
+            needle
                 .shadow(color: isOnBright ? .white.opacity(0.7) : .black.opacity(0.6), radius: 1)
+            reading(degrees)
+                .shadow(color: isOnBright ? .white.opacity(0.7) : .black.opacity(0.6), radius: 1)
+                .position(x: side == .leading ? Self.width - readingStart : readingStart, y: height / 2)
             if let dot = dotCentre(at: angle) {
                 // Fading in as it leaves the needle.
                 horizonDot
@@ -1268,10 +1274,9 @@ private struct StraighteningRuler: View {
         }
     }
 
-    /// A needle across the tape's middle in yellow, as the Camera app on iPhone marks its setting,
-    /// and `degrees` beside it. Drawn once over both of the tape's inks, with the shadow of the one
-    /// showing (``body``).
-    private func needle(reading degrees: String) -> some View {
+    /// A needle across the tape's middle in yellow, as the Camera app on iPhone marks its setting.
+    /// Drawn once over both of the tape's inks, with the shadow of the one showing (``body``).
+    private var needle: some View {
         Canvas { context, size in
             // Outwards from the spine.
             let outwards: CGFloat = side == .leading ? -1 : 1
@@ -1282,9 +1287,69 @@ private struct StraighteningRuler: View {
             needle.move(to: CGPoint(x: x(-8), y: middle))
             needle.addLine(to: CGPoint(x: x(14), y: middle))
             context.stroke(needle, with: .color(.yellow), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            context.draw(Text(degrees).font(.system(size: 13, weight: .semibold, design: .monospaced)).foregroundStyle(.yellow),
-                         at: CGPoint(x: x(20), y: middle), anchor: side == .leading ? .trailing : .leading)
         }
+        .allowsHitTesting(false)
+    }
+
+    /// The angle beside the needle, in the needle's yellow: a field, so an angle can be typed in
+    /// place of `degrees`, the one it shows. Clicked into, it holds that selected, for typing to
+    /// replace. Return turns the photo to the angle typed. Esc, or leaving the field any other way,
+    /// leaves the photo as it was.
+    ///
+    /// A field of text read here (``angle(from:)``), not a field of a number with a format
+    /// (`TextField(value:formatter:)` and a `NumberFormatter` whose suffix is the degree sign).
+    /// That was tried: a click put the caret in the angle rather than selecting it, the photo
+    /// turned at each digit so Esc kept what was typed, and a point was refused where the region
+    /// writes a comma. Foundation's angle format (`Measurement<UnitAngle>.FormatStyle`) writes the
+    /// degree sign but reads nothing back.
+    private func reading(_ degrees: String) -> some View {
+        let isTyped = focus.wrappedValue == .cropAngle(side)
+        // No prompt: macOS shows the field's title for none.
+        return TextField("Angle", text: Binding { isTyped ? typedAngle : degrees } set: { typedAngle = $0 },
+                         prompt: Text(verbatim: ""))
+            .textFieldStyle(.plain)
+            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            // Its own colour: left, a field draws its text greyed out.
+            .foregroundStyle(.yellow)
+            .multilineTextAlignment(side == .leading ? .trailing : .leading)
+            .focused(focus, equals: .cropAngle(side))
+            .onSubmit {
+                if let angle = Self.angle(from: typedAngle), angle != model.markedFraming.angle {
+                    model.straighten(to: angle)
+                }
+                focus.wrappedValue = .canvas
+            }
+            .onExitCommand { focus.wrappedValue = .canvas }
+            // Tab leaves the field too, rather than go on to Custom's ratio, which chose Custom.
+            .onKeyPress(keys: [.tab, backTab]) { _ in
+                focus.wrappedValue = .canvas
+                return .handled
+            }
+            // Turned another way while it's typed in, as by a scroll over the tape, the field is
+            // left: it would show what was typed, not the photo's angle, and Return would turn the
+            // photo back to that.
+            .onChange(of: model.markedFraming.angle) {
+                if isTyped {
+                    focus.wrappedValue = .canvas
+                }
+            }
+            .onChange(of: isTyped) { _, isTyped in
+                typedAngle = isTyped ? degrees : ""
+                if isTyped {
+                    selectAllOnceClicked()
+                }
+            }
+            .frame(width: Self.readingWidth)
+            .pointerStyle(.horizontalText)
+    }
+
+    /// The angle typed as `text`, if it's a number: with a point or a comma for its decimals,
+    /// whichever the region writes, and with the degree sign or without. Foundation's number format
+    /// reads 2.4 as 2 where the region writes a comma.
+    private static func angle(from text: String) -> Double? {
+        let number = text.replacingOccurrences(of: ",", with: ".").replacingOccurrences(of: "−", with: "-")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "° "))
+        return Double(number).flatMap { $0.isFinite ? $0 : nil }
     }
 
     /// Where `degree` is down the tape, with the tape at `angle`, and how far it faces out of the

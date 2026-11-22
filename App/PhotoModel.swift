@@ -524,10 +524,9 @@ final class PhotoModel {
         setCropShape(shape, upright: cropSelection.height > cropSelection.width, typed: nil)
     }
 
-    /// Marks `marked` kept to `ratio`'s width by its height as typed for Custom, so 9:16 stands
-    /// upright: the largest part of that shape in it. For nil, all of it, to any shape.
-    func typeCropRatio(_ ratio: CGSize?, in marked: CGRect) {
-        cropSelection = marked
+    /// Keeps the part marked to `ratio`'s width by its height as typed for Custom, so 9:16 stands
+    /// upright: the largest part of that shape in it. For nil, to any shape.
+    func typeCropRatio(_ ratio: CGSize?) {
         setCropShape(.custom, upright: false, typed: ratio)
     }
 
