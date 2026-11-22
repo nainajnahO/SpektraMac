@@ -55,7 +55,7 @@ Or **View › Print** (⌘1) and **View › Film** (⌘2).
   be shown as film, because the papers are made for negatives, so with a slide film chosen the switch is greyed out
   on Film.
 
-**The settings** are on the right. Show or hide them with the **Adjust** button or **View › Hide Inspector** (⌃⌘I).
+**The settings** are on the right. Show or hide them with **View › Hide Inspector** (⌃⌘I).
 They're in three tabs that follow the light: **Camera**, **Film** and **Print** (**View › Camera Settings** ⌥⌘1,
 **Film Settings** ⌥⌘2, **Print Settings** ⌥⌘3).
 
@@ -89,9 +89,9 @@ the photo that's open.
 Pro). When you let go, the finished look renders at the size of the window. Renders already made come back at once,
 for example when a slider returns to an earlier value.
 
-**Status and Log.** The window's subtitle says what SpektraMac is doing, and the photo's size when it's idle. The
-**Log** button (⌥⌘L) opens a window listing what was opened, rendered and saved, with timings, and any errors: the last
-1,000 entries. The Console app keeps them all (search for SpektraMac). Above the list, a graph shows how hard
+**Status and Log.** The window's subtitle says what SpektraMac is doing, and the photo's size when it's idle.
+**Window › Log** (⌥⌘L) opens a window listing what was opened, rendered and saved, with timings, and any errors: the
+last 1,000 entries. The Console app keeps them all (search for SpektraMac). Above the list, a graph shows how hard
 SpektraMac works the Mac each second over the last minute, while the window is open: **CPU**, its processor time
 as a share of all the cores, and **GPU**, the time its film simulation takes on the graphics processor. (The GPU
 line leaves out the last step of drawing a render to the screen or a file, and macOS gives no figure for one app's
