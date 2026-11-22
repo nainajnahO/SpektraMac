@@ -470,13 +470,17 @@ final class PhotoModel {
     }
     /// The shape the part marked keeps to, and whether 3:2 and 4:5 stand upright rather than lie on
     /// their side.
-    private(set) var cropShape = CropShape.free
+    private(set) var cropShape = CropShape.asShot
     private(set) var cropShapeIsUpright = false
+    /// The width and height typed for Custom, as the frame stands: nil keeps it to any shape.
+    private(set) var typedCropRatio: CGSize?
     /// Width over height the part marked keeps to: nil for any.
-    var cropRatio: CGFloat? { cropShape.ratio(upright: cropShapeIsUpright, in: cropBounds.size) }
+    var cropRatio: CGFloat? {
+        cropShape.ratio(upright: cropShapeIsUpright, typed: typedCropRatio, in: cropBounds.size)
+    }
     /// The shape of the crop last kept: crop mode starts at it, for cropping a series of photos
-    /// alike, while the app is open.
-    @ObservationIgnored private var keptCropShape = (shape: CropShape.free, isUpright: false)
+    /// alike, while the app is open. As Shot until one's kept.
+    @ObservationIgnored private var keptCropShape = (shape: CropShape.asShot, isUpright: false, typed: CGSize?.none)
     /// The photo's framing as crop mode began: what Cancel goes back to, and Undo once it's kept.
     @ObservationIgnored private var framingBeforeCropping = Framing.whole
     /// The framing last asked of the engine for the open photo, which ``photo`` has once it's made.
@@ -504,26 +508,35 @@ final class PhotoModel {
         markedFraming = photo.framing
         cropSelection = photo.framing.crop ?? cropBounds
         let kept = keptCropShape
-        let keptRatio = kept.shape.ratio(upright: kept.isUpright, in: cropBounds.size)
+        let keptRatio = kept.shape.ratio(upright: kept.isUpright, typed: kept.typed, in: cropBounds.size)
         let isKeptShape = keptRatio.map { abs(cropSelection.width - cropSelection.height * $0) <= 1 } ?? true
         if photo.framing.crop == nil || isKeptShape {
-            setCropShape(kept.shape, upright: kept.isUpright)
+            setCropShape(kept.shape, upright: kept.isUpright, typed: kept.typed)
         } else {
-            setCropShape(.free, upright: false)
+            setCropShape(.custom, upright: false, typed: nil)
         }
         findHorizon()
     }
 
-    /// Keeps the part marked to `shape`, standing as the part marked does.
+    /// Keeps the part marked to `shape`, standing as the part marked does. Custom keeps it to any
+    /// shape, until a ratio is typed for it.
     func chooseCropShape(_ shape: CropShape) {
-        setCropShape(shape, upright: cropSelection.height > cropSelection.width)
+        setCropShape(shape, upright: cropSelection.height > cropSelection.width, typed: nil)
+    }
+
+    /// Marks `marked` kept to `ratio`'s width by its height as typed for Custom, so 9:16 stands
+    /// upright: the largest part of that shape in it. For nil, all of it, to any shape.
+    func typeCropRatio(_ ratio: CGSize?, in marked: CGRect) {
+        cropSelection = marked
+        setCropShape(.custom, upright: false, typed: ratio)
     }
 
     /// Keeps the part marked to `shape`: the largest part of that shape in what's marked, about the
     /// same middle.
-    private func setCropShape(_ shape: CropShape, upright: Bool) {
+    private func setCropShape(_ shape: CropShape, upright: Bool, typed: CGSize?) {
         cropShape = shape
         cropShapeIsUpright = upright
+        typedCropRatio = typed
         guard let ratio = cropRatio else { return }
         let marked = cropSelection
         let width = min(marked.width, marked.height * ratio)
@@ -539,6 +552,8 @@ final class PhotoModel {
             markedFraming = markedFraming.turned(left: quarters, in: photo.wholeBounds.size)
             if !quarters.isMultiple(of: 2) {
                 cropShapeIsUpright.toggle()
+                // 16:9 typed is 9:16 turned.
+                typedCropRatio = typedCropRatio.map { CGSize(width: $0.height, height: $0.width) }
             }
             findHorizon()
         } else {
@@ -682,7 +697,7 @@ final class PhotoModel {
     func endCropping() {
         guard isCropping, !isLeavingCropMode else { return }
         if hasCropChanges {
-            keptCropShape = (cropShape, cropShapeIsUpright)
+            keptCropShape = (cropShape, cropShapeIsUpright, typedCropRatio)
         }
         setFraming(framingToKeep, from: framingBeforeCropping, named: "Crop")
     }

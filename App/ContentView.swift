@@ -8,18 +8,23 @@ struct ContentView: View {
     @Environment(\.undoManager) private var undoManager
     @SceneStorage("showsSettings") private var showsSettings = true
     @SceneStorage("settingsCategory") private var category = SettingsCategory.film
-    @FocusState private var isCanvasFocused: Bool
+    @FocusState private var focus: Focus?
+
+    /// What has the keyboard: the canvas, or in crop mode the ratio typed for Custom.
+    enum Focus: Hashable {
+        case canvas, cropRatio
+    }
 
     var body: some View {
         @Bindable var model = model
-        ImageCanvas()
+        ImageCanvas(focus: $focus)
             .background(HostingViewName(name: "Photo"))
             // Focused from the start, as nothing else in the window takes focus on a click, so
             // Edit › Copy (⌘C) reaches it: the finished photo, as Share sends it.
             .focusable()
             .focusEffectDisabled()
-            .focused($isCanvasFocused)
-            .defaultFocus($isCanvasFocused, true)
+            .focused($focus, equals: .canvas)
+            .defaultFocus($focus, .canvas)
             .copyable([model.finishedPhoto].compactMap { $0 })
             .navigationTitle(model.photo?.name ?? "SpektraMac")
             .navigationSubtitle(status)
@@ -61,6 +66,11 @@ struct ContentView: View {
             .background(HostingViewName(name: "Editor"))
             .onChange(of: undoManager, initial: true) { _, undoManager in
                 model.undoManager = undoManager
+            }
+            // Left with a ratio being typed, as by clicking Done, the keyboard was nowhere and Copy
+            // greyed out.
+            .onChange(of: model.isCropping) { _, isCropping in
+                if !isCropping { focus = .canvas }
             }
             // For the View menu (``ViewCommands``).
             .focusedSceneValue(\.settingsCategory, $category)
@@ -123,9 +133,9 @@ struct ContentView: View {
                     }
                     HStack(spacing: Self.toolbarGlassSpacing) {
                         // C as well as the Image menu's ⌘K, as in Photos: a menu item has one
-                        // shortcut.
+                        // shortcut. Not while a ratio's typed, as a C there would be a typo.
                         cropToggle(showsDone: model.hasCropChanges)
-                            .keyboardShortcut("c", modifiers: [])
+                            .keyboardShortcut(focus == .cropRatio ? nil : KeyboardShortcut("c", modifiers: []))
                         if model.isCropping {
                             rotateLeftButton
                         }
@@ -146,7 +156,8 @@ struct ContentView: View {
                     Button("Reset", role: .destructive) { model.resetCrop() }
                         .disabled(!model.canResetCrop)
                     Button("Cancel") { model.cancelCropping() }
-                        .keyboardShortcut(.cancelAction)
+                        // While a ratio's typed, Esc leaves the field, not crop mode.
+                        .keyboardShortcut(focus == .cropRatio ? nil : .cancelAction)
                         .disabled(model.isLeavingCropMode)
                 }
                 .buttonStyle(ToolbarGroupButtonStyle())
@@ -339,6 +350,8 @@ private struct HostingViewName: NSViewRepresentable {
 /// reaches under the toolbar and the panel, so a zoomed photo shows through them, as in Photos.
 private struct ImageCanvas: View {
     @Environment(PhotoModel.self) private var model
+    /// The window's keyboard focus: the canvas, or the ratio typed for Custom.
+    var focus: FocusState<ContentView.Focus?>.Binding
     /// Magnification over the photo fitted to the canvas (1 shows all of it), and how far the
     /// zoomed photo is moved from the centre, in points.
     @State private var zoom: CGFloat = 1
@@ -356,6 +369,14 @@ private struct ImageCanvas: View {
     /// In crop mode, a drag moves the photo under a frame fixed in the middle, as in Photos, rather
     /// than the frame over the photo: as it was chosen last, while the app is open.
     @State private var cropMovesPhoto = false
+    /// What's in Custom's field, and where it's selected.
+    @State private var typedRatio = ""
+    @State private var typedRatioSelection: TextSelection?
+    /// Custom's field holds 16:9 selected, as it was clicked into empty: Return or Tab keeps the
+    /// frame to it, and typing replaces it.
+    @State private var suggestsRatio = false
+    /// The frame as marked before a ratio typed reshaped it, and as it reshaped it.
+    @State private var typing: (before: CGRect, after: CGRect)?
     /// While a corner or edge of the frame is dragged with the photo moving: the part marked the
     /// canvas stays laid out around (``CropOverlay/held``).
     @State private var heldCrop: CGRect?
@@ -511,15 +532,161 @@ private struct ImageCanvas: View {
     /// there has dividers and its choice in the accent colour. With `.tabs`, VoiceOver announces
     /// the shapes as tabs. Not a menu: a SwiftUI menu has no action for assistive apps to press on
     /// macOS 27, which fails the accessibility audit (#314).
+    ///
+    /// Custom's field lies over its tab, which is blank once Custom's chosen: a text field as a `.tabs`
+    /// picker's choice draws as an empty capsule, and beside the picker in its glass, the picker drew
+    /// a capsule of its own inside it.
     private var cropShapes: some View {
-        Picker("Shape", selection: Binding { model.cropShape } set: { model.chooseCropShape($0) }) {
-            ForEach(CropShape.allCases, id: \.self) { Text($0.rawValue) }
+        Picker("Shape", selection: Binding { model.cropShape } set: { shape in
+            model.chooseCropShape(shape)
+            focus.wrappedValue = .canvas
+        }) {
+            ForEach(CropShape.allCases, id: \.self) { shape in
+                if shape == .custom && model.cropShape == .custom {
+                    Text(verbatim: " ").accessibilityLabel(shape.rawValue)
+                } else {
+                    Text(shape.rawValue)
+                }
+            }
         }
         .pickerStyle(.tabs)
         .controlSize(.extraLarge)
         .labelsHidden()
         .fixedSize()
+        // Over Custom's tab: the first of the tabs, which are alike in width. Inside the glass, as
+        // over it, the field's text was drawn under it.
+        .overlay(alignment: .leading) {
+            GeometryReader { picker in
+                customShape.frame(width: picker.size.width / CGFloat(CropShape.allCases.count), height: picker.size.height)
+            }
+        }
         .glassEffect()
+    }
+
+    /// Custom, a field for a ratio to keep the frame to: clicked into, the frame is free, and it
+    /// takes each ratio as it's typed. Clicked into empty, it holds 16:9 selected, which Return or
+    /// Tab keeps. Emptied, the frame is free again. Return and Esc leave the field, as choosing
+    /// another shape does.
+    ///
+    /// A field throughout, not a button that turns into one: SwiftUI didn't give the keyboard to
+    /// a field as it appeared, from the button's action or the field's `onAppear`.
+    private var customShape: some View {
+        // Empty, over its tab's "Custom" until it's chosen. No prompt: macOS shows the field's
+        // title for none.
+        TextField("Ratio", text: $typedRatio, selection: $typedRatioSelection, prompt: Text(verbatim: ""))
+            .textFieldStyle(.plain)
+            .multilineTextAlignment(.center)
+            // Under the field's text and caret, the hint once chosen, dimmer than macOS draws a
+            // prompt on glass, where it looked typed. A prompt styled dimmer lost its centring.
+            .background {
+                if model.cropShape == .custom && typedRatio.isEmpty {
+                    Text(verbatim: Self.suggestedRatio)
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
+            }
+            .focused(focus, equals: .cropRatio)
+            .onSubmit {
+                keepSuggestedRatio()
+                focus.wrappedValue = .canvas
+            }
+            .onKeyPress(.tab) {
+                guard suggestsRatio else { return .ignored }
+                keepSuggestedRatio()
+                typedRatioSelection = TextSelection(insertionPoint: typedRatio.endIndex)
+                return .handled
+            }
+            .onExitCommand { focus.wrappedValue = .canvas }
+            .padding(.horizontal, 4)
+            .onChange(of: typedRatio) { typed, text in
+                let formatted = Self.formatted(text, typedAfter: typed)
+                // Changed again, it's kept to the ratio as formatted.
+                if formatted != text {
+                    typedRatio = formatted
+                } else if !(suggestsRatio && text == Self.suggestedRatio) {
+                    suggestsRatio = false
+                    keepToTypedRatio()
+                }
+            }
+            // As turned, and as crop mode starts at a ratio typed before.
+            .onChange(of: model.typedCropRatio, initial: true) { _, ratio in
+                if Self.ratio(from: typedRatio) != ratio { typedRatio = Self.text(of: ratio) }
+            }
+            .onChange(of: focus.wrappedValue) { _, focus in
+                if focus == .cropRatio {
+                    if model.cropShape != .custom { model.chooseCropShape(.custom) }
+                    // Typing begins at the frame as it is.
+                    typing = nil
+                    if typedRatio.isEmpty {
+                        suggestsRatio = true
+                        typedRatio = Self.suggestedRatio
+                        typedRatioSelection = TextSelection(range: typedRatio.startIndex..<typedRatio.endIndex)
+                    }
+                } else {
+                    // Left partway, as at 16:, it shows the ratio kept, and without Return or
+                    // Tab, not 16:9 suggested.
+                    suggestsRatio = false
+                    typedRatio = Self.text(of: model.typedCropRatio)
+                }
+            }
+    }
+
+    /// The ratio Custom's field suggests.
+    private static let suggestedRatio = "16:9"
+
+    /// Keeps the frame to 16:9, if the field suggests it.
+    private func keepSuggestedRatio() {
+        guard suggestsRatio else { return }
+        suggestsRatio = false
+        keepToTypedRatio()
+    }
+
+    /// Keeps the frame to the ratio in Custom's field, once it's one, or free once it's empty. Each is
+    /// fitted to the frame as it was before typing began, so 16:10 isn't fitted in 16:1 on the way
+    /// to it, unless something else has moved the frame since.
+    private func keepToTypedRatio() {
+        let ratio = Self.ratio(from: typedRatio)
+        guard ratio != model.typedCropRatio, ratio != nil || typedRatio.isEmpty else { return }
+        let marked = typing.flatMap { $0.after == model.cropSelection ? $0.before : nil } ?? model.cropSelection
+        model.typeCropRatio(ratio, in: marked)
+        typing = (marked, model.cropSelection)
+    }
+
+    /// `text` as Custom's field takes it, changed from `typed`: two digits at most each side of one
+    /// colon, and nothing else. The colon follows two digits as they're typed, and a third digit
+    /// goes after it; one digit, as for 4:5, needs the colon typed.
+    ///
+    /// Formatted here as it's typed: a SwiftUI field's format (`TextField(value:format:)`) applies
+    /// once the field is left or Return is pressed.
+    private static func formatted(_ text: String, typedAfter typed: String) -> String {
+        let isDigit = { (character: Character) in character.isASCII && character.isWholeNumber }
+        let sides = text.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        var width = sides[0].filter(isDigit)
+        var height = sides.count > 1 ? sides[1].filter(isDigit) : ""
+        var hasColon = sides.count > 1
+        if !hasColon, width.count > 2 {
+            height = String(width.dropFirst(2))
+            width = String(width.prefix(2))
+            hasColon = true
+        }
+        // Not as the colon after two digits is deleted, which would put it back.
+        if !hasColon, width.count == 2, text.count > typed.count {
+            hasColon = true
+        }
+        return hasColon ? "\(width.prefix(2)):\(height.prefix(2))" : width
+    }
+
+    /// Two whole numbers either side of a colon, greater than 0: as width and height.
+    private static func ratio(from text: String) -> CGSize? {
+        let sides = text.split(separator: ":", omittingEmptySubsequences: false).map { Int($0) }
+        guard sides.count == 2, let width = sides[0], let height = sides[1], width > 0, height > 0 else { return nil }
+        return CGSize(width: width, height: height)
+    }
+
+    /// `ratio` as Custom's field shows it, as 16:9: empty for none.
+    private static func text(of ratio: CGSize?) -> String {
+        guard let ratio else { return "" }
+        return "\(Int(ratio.width)):\(Int(ratio.height))"
     }
 
     private var canvas: some View {

@@ -408,6 +408,29 @@ final class PhotoModelTests {
         model.cancelCropping()
     }
 
+    /// Crop mode starts at As Shot. A ratio typed for Custom marks the largest part of that shape,
+    /// turns with the photo, and is where crop mode starts once it's kept (#354).
+    @Test func typedRatioTurnsAndIsKept() async throws {
+        let model = try await openedModel()
+        model.beginCropping()
+        #expect(model.cropShape == .asShot)
+        model.typeCropRatio(CGSize(width: 16, height: 9), in: model.cropSelection)
+        #expect(model.cropShape == .custom)
+        #expect(model.cropSelection.width == 1200 && abs(model.cropSelection.height - 675) < 0.001)
+
+        model.turn(left: 1)
+        #expect(model.typedCropRatio == CGSize(width: 9, height: 16))
+        let start = model.log.count
+        model.endCropping()
+        try await until { messages(of: model, since: start).contains { $0.hasPrefix("Cropped") } }
+        #expect(model.photo?.width == 675 && model.photo?.height == 1200)
+
+        model.beginCropping()
+        #expect(model.cropShape == .custom)
+        #expect(model.typedCropRatio == CGSize(width: 9, height: 16))
+        model.cancelCropping()
+    }
+
     // MARK: Timing the engine's work
 
     /// Work queued behind other work on the engine is timed from when the engine starts on it, and

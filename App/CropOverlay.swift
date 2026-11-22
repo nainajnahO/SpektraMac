@@ -2,17 +2,18 @@ import SwiftUI
 
 /// The shapes the crop bar keeps a crop to.
 enum CropShape: String, CaseIterable {
-    case free = "Free"
+    case custom = "Custom"
     case asShot = "As Shot"
     case threeTwo = "3:2"
     case fourFive = "4:5"
     case square = "1:1"
 
     /// Width over height for a part of a photo of `whole`'s size: nil for any. 3:2 and 4:5 stand
-    /// upright if `upright`, and otherwise lie on their side.
-    func ratio(upright: Bool, in whole: CGSize) -> CGFloat? {
+    /// upright if `upright`, and otherwise lie on their side. Custom keeps to the width and height
+    /// typed for it, as typed, if any.
+    func ratio(upright: Bool, typed: CGSize?, in whole: CGSize) -> CGFloat? {
         switch self {
-        case .free: nil
+        case .custom: typed.map { $0.width / $0.height }
         case .asShot: whole.width / whole.height
         case .threeTwo: upright ? 2.0 / 3 : 3.0 / 2
         case .fourFive: upright ? 4.0 / 5 : 5.0 / 4
