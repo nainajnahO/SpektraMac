@@ -16,7 +16,7 @@ setting, so opening a photo, adjusting it, using presets and film defaults, and 
 
 ## Where it works
 
-SpektraMac runs on macOS 26.5 or newer, with the accessibility features built into macOS (System Settings ›
+SpektraMac runs on macOS 27 or newer, with the accessibility features built into macOS (System Settings ›
 Accessibility). Assistive technology from other makers hasn't been tried.
 
 ## New in the next release

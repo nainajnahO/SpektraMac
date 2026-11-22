@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://github.com/nainajnahO/SpektraMac/releases/latest"><img src="https://img.shields.io/github/v/release/nainajnahO/SpektraMac" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/status-beta-f2a23c" alt="Status: beta">
-  <img src="https://img.shields.io/badge/macOS-26.5%2B-111111" alt="macOS 26.5 or newer">
+  <img src="https://img.shields.io/badge/macOS-27%2B-111111" alt="macOS 27 or newer">
   <img src="https://img.shields.io/badge/Swift%20%2B%20Metal-F05138" alt="Swift and Metal">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/nainajnahO/SpektraMac" alt="Licence: GPL-3.0"></a>
 </p>
@@ -124,7 +124,7 @@ uv tool install "spektrafilm @ git+https://github.com/andreavolpato/spektrafilm@
 
 ## Build from source
 
-There's no download yet. You need macOS 26.5 or newer and [Xcode 27](https://developer.apple.com/xcode/).
+There's no download yet. You need macOS 27 or newer and [Xcode 27](https://developer.apple.com/xcode/).
 
 1. Clone the repository and open the project:
 
