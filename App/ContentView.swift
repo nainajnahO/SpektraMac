@@ -372,9 +372,12 @@ private struct ImageCanvas: View {
     /// What's in Custom's field, and where it's selected.
     @State private var typedRatio = ""
     @State private var typedRatioSelection: TextSelection?
-    /// Custom's field holds 16:9 selected, as it was clicked into empty: Return or Tab keeps the
-    /// frame to it, and typing replaces it.
+    /// Custom's field holds the ratio suggested selected, as it was clicked into empty: Return or
+    /// Tab keeps the frame to it, and typing replaces it.
     @State private var suggestsRatio = false
+    /// The ratio Custom's field suggests: the last one typed while the app is open, 16:9 until one
+    /// is. As typed, not as turned since.
+    @State private var suggestedRatio = "16:9"
     /// The frame as marked before a ratio typed reshaped it, and as it reshaped it.
     @State private var typing: (before: CGRect, after: CGRect)?
     /// While a corner or edge of the frame is dragged with the photo moving: the part marked the
@@ -564,9 +567,9 @@ private struct ImageCanvas: View {
     }
 
     /// Custom, a field for a ratio to keep the frame to: clicked into, the frame is free, and it
-    /// takes each ratio as it's typed. Clicked into empty, it holds 16:9 selected, which Return or
-    /// Tab keeps. Emptied, the frame is free again. Return and Esc leave the field, as choosing
-    /// another shape does.
+    /// takes each ratio as it's typed. Clicked into empty, it holds the last ratio typed (16:9 at
+    /// first) selected, which Return or Tab keeps. Emptied, the frame is free again. Return and Esc
+    /// leave the field, as choosing another shape does.
     ///
     /// A field throughout, not a button that turns into one: SwiftUI didn't give the keyboard to
     /// a field as it appeared, from the button's action or the field's `onAppear`.
@@ -575,12 +578,15 @@ private struct ImageCanvas: View {
         // title for none.
         TextField("Ratio", text: $typedRatio, selection: $typedRatioSelection, prompt: Text(verbatim: ""))
             .textFieldStyle(.plain)
+            // Its own colour: left, as by Return, the field drew its ratio greyed out, unlike the
+            // shapes beside it.
+            .foregroundStyle(Color.primary)
             .multilineTextAlignment(.center)
             // Under the field's text and caret, the hint once chosen, dimmer than macOS draws a
             // prompt on glass, where it looked typed. A prompt styled dimmer lost its centring.
             .background {
                 if model.cropShape == .custom && typedRatio.isEmpty {
-                    Text(verbatim: Self.suggestedRatio)
+                    Text(verbatim: suggestedRatio)
                         .foregroundStyle(.tertiary)
                         .accessibilityHidden(true)
                 }
@@ -600,10 +606,12 @@ private struct ImageCanvas: View {
             .padding(.horizontal, 4)
             .onChange(of: typedRatio) { typed, text in
                 let formatted = Self.formatted(text, typedAfter: typed)
-                // Changed again, it's kept to the ratio as formatted.
+                // Changed again, it's kept to the ratio as formatted, with the caret at its end:
+                // left before a colon put after 16, the 9 typed next went before it and was dropped.
                 if formatted != text {
                     typedRatio = formatted
-                } else if !(suggestsRatio && text == Self.suggestedRatio) {
+                    typedRatioSelection = TextSelection(insertionPoint: typedRatio.endIndex)
+                } else if !(suggestsRatio && text == suggestedRatio) {
                     suggestsRatio = false
                     keepToTypedRatio()
                 }
@@ -619,22 +627,19 @@ private struct ImageCanvas: View {
                     typing = nil
                     if typedRatio.isEmpty {
                         suggestsRatio = true
-                        typedRatio = Self.suggestedRatio
+                        typedRatio = suggestedRatio
                         typedRatioSelection = TextSelection(range: typedRatio.startIndex..<typedRatio.endIndex)
                     }
                 } else {
                     // Left partway, as at 16:, it shows the ratio kept, and without Return or
-                    // Tab, not 16:9 suggested.
+                    // Tab, not the ratio suggested.
                     suggestsRatio = false
                     typedRatio = Self.text(of: model.typedCropRatio)
                 }
             }
     }
 
-    /// The ratio Custom's field suggests.
-    private static let suggestedRatio = "16:9"
-
-    /// Keeps the frame to 16:9, if the field suggests it.
+    /// Keeps the frame to the ratio suggested, if the field suggests it.
     private func keepSuggestedRatio() {
         guard suggestsRatio else { return }
         suggestsRatio = false
@@ -650,6 +655,7 @@ private struct ImageCanvas: View {
         let marked = typing.flatMap { $0.after == model.cropSelection ? $0.before : nil } ?? model.cropSelection
         model.typeCropRatio(ratio, in: marked)
         typing = (marked, model.cropSelection)
+        if let ratio { suggestedRatio = Self.text(of: ratio) }
     }
 
     /// `text` as Custom's field takes it, changed from `typed`: two digits at most each side of one
