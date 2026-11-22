@@ -47,13 +47,21 @@ struct SpektraMacApp: App {
                 Link("SpektraMac Help", destination: URL(string: "https://github.com/nainajnahO/SpektraMac/blob/main/docs/guide.md")!)
                     .keyboardShortcut("?", modifiers: .command)
             }
-            // The toolbar's Crop: ⌘K, as in Preview. Off keeps the crop.
+            // The toolbar's Crop: ⌘K, as in Preview. Off keeps the crop. The turns as Preview's: in
+            // crop mode the part marked turns, otherwise the photo at once.
             CommandMenu("Image") {
                 Toggle("Crop", isOn: Binding { model.isCropping } set: { crops in
                     if crops { model.beginCropping() } else { model.endCropping() }
                 })
                 .keyboardShortcut("k")
                 .disabled(!model.canCrop)
+                Divider()
+                Button("Rotate Left") { model.turn(left: 1) }
+                    .keyboardShortcut("l")
+                    .disabled(!model.canTurn)
+                Button("Rotate Right") { model.turn(left: -1) }
+                    .keyboardShortcut("r")
+                    .disabled(!model.canTurn)
             }
             CommandMenu("Preset") {
                 Group {

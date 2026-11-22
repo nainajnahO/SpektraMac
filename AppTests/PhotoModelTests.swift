@@ -363,6 +363,74 @@ final class PhotoModelTests {
         #expect(model.controls.filmDevelopmentTime == nil && model.isSlideFilm)
     }
 
+    // MARK: Turning and straightening
+
+    /// Outside crop mode, Rotate turns the photo at once, one step to undo (#354).
+    @Test func rotateTurnsAtOnceAndUndoes() async throws {
+        let model = try await openedModel()
+        let undoManager = UndoManager()
+        undoManager.groupsByEvent = false
+        model.undoManager = undoManager
+        let start = model.log.count
+        event(undoManager) { model.turn(left: 1) }
+        #expect(undoManager.undoActionName == "Rotate")
+        try await until { messages(of: model, since: start).contains { $0.hasPrefix("Turned") } }
+        #expect(model.photo?.framing == Framing(quarterTurns: 1))
+        #expect(model.photo?.width == 800 && model.photo?.height == 1200)
+
+        let undone = model.log.count
+        undoManager.undo()
+        try await until { messages(of: model, since: undone).contains { $0.hasPrefix("Showed all of") } }
+        #expect(model.photo?.framing == .whole)
+        #expect(model.photo?.width == 1200 && model.photo?.height == 800)
+    }
+
+    /// Straightened, the crop kept is in whole pixels inside the photo, so crop mode again starts
+    /// with the frame as it was kept, free to move, and nothing to keep (#354).
+    @Test func straightenedCropIsKeptInsideThePhoto() async throws {
+        let model = try await openedModel()
+        model.beginCropping()
+        model.straighten(to: 7.34)
+        #expect(model.markedFraming.angle == 7.3)
+        let start = model.log.count
+        model.endCropping()
+        try await until { messages(of: model, since: start).contains { $0.hasPrefix("Cropped") } }
+        let framing = try #require(model.photo?.framing)
+        let crop = try #require(framing.crop)
+        #expect(framing.angle == 7.3)
+        #expect(crop == crop.integral)
+        #expect(StraightenedPhoto(size: CGSize(width: 1200, height: 800), angle: 7.3).contains(crop))
+        #expect(model.photo?.width == Int(crop.width) && model.photo?.height == Int(crop.height))
+
+        model.beginCropping()
+        #expect(model.markedFraming == framing)
+        #expect(!model.hasCropChanges)
+        model.cancelCropping()
+    }
+
+    /// Crop mode starts at As Shot. A ratio typed for Custom marks the largest part of that shape,
+    /// turns with the photo, and is where crop mode starts once it's kept (#354).
+    @Test func typedRatioTurnsAndIsKept() async throws {
+        let model = try await openedModel()
+        model.beginCropping()
+        #expect(model.cropShape == .asShot)
+        model.typeCropRatio(CGSize(width: 16, height: 9))
+        #expect(model.cropShape == .custom)
+        #expect(model.cropSelection.width == 1200 && abs(model.cropSelection.height - 675) < 0.001)
+
+        model.turn(left: 1)
+        #expect(model.typedCropRatio == CGSize(width: 9, height: 16))
+        let start = model.log.count
+        model.endCropping()
+        try await until { messages(of: model, since: start).contains { $0.hasPrefix("Cropped") } }
+        #expect(model.photo?.width == 675 && model.photo?.height == 1200)
+
+        model.beginCropping()
+        #expect(model.cropShape == .custom)
+        #expect(model.typedCropRatio == CGSize(width: 9, height: 16))
+        model.cancelCropping()
+    }
+
     // MARK: Timing the engine's work
 
     /// Work queued behind other work on the engine is timed from when the engine starts on it, and

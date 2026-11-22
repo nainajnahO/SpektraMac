@@ -5,6 +5,7 @@ import ImageIO
 import Observation
 import SpektraEngine
 import UniformTypeIdentifiers
+import Vision
 import os
 
 @MainActor
@@ -16,10 +17,10 @@ final class PhotoModel {
         let message: String
     }
 
-    /// The open photo (on the engine's GPU), all of it or the part it's cropped to: its file name,
-    /// size and preview size, and what the metering marks found in it.
+    /// The open photo (on the engine's GPU), all of it or framed: its file name, size and preview
+    /// size, and what the metering marks found in it.
     struct Photo: Identifiable {
-        /// The same through a crop: it's the file that opened.
+        /// The same through a framing: it's the file that opened.
         var id = UUID()
         let name: String
         let width: Int
@@ -32,10 +33,9 @@ final class PhotoModel {
         /// The size it opened at.
         let wholeWidth: Int
         let wholeHeight: Int
-        /// The part of that it's cropped to, in whole pixels from the top left: nil for all of it.
-        /// The photo's own, apart from the controls: no preset or film's defaults has a crop, and
-        /// the next photo opens whole.
-        var crop: CGRect?
+        /// How that's turned and cropped, the crop in whole pixels. The photo's own, apart from the
+        /// controls: no preset or film's defaults has a framing, and the next photo opens whole.
+        var framing = Framing.whole
 
         /// All of it, in its own pixels.
         var wholeBounds: CGRect { CGRect(x: 0, y: 0, width: wholeWidth, height: wholeHeight) }
@@ -53,6 +53,8 @@ final class PhotoModel {
             stripControls = nil
             if photo?.id != oldValue?.id {
                 wholeOriginal = nil
+                horizons = [:]
+                horizonsLookedFor = []
             }
             updateOriginal()
             showsOriginal = false
@@ -290,7 +292,7 @@ final class PhotoModel {
     /// "Opening…" stays until the newest is done. An opened photo goes to the top of
     /// ``recentPhotos``.
     func open(_ url: URL) {
-        // The open photo's crop is as it was, should this one fail to open.
+        // The open photo's framing is as it was, should this one fail to open.
         cancelCropping()
         // Files from the Open panel and Open Recent are security-scoped; dropped files and those
         // sent by Finder or the Dock are already accessible.
@@ -332,7 +334,7 @@ final class PhotoModel {
                 undoManager?.disableUndoRegistration()
                 controls.exposureEV = 0
                 undoManager?.enableUndoRegistration()
-                askedCrop = nil
+                askedFraming = .whole
                 photo = Photo(name: url.lastPathComponent, width: opened.width, height: opened.height,
                               previewWidth: opened.previewWidth, previewHeight: opened.previewHeight,
                               metering: opened.metering, meteringOverlays: opened.meteringOverlays,
@@ -392,22 +394,44 @@ final class PhotoModel {
         fail("Couldn't open the file", error, alert: true)
     }
 
-    /// Cuts ``original`` from ``wholeOriginal`` as the photo is cropped: by proportion, as a RAW
-    /// file's size as ImageIO decodes it can differ from Core Image's.
+    /// Frames ``original`` from ``wholeOriginal`` as the photo is framed: away from the main actor, as
+    /// it's a render of the photo's size. Meanwhile there's none to show.
     private func updateOriginal() {
-        guard let whole = wholeOriginal, let photo, let crop = photo.crop else {
+        guard let whole = wholeOriginal, let photo, photo.framing != .whole else {
             original = wholeOriginal
             return
         }
-        let scale = CGAffineTransform(scaleX: CGFloat(whole.width) / CGFloat(photo.wholeWidth),
-                                      y: CGFloat(whole.height) / CGFloat(photo.wholeHeight))
-        original = whole.cropping(to: crop.applying(scale).integral) ?? whole
+        original = nil
+        let (id, framing, size) = (photo.id, photo.framing, photo.wholeBounds.size)
+        Task {
+            let framed = await Task.detached(priority: .userInitiated) { Self.framed(whole, as: framing, of: size) }.value
+            guard self.photo?.id == id, self.photo?.framing == framing, wholeOriginal === whole else { return }
+            original = framed ?? whole
+        }
     }
+
+    /// `image`, all of a photo of `size` in the engine's pixels, framed as `framing` has it: scaled
+    /// to `size` first, as a RAW file's size as ImageIO decodes it can differ from Core Image's.
+    nonisolated private static func framed(_ image: CGImage, as framing: Framing, of size: CGSize) -> CGImage? {
+        let bounds = CGRect(origin: .zero, size: framing.turned(size))
+        let region = framing.crop ?? bounds
+        let scaled = CIImage(cgImage: image).transformed(by: CGAffineTransform(scaleX: size.width / CGFloat(image.width),
+                                                                                  y: size.height / CGFloat(image.height)))
+        let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        // Core Image measures up.
+        return imageContext.createCGImage(framing.applied(to: scaled, size: size),
+                                          from: CGRect(x: region.minX, y: bounds.height - region.maxY,
+                                                       width: region.width, height: region.height),
+                                          format: image.bitsPerComponent > 8 ? .RGBAh : .RGBA8, colorSpace: space)
+    }
+
+    /// Frames the original and the last render while the engine frames the photo.
+    nonisolated private static let imageContext = CIContext()
 
     // MARK: Cropping
 
-    /// Crop mode: the canvas shows all of the original with the part to keep marked on it
-    /// (``cropSelection``), and the settings wait. ``endCropping()`` keeps that part and
+    /// Crop mode: the canvas shows all of the original, turned as marked, with the part to keep
+    /// marked on it (``markedFraming``), and the settings wait. ``endCropping()`` keeps that and
     /// ``cancelCropping()`` leaves the photo as it was.
     ///
     /// The original, not the film: grain is the frame's, so a render of all of the photo, zoomed
@@ -416,142 +440,385 @@ final class PhotoModel {
     /// Crop mode is ending with the crop kept, once the engine has it: the frame stays as it was
     /// marked until the cropped photo is there to show in its place.
     private(set) var isLeavingCropMode = false
-    /// The part marked to keep while cropping, in the pixels of the photo as it opened, from its top
-    /// left: what the canvas's handles move.
-    var cropSelection = CGRect.zero
-    /// The shape the part marked keeps to: free as crop mode starts.
-    var cropShape = CropShape.free
-    /// The photo's crop as crop mode began: what Cancel goes back to, and Undo once the crop is kept.
-    @ObservationIgnored private var cropBeforeCropping: CGRect?
-    /// The crop last asked of the engine for the open photo, which ``photo`` has once it's made.
-    @ObservationIgnored private var askedCrop: CGRect?
-    /// How many crops have been asked of the engine: the newest one's photo is the one that shows.
-    @ObservationIgnored private var cropsStarted = 0
+    /// What crop mode marks: the turns, the straightening and the part to keep, which is never nil
+    /// there.
+    private(set) var markedFraming = Framing.whole
+    /// A straightening tape is being dragged or scrolled: the frame shows a fine grid.
+    private(set) var isStraightening = false
+    /// The angles that level the horizon Vision found in the open photo, for each quarter turn it
+    /// was looked for in (``findHorizon()``).
+    private(set) var horizons: [Int: Double] = [:]
+    /// The quarter turns of the open photo Vision has looked, or is looking, for the horizon in.
+    @ObservationIgnored private var horizonsLookedFor: Set<Int> = []
+    /// What was marked as the slider's drag began: each angle is set from it, so the frame grows
+    /// back as the photo turns back.
+    @ObservationIgnored private var markedBeforeStraightening: Framing?
+    /// The part marked to keep while cropping, in the pixels of the photo turned as marked, from the
+    /// top left of all of it turned (``cropBounds``): what the canvas's handles move.
+    var cropSelection: CGRect {
+        get { markedFraming.crop ?? .zero }
+        set { markedFraming.crop = newValue }
+    }
+    /// All of the photo turned as marked: what the part marked is measured in.
+    var cropBounds: CGRect {
+        guard let photo else { return .zero }
+        return CGRect(origin: .zero, size: markedFraming.turned(photo.wholeBounds.size))
+    }
+    /// All of the photo turned and straightened as marked: the part marked keeps inside it.
+    var straightenedPhoto: StraightenedPhoto {
+        StraightenedPhoto(size: cropBounds.size, angle: markedFraming.angle)
+    }
+    /// The shape the part marked keeps to, and whether 3:2 and 4:5 stand upright rather than lie on
+    /// their side.
+    private(set) var cropShape = CropShape.asShot
+    private(set) var cropShapeIsUpright = false
+    /// The width and height typed for Custom, as the frame stands: nil keeps it to any shape.
+    private(set) var typedCropRatio: CGSize?
+    /// Width over height the part marked keeps to: nil for any.
+    var cropRatio: CGFloat? {
+        cropShape.ratio(upright: cropShapeIsUpright, typed: typedCropRatio, in: cropBounds.size)
+    }
+    /// The shape of the crop last kept: crop mode starts at it, for cropping a series of photos
+    /// alike, while the app is open. As Shot until one's kept.
+    @ObservationIgnored private var keptCropShape = (shape: CropShape.asShot, isUpright: false, typed: CGSize?.none)
+    /// The photo's framing as crop mode began: what Cancel goes back to, and Undo once it's kept.
+    @ObservationIgnored private var framingBeforeCropping = Framing.whole
+    /// The framing last asked of the engine for the open photo, which ``photo`` has once it's made.
+    @ObservationIgnored private var askedFraming = Framing.whole
+    /// How many framings have been asked of the engine: the newest one's photo is the one that shows.
+    @ObservationIgnored private var framingsStarted = 0
 
     /// Once the original, which crop mode shows, has loaded. Not while a photo opens, which the
     /// engine would crop in place of this one, or one saves.
     var canCrop: Bool { photo != nil && wholeOriginal != nil && engine != nil && !isLoading && savePhase == nil }
 
+    /// In crop mode until the crop is being kept; otherwise as the photo can be framed.
+    var canTurn: Bool {
+        isCropping ? !isLeavingCropMode : photo != nil && engine != nil && !isLoading && savePhase == nil
+    }
+
     /// Starts crop mode, on all of the original: a cropped photo shows whole, with its crop marked.
+    /// It starts at the shape last kept, unless the photo is cropped to another.
     func beginCropping() {
         guard canCrop, !isCropping, let photo else { return }
         isCropping = true
         showsOriginal = false
-        cropBeforeCropping = photo.crop
-        cropSelection = photo.crop ?? photo.wholeBounds
-        cropShape = .free
+        endStraightening()
+        framingBeforeCropping = photo.framing
+        markedFraming = photo.framing
+        cropSelection = photo.framing.crop ?? cropBounds
+        let kept = keptCropShape
+        let keptRatio = kept.shape.ratio(upright: kept.isUpright, typed: kept.typed, in: cropBounds.size)
+        let isKeptShape = keptRatio.map { abs(cropSelection.width - cropSelection.height * $0) <= 1 } ?? true
+        if photo.framing.crop == nil || isKeptShape {
+            setCropShape(kept.shape, upright: kept.isUpright, typed: kept.typed)
+        } else {
+            setCropShape(.custom, upright: false, typed: nil)
+        }
+        findHorizon()
     }
 
-    /// Something to reset: the photo is cropped, or the part marked isn't all of it.
+    /// Keeps the part marked to `shape`, standing as the part marked does. Custom keeps it to any
+    /// shape, until a ratio is typed for it.
+    func chooseCropShape(_ shape: CropShape) {
+        setCropShape(shape, upright: cropSelection.height > cropSelection.width, typed: nil)
+    }
+
+    /// Keeps the part marked to `ratio`'s width by its height as typed for Custom, so 9:16 stands
+    /// upright: the largest part of that shape in it. For nil, to any shape.
+    func typeCropRatio(_ ratio: CGSize?) {
+        setCropShape(.custom, upright: false, typed: ratio)
+    }
+
+    /// Keeps the part marked to `shape`: the largest part of that shape in what's marked, about the
+    /// same middle.
+    private func setCropShape(_ shape: CropShape, upright: Bool, typed: CGSize?) {
+        cropShape = shape
+        cropShapeIsUpright = upright
+        typedCropRatio = typed
+        guard let ratio = cropRatio else { return }
+        let marked = cropSelection
+        let width = min(marked.width, marked.height * ratio)
+        cropSelection = CGRect(x: marked.midX - width / 2, y: marked.midY - width / ratio / 2,
+                               width: width, height: width / ratio)
+    }
+
+    /// Turns the photo a quarter to the left, or for −1 to the right. In crop mode the part marked
+    /// turns with it; otherwise the photo turns at once, one step to undo.
+    func turn(left quarters: Int) {
+        guard canTurn, let photo else { return }
+        if isCropping {
+            markedFraming = markedFraming.turned(left: quarters, in: photo.wholeBounds.size)
+            if !quarters.isMultiple(of: 2) {
+                cropShapeIsUpright.toggle()
+                // 16:9 typed is 9:16 turned.
+                typedCropRatio = typedCropRatio.map { CGSize(width: $0.height, height: $0.width) }
+            }
+            findHorizon()
+        } else {
+            // From the framing asked for last, so turns made faster than the engine all count.
+            setFraming(askedFraming.turned(left: quarters, in: photo.wholeBounds.size), from: askedFraming,
+                       named: "Rotate")
+        }
+    }
+
+    /// A drag or scroll of a tape begins: angles are set from what's marked now. It takes over from
+    /// a turn to the horizon under way.
+    func beginStraightening() {
+        guard isCropping else { return }
+        horizonTurn?.cancel()
+        horizonTurn = nil
+        markedBeforeStraightening = markedFraming
+        isStraightening = true
+    }
+
+    func endStraightening() {
+        markedBeforeStraightening = nil
+        isStraightening = false
+    }
+
+    /// Straightens the photo `angle` degrees to the right, to a tenth, from what was marked as the
+    /// slider's drag began, or else from what's marked. The frame keeps the same part of the photo
+    /// in its middle and its shape, made smaller where it would reach past the photo's edge.
+    func straighten(to angle: Double) {
+        guard isCropping, !isLeavingCropMode else { return }
+        let start = markedBeforeStraightening ?? markedFraming
+        guard let crop = start.crop else { return }
+        let angle = min(max((angle * 10).rounded() / 10, -45), 45)
+        let size = cropBounds.size
+        let middle = StraightenedPhoto(size: size, angle: angle)
+            .straightened(StraightenedPhoto(size: size, angle: start.angle).unstraightened(CGPoint(x: crop.midX, y: crop.midY)))
+        markedFraming.angle = angle
+        cropSelection = straightenedPhoto.fitted(CGRect(x: middle.x - crop.width / 2, y: middle.y - crop.height / 2,
+                                                        width: crop.width, height: crop.height))
+    }
+
+    /// The angle, to a tenth, that levels the horizon Vision found in the photo turned as marked: nil
+    /// while it looks, or where it found none.
+    var horizonAngle: Double? { horizons[markedFraming.quarterTurns] }
+
+    /// Straightens the photo by its horizon (``horizonAngle``), as a click on its dot on the tapes:
+    /// turning it there over half a second as a quick drag of a tape would, so the frame, the tapes,
+    /// the fine grid and the trackpad's clicks go with it. At once with Reduce Motion. A drag or
+    /// scroll of a tape takes over from it.
+    func straightenByHorizon() {
+        guard isCropping, !isLeavingCropMode, let target = horizonAngle else { return }
+        endStraightening()
+        let start = markedFraming.angle
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, abs(target - start) >= 0.1 else {
+            straighten(to: target)
+            return
+        }
+        beginStraightening()
+        horizonTurn = Task {
+            let clock = ContinuousClock()
+            let began = clock.now
+            var done = 0.0
+            while done < 1, !Task.isCancelled, isCropping, !isLeavingCropMode {
+                done = min(1, (clock.now - began) / .milliseconds(500))
+                // Easing in and out.
+                straighten(to: start + (target - start) * done * done * (3 - 2 * done))
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            if !Task.isCancelled {
+                endStraightening()
+            }
+        }
+    }
+
+    /// The turn to the horizon under way (``straightenByHorizon()``).
+    @ObservationIgnored private var horizonTurn: Task<Void, Never>?
+
+    /// Has Vision look for the horizon in the original turned as marked, once for each quarter turn
+    /// of the open photo, away from the main actor: in crop mode, for its dot on the tapes.
+    private func findHorizon() {
+        let turns = markedFraming.quarterTurns
+        guard isCropping, let whole = wholeOriginal, let photo, !horizonsLookedFor.contains(turns) else { return }
+        horizonsLookedFor.insert(turns)
+        Task {
+            let found: Result<Double?, any Error>
+            do {
+                found = .success(try await Self.levellingAngle(of: whole, turnedLeft: turns))
+            } catch {
+                found = .failure(error)
+            }
+            guard self.photo?.id == photo.id else { return }
+            switch found {
+            case .success(let angle?):
+                horizons[turns] = min(max((angle * 10).rounded() / 10, -45), 45)
+            case .success(nil):
+                note("Found no horizon in \(photo.name)")
+            case .failure(let error):
+                horizonsLookedFor.remove(turns)
+                fail("Couldn't look for the horizon in “\(photo.name)”", error)
+            }
+        }
+    }
+
+    /// The degrees to the right that level the horizon Vision finds in `image` turned `quarters` to
+    /// the left: nil where it finds none, as where it's level already. Vision looks at it 1024
+    /// pixels on the long side, away from the main actor.
+    @concurrent nonisolated private static func levellingAngle(of image: CGImage, turnedLeft quarters: Int) async throws -> Double? {
+        let scale = min(1, 1024 / CGFloat(max(image.width, image.height)))
+        // In whole pixels: with a fraction of one at an edge, Vision found no horizon in photos
+        // where it finds one otherwise.
+        let size = CGSize(width: (CGFloat(image.width) * scale).rounded(), height: (CGFloat(image.height) * scale).rounded())
+        let small = CIImage(cgImage: image).transformed(by: CGAffineTransform(scaleX: size.width / CGFloat(image.width),
+                                                                                y: size.height / CGFloat(image.height)))
+        let turned = Framing(quarterTurns: quarters).applied(to: small, size: size)
+        guard let horizon = try await DetectHorizonRequest().perform(on: turned) else { return nil }
+        // Vision's angle turns the photo anticlockwise to level it: a photo turned 2° clockwise
+        // reads +2°.
+        return -horizon.angle.converted(to: .degrees).value
+    }
+
+    /// Something to reset: the photo is framed, or what's marked isn't all of it.
     var canResetCrop: Bool {
-        guard isCropping, !isLeavingCropMode, let photo else { return false }
-        return cropBeforeCropping != nil || cropSelection != photo.wholeBounds
+        guard isCropping, !isLeavingCropMode else { return false }
+        return framingBeforeCropping != .whole || framingToKeep != .whole
     }
 
-    /// Ends crop mode with all of the photo kept: one step to undo, as ``endCropping()``. The frame
-    /// stays as marked until the photo shows, so Done doesn't start to grow out of Crop meanwhile.
+    /// Ends crop mode with all of the photo kept, unturned: one step to undo, as ``endCropping()``.
+    /// The frame stays as marked until the photo shows, so Done doesn't start to grow out of Crop
+    /// meanwhile.
     func resetCrop() {
         guard canResetCrop else { return }
-        setCrop(nil, from: cropBeforeCropping)
+        setFraming(.whole, from: framingBeforeCropping, named: "Crop")
     }
 
-    /// The part marked differs from the crop as crop mode began: ``endCropping()`` would change it.
+    /// What's marked differs from the framing as crop mode began: ``endCropping()`` would change it.
     var hasCropChanges: Bool {
-        isCropping && cropToKeep != cropBeforeCropping
+        isCropping && framingToKeep != framingBeforeCropping
     }
 
-    /// Ends crop mode, cropping the photo to ``cropSelection`` in whole pixels: one step to undo.
+    /// Ends crop mode, framing the photo as marked, in whole pixels: one step to undo. A crop of a
+    /// new shape is the one the next starts at.
     func endCropping() {
         guard isCropping, !isLeavingCropMode else { return }
-        setCrop(cropToKeep, from: cropBeforeCropping)
+        if hasCropChanges {
+            keptCropShape = (cropShape, cropShapeIsUpright, typedCropRatio)
+        }
+        setFraming(framingToKeep, from: framingBeforeCropping, named: "Crop")
     }
 
-    /// ``cropSelection`` in whole pixels, in the photo: nil for all of it.
-    private var cropToKeep: CGRect? {
-        guard let photo else { return nil }
+    /// ``markedFraming`` with the part marked in whole pixels: no crop for all of the photo.
+    private var framingToKeep: Framing {
+        let bounds = cropBounds
         // The size before the place, so a square stays one.
         let size = CGSize(width: max(1, cropSelection.width.rounded()), height: max(1, cropSelection.height.rounded()))
-        let origin = CGPoint(x: min(max(0, cropSelection.minX.rounded()), CGFloat(photo.wholeWidth) - size.width),
-                             y: min(max(0, cropSelection.minY.rounded()), CGFloat(photo.wholeHeight) - size.height))
-        let kept = CGRect(origin: origin, size: size).intersection(photo.wholeBounds)
-        return kept == photo.wholeBounds ? nil : kept
+        var framing = markedFraming
+        // Straightened, the photo reaches past where it lies unstraightened, and isn't all kept: in
+        // whole pixels inside it, a pixel smaller where rounding would take a corner past its edge.
+        // Kept past it, the frame marked in crop mode again would have no room to move.
+        guard framing.angle == 0 else {
+            let photo = straightenedPhoto
+            var (inside, kept) = (size, CGRect.zero)
+            for _ in 0..<4 {
+                let placed = photo.fitted(CGRect(x: cropSelection.midX - inside.width / 2, y: cropSelection.midY - inside.height / 2,
+                                                 width: inside.width, height: inside.height))
+                kept = CGRect(origin: CGPoint(x: placed.minX.rounded(), y: placed.minY.rounded()), size: inside)
+                if photo.contains(kept) {
+                    break
+                }
+                inside = CGSize(width: max(1, inside.width - 1), height: max(1, inside.height - 1))
+            }
+            framing.crop = kept
+            return framing
+        }
+        let origin = CGPoint(x: min(max(0, cropSelection.minX.rounded()), bounds.width - size.width),
+                             y: min(max(0, cropSelection.minY.rounded()), bounds.height - size.height))
+        let kept = CGRect(origin: origin, size: size).intersection(bounds)
+        framing.crop = kept == bounds ? nil : kept
+        return framing
     }
 
-    /// Ends crop mode with the photo cropped as it was before: not once the crop is being kept.
+    /// Ends crop mode with the photo framed as it was before: not once the crop is being kept.
     func cancelCropping() {
         guard isCropping, !isLeavingCropMode else { return }
         isCropping = false
     }
 
-    /// Crops the photo to `crop` (all of it for nil), which Undo sets back to `previous`.
-    private func setCrop(_ crop: CGRect?, from previous: CGRect?) {
-        if crop != previous, let undoManager {
+    /// Frames the photo as `framing` has it, which Undo sets back to `previous`: a step named `name`.
+    private func setFraming(_ framing: Framing, from previous: Framing, named name: String) {
+        if framing != previous, let undoManager {
             undoManager.registerUndo(withTarget: self) { model in
-                // Not while a photo opens: the engine would crop that one. The step is spent, and
+                // Not while a photo opens: the engine would frame that one. The step is spent, and
                 // the photo that opens empties Undo. Undone in crop mode, the mode ends: the crop
                 // it was marking is gone.
                 guard !model.isLoading else { return }
-                model.setCrop(previous, from: crop)
+                model.setFraming(previous, from: framing, named: name)
             }
-            undoManager.setActionName("Crop")
+            undoManager.setActionName(name)
         }
-        applyCrop(crop)
+        applyFraming(framing)
     }
 
-    /// Has the engine crop the photo to `crop`, or show all of it for nil, and shows the result:
-    /// metered again, at the exposure it had. The newest of several asked for is the one that shows.
-    /// Crop mode ends with it.
-    private func applyCrop(_ crop: CGRect?) {
-        guard let engine, let photo, crop != askedCrop else {
+    /// Has the engine frame the photo as `framing` has it, and shows the result: metered again, at
+    /// the exposure it had. The newest of several asked for is the one that shows. Crop mode ends
+    /// with it.
+    private func applyFraming(_ framing: Framing) {
+        guard let engine, let photo, framing != askedFraming else {
             isCropping = false
             return
         }
-        askedCrop = crop
-        cropsStarted += 1
-        let generation = cropsStarted
+        askedFraming = framing
+        framingsStarted += 1
+        let generation = framingsStarted
         isLeavingCropMode = isCropping
-        // The engine crops once it's done rendering: stop that.
+        // The engine frames once it's done rendering: stop that.
         stopRendering()
         stripTask?.cancel()
         stripTask = nil
         stopPreloading()
         Task {
             do {
-                let (opened, time) = try await EngineTime.measure(on: engine) { try $0.crop(to: crop) }
-                // A crop asked for since shows instead.
-                guard generation == cropsStarted else { return }
+                let (opened, time) = try await EngineTime.measure(on: engine) { try $0.frame(framing) }
+                // A framing asked for since shows instead.
+                guard generation == framingsStarted else { return }
                 isCropping = false
                 isLeavingCropMode = false
                 // As does another photo.
                 guard let shown = self.photo, shown.id == photo.id else { return }
-                // Until its first render, the canvas shows the last one in the crop's shape: cut
-                // from it where it shows all of the crop, else nothing.
-                let rendered = shown.crop ?? shown.wholeBounds
-                if let display = displayImage, let crop, rendered.contains(crop) {
-                    let scale = CGAffineTransform(scaleX: CGFloat(display.width) / rendered.width,
-                                                  y: CGFloat(display.height) / rendered.height)
-                    displayImage = display.cropping(to: crop.offsetBy(dx: -rendered.minX, dy: -rendered.minY)
-                                                        .applying(scale).integral)
-                } else {
-                    displayImage = nil
-                }
+                // Until its first render, the canvas shows the last one framed the same way: cut and
+                // turned from it where it shows all of that, else nothing.
+                displayImage = displayImage.flatMap { Self.cut($0, framed: shown.framing, to: framing,
+                                                               of: shown.wholeBounds.size) }
                 self.photo = Photo(id: shown.id, name: shown.name, width: opened.width, height: opened.height,
                                    previewWidth: opened.previewWidth, previewHeight: opened.previewHeight,
                                    metering: opened.metering, meteringOverlays: opened.meteringOverlays,
-                                   wholeWidth: shown.wholeWidth, wholeHeight: shown.wholeHeight, crop: crop)
-                note(crop == nil ? "Showed all of \(shown.name) (\(opened.width) × \(opened.height)) \(time.formatted())"
-                                 : "Cropped \(shown.name) to \(opened.width) × \(opened.height) \(time.formatted())")
+                                   wholeWidth: shown.wholeWidth, wholeHeight: shown.wholeHeight, framing: framing)
+                let what = framing == .whole ? "Showed all of" : framing.crop == nil ? "Turned" : "Cropped"
+                note("\(what) \(shown.name) (\(opened.width) × \(opened.height)) \(time.formatted())")
             } catch {
-                guard generation == cropsStarted else { return }
+                guard generation == framingsStarted else { return }
                 isCropping = false
                 isLeavingCropMode = false
                 guard self.photo?.id == photo.id else { return }
                 // The engine keeps the photo as it was: its renders, stopped above, start again.
-                askedCrop = self.photo?.crop
+                askedFraming = self.photo?.framing ?? .whole
                 scheduleRender()
                 fail("Couldn't crop “\(photo.name)”", error, alert: true)
             }
         }
+    }
+
+    /// `display`, a render of a photo of `size` framed `shown`, cut and turned to show it framed
+    /// `framing`: nil where it doesn't show all of that, or it's straightened otherwise.
+    nonisolated private static func cut(_ display: CGImage, framed shown: Framing, to framing: Framing,
+                                        of size: CGSize) -> CGImage? {
+        guard framing.angle == shown.angle else { return nil }
+        let quarters = framing.quarterTurns - shown.quarterTurns
+        // What's to show, where the render lies.
+        let wanted = framing.turned(left: -quarters, in: size)
+        let kept = wanted.crop ?? CGRect(origin: .zero, size: wanted.turned(size))
+        let rendered = shown.crop ?? CGRect(origin: .zero, size: shown.turned(size))
+        guard rendered.contains(kept) else { return nil }
+        let scale = CGAffineTransform(scaleX: CGFloat(display.width) / rendered.width,
+                                      y: CGFloat(display.height) / rendered.height)
+        guard let part = display.cropping(to: kept.offsetBy(dx: -rendered.minX, dy: -rendered.minY)
+                                              .applying(scale).integral) else { return nil }
+        return quarters.isMultiple(of: 4) ? part : framed(part, as: Framing(quarterTurns: quarters),
+                                                          of: CGSize(width: part.width, height: part.height))
     }
 
     // MARK: Rendering

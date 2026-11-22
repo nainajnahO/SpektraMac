@@ -8,18 +8,27 @@ struct ContentView: View {
     @Environment(\.undoManager) private var undoManager
     @SceneStorage("showsSettings") private var showsSettings = true
     @SceneStorage("settingsCategory") private var category = SettingsCategory.film
-    @FocusState private var isCanvasFocused: Bool
+    @FocusState private var focus: Focus?
+
+    /// What has the keyboard: the canvas, or in crop mode the ratio typed for Custom, or the angle
+    /// typed beside the straightening tape on one side.
+    enum Focus: Hashable {
+        case canvas, cropRatio, cropAngle(HorizontalEdge)
+
+        /// A field that's typed in, where C and Esc are the field's own.
+        var isField: Bool { self != .canvas }
+    }
 
     var body: some View {
         @Bindable var model = model
-        ImageCanvas()
+        ImageCanvas(focus: $focus)
             .background(HostingViewName(name: "Photo"))
             // Focused from the start, as nothing else in the window takes focus on a click, so
             // Edit › Copy (⌘C) reaches it: the finished photo, as Share sends it.
             .focusable()
             .focusEffectDisabled()
-            .focused($isCanvasFocused)
-            .defaultFocus($isCanvasFocused, true)
+            .focused($focus, equals: .canvas)
+            .defaultFocus($focus, .canvas)
             .copyable([model.finishedPhoto].compactMap { $0 })
             .navigationTitle(model.photo?.name ?? "SpektraMac")
             .navigationSubtitle(status)
@@ -61,6 +70,11 @@ struct ContentView: View {
             .background(HostingViewName(name: "Editor"))
             .onChange(of: undoManager, initial: true) { _, undoManager in
                 model.undoManager = undoManager
+            }
+            // Left with a ratio being typed, as by clicking Done, the keyboard was nowhere and Copy
+            // greyed out.
+            .onChange(of: model.isCropping) { _, isCropping in
+                if !isCropping { focus = .canvas }
             }
             // For the View menu (``ViewCommands``).
             .focusedSceneValue(\.settingsCategory, $category)
@@ -107,16 +121,30 @@ struct ContentView: View {
         // crop.
         if model.photo != nil {
             ToolbarItem {
-                // The toolbar sizes an item, and its glass, to the new width at once. So the button
-                // has glass of its own, and while cropping the item is as wide as the button with
-                // Done from the start: the button, at its right, grows to the left into it.
+                // The toolbar sizes an item, and its glass, to the new width at once. So the buttons
+                // have glass of their own, and while cropping the item is as wide as they are with
+                // Done from the start: Rotate Left stays at its right, and Crop beside it grows to
+                // the left into it. As toolbar items of their own, Rotate Left stood apart from Crop
+                // by the width kept for Done.
                 ZStack(alignment: .trailing) {
                     if model.isCropping {
-                        cropToggle(showsDone: true)
-                            .hidden()
-                            .accessibilityHidden(true)
+                        HStack(spacing: Self.toolbarGlassSpacing) {
+                            cropToggle(showsDone: true)
+                            rotateLeftButton
+                        }
+                        .hidden()
+                        .accessibilityHidden(true)
                     }
-                    cropToggle(showsDone: model.hasCropChanges)
+                    HStack(spacing: Self.toolbarGlassSpacing) {
+                        // C as well as the Image menu's ⌘K, as in Photos: a menu item has one
+                        // shortcut. Not while a ratio or an angle is typed, as a C there would be
+                        // a typo.
+                        cropToggle(showsDone: model.hasCropChanges)
+                            .keyboardShortcut(focus?.isField == true ? nil : KeyboardShortcut("c", modifiers: []))
+                        if model.isCropping {
+                            rotateLeftButton
+                        }
+                    }
                 }
                 // Not as crop mode ends, when the toolbar changes around it at once.
                 .animation(model.isCropping ? .snappy(duration: 0.3) : nil, value: model.hasCropChanges)
@@ -133,7 +161,8 @@ struct ContentView: View {
                     Button("Reset", role: .destructive) { model.resetCrop() }
                         .disabled(!model.canResetCrop)
                     Button("Cancel") { model.cancelCropping() }
-                        .keyboardShortcut(.cancelAction)
+                        // While a ratio or an angle is typed, Esc leaves the field, not crop mode.
+                        .keyboardShortcut(focus?.isField == true ? nil : .cancelAction)
                         .disabled(model.isLeavingCropMode)
                 }
                 .buttonStyle(ToolbarGroupButtonStyle())
@@ -186,8 +215,28 @@ struct ContentView: View {
         .help(model.isCropping ? "Keep the crop" : "Crop the photo")
     }
 
+    /// While cropping, beside Crop: the photo turns as marked. The Image menu turns it either way, in
+    /// crop mode or not. In glass of its own, a circle as Crop is without Done (``cropToggle(showsDone:)``).
+    private var rotateLeftButton: some View {
+        Button {
+            model.turn(left: 1)
+        } label: {
+            Image(systemName: "rotate.left")
+                .imageScale(.large)
+                .frame(width: Self.toolbarButtonHeight, height: Self.toolbarButtonHeight)
+                .contentShape(.circle)
+                .glassEffect(.regular.interactive(), in: .circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Rotate Left")
+        .disabled(!model.canTurn)
+        .help("Turn the photo a quarter to the left")
+    }
+
     /// How tall the toolbar's buttons are.
     private static let toolbarButtonHeight: CGFloat = 36
+    /// How far apart the toolbar puts groups of buttons in glass of their own.
+    private static let toolbarGlassSpacing: CGFloat = 8
 
     /// Whether the alert shows: while there's a failure, which dismissing it clears.
     private var showsFailure: Binding<Bool> {
@@ -306,6 +355,8 @@ private struct HostingViewName: NSViewRepresentable {
 /// reaches under the toolbar and the panel, so a zoomed photo shows through them, as in Photos.
 private struct ImageCanvas: View {
     @Environment(PhotoModel.self) private var model
+    /// The window's keyboard focus: the canvas, or a ratio or an angle typed.
+    var focus: FocusState<ContentView.Focus?>.Binding
     /// Magnification over the photo fitted to the canvas (1 shows all of it), and how far the
     /// zoomed photo is moved from the centre, in points.
     @State private var zoom: CGFloat = 1
@@ -320,16 +371,27 @@ private struct ImageCanvas: View {
     @State private var dragStart: CGSize?
     @State private var pinched: CGFloat = 1
     @State private var scrollMonitor: Any?
-    /// In crop mode: the width over height of the shape the crop keeps to as it was chosen, if it
-    /// has one (``PhotoModel/cropShape``).
-    @State private var cropRatio: CGFloat?
     /// In crop mode, a drag moves the photo under a frame fixed in the middle, as in Photos, rather
     /// than the frame over the photo: as it was chosen last, while the app is open.
     @State private var cropMovesPhoto = false
+    /// What's in Custom's field, and where it's selected.
+    @State private var typedRatio = ""
+    @State private var typedRatioSelection: TextSelection?
+    /// The ratio Custom's field holds as it's clicked into empty: the last one kept while the app
+    /// is open, 16:9 until one is. As typed, not as turned since.
+    @State private var suggestedRatio = "16:9"
     /// While a corner or edge of the frame is dragged with the photo moving: the part marked the
     /// canvas stays laid out around (``CropOverlay/held``).
     @State private var heldCrop: CGRect?
+    /// In crop mode, the straightening tape the pointer is over: scrolling there turns the photo.
+    @State private var tapeUnderPointer: HorizontalEdge?
+    /// While a trackpad's scroll over a tape is under way: the angle as it began, and the degrees
+    /// scrolled since.
+    @State private var scrollStraightening: (start: Double, degrees: Double)?
+    /// How bright all of the original is, where, for the tapes: read once it's there.
+    @State private var originalBrightness: Brightness?
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         // Takes the canvas below the toolbar and beside the panel, whose geometry gives where that
@@ -385,15 +447,64 @@ private struct ImageCanvas: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if model.isCropping, let photo = model.photo {
-                    cropControls(for: photo)
+                if model.isCropping {
+                    cropControls
                 }
+            }
+            // A tape at each side, clear of the frame's edges where they're the photo's, and of the
+            // controls below.
+            .overlay {
+                if model.isCropping {
+                    let height = min(280, max(120, visibleSize.height - 200))
+                    HStack {
+                        StraighteningRuler(side: .leading, height: height, isPrimary: true,
+                                           brightness: brightness(underTapeOn: .leading, height: height),
+                                           tapeUnderPointer: $tapeUnderPointer, focus: focus)
+                        Spacer()
+                        StraighteningRuler(side: .trailing, height: height, isPrimary: false,
+                                           brightness: brightness(underTapeOn: .trailing, height: height),
+                                           tapeUnderPointer: $tapeUnderPointer, focus: focus)
+                    }
+                    .padding(.horizontal, StraighteningRuler.inset)
+                    .disabled(model.isLeavingCropMode)
+                }
+            }
+            .task(id: model.wholeOriginal.map(ObjectIdentifier.init)) {
+                originalBrightness = nil
+                guard let whole = model.wholeOriginal else { return }
+                originalBrightness = await Task.detached(priority: .userInitiated) { Brightness(of: whole) }.value
+            }
+            // A scroll that leaves the tape before it ends ends there: the grid goes.
+            .onChange(of: tapeUnderPointer) {
+                if scrollStraightening != nil {
+                    scrollStraightening = nil
+                    model.endStraightening()
+                }
+            }
+            // A click on the trackpad at each tenth of a degree a drag or scroll of a tape passes,
+            // a rumble as it goes, and a firmer one at 0° and every 10°, as the settings' sliders
+            // click at their lines. A Mac's trackpad plays only these two, so a whole degree clicks
+            // as a tenth does. Not as Auto or a double-click sets the angle.
+            .sensoryFeedback(trigger: model.markedFraming.angle) { old, new in
+                guard model.isStraightening else { return nil }
+                let passed = { (degree: Int) in
+                    (old < Double(degree) && Double(degree) <= new) || (new <= Double(degree) && Double(degree) < old)
+                }
+                let degrees = Int(min(old, new).rounded(.down))...Int(max(old, new).rounded(.up))
+                if degrees.contains(where: { $0.isMultiple(of: 10) && passed($0) }) { return .levelChange }
+                // As at the exposure's dots, the firmer one at the horizon's.
+                if let horizon = model.horizonAngle, (old < horizon && horizon <= new) || (new <= horizon && horizon < old) {
+                    return .levelChange
+                }
+                // Each change of the angle is a tenth or more: it's to a tenth.
+                return .alignment
             }
     }
 
     /// In crop mode, on the canvas over the foot of the photo, in glass as the toolbar's buttons
-    /// are: what a drag moves, and the shapes to keep to. Reset and Cancel are in the toolbar.
-    private func cropControls(for photo: PhotoModel.Photo) -> some View {
+    /// are: what a drag moves, and the shapes to keep to. The straightening tapes are at the
+    /// canvas's sides; Rotate, Reset and Cancel are in the toolbar.
+    private var cropControls: some View {
         // Glass near glass is drawn together.
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
@@ -415,15 +526,6 @@ private struct ImageCanvas: View {
         .disabled(model.isLeavingCropMode)
         // Clear of the frame's foot where it's the photo's: its edge is held below them.
         .padding(.bottom, 24)
-        .onChange(of: model.cropShape) {
-            // The largest part of that shape in what's marked, about the same middle.
-            let marked = model.cropSelection
-            cropRatio = model.cropShape.ratio(of: marked.size, in: photo.wholeBounds.size)
-            guard let cropRatio else { return }
-            let width = min(marked.width, marked.height * cropRatio)
-            model.cropSelection = CGRect(x: marked.midX - width / 2, y: marked.midY - width / cropRatio / 2,
-                                         width: width, height: width / cropRatio)
-        }
     }
 
     /// The crop's shapes in one group of glass, looking as the toolbar's Camera, Film and Print do:
@@ -433,15 +535,142 @@ private struct ImageCanvas: View {
     /// there has dividers and its choice in the accent colour. With `.tabs`, VoiceOver announces
     /// the shapes as tabs. Not a menu: a SwiftUI menu has no action for assistive apps to press on
     /// macOS 27, which fails the accessibility audit (#314).
+    ///
+    /// Custom's field lies over its tab, which is blank once Custom's chosen: a text field as a `.tabs`
+    /// picker's choice draws as an empty capsule, and beside the picker in its glass, the picker drew
+    /// a capsule of its own inside it.
     private var cropShapes: some View {
-        Picker("Shape", selection: Binding { model.cropShape } set: { model.cropShape = $0 }) {
-            ForEach(CropShape.allCases, id: \.self) { Text($0.rawValue) }
+        Picker("Shape", selection: Binding { model.cropShape } set: { shape in
+            model.chooseCropShape(shape)
+            focus.wrappedValue = .canvas
+        }) {
+            ForEach(CropShape.allCases, id: \.self) { shape in
+                if shape == .custom && model.cropShape == .custom {
+                    Text(verbatim: " ").accessibilityLabel(shape.rawValue)
+                } else {
+                    Text(shape.rawValue)
+                }
+            }
         }
         .pickerStyle(.tabs)
         .controlSize(.extraLarge)
         .labelsHidden()
         .fixedSize()
+        // Over Custom's tab: the first of the tabs, which are alike in width. Inside the glass, as
+        // over it, the field's text was drawn under it.
+        .overlay(alignment: .leading) {
+            GeometryReader { picker in
+                customShape.frame(width: picker.size.width / CGFloat(CropShape.allCases.count), height: picker.size.height)
+            }
+        }
         .glassEffect()
+    }
+
+    /// Custom, a field for a ratio to keep the frame to, typed as the angle beside the tapes is
+    /// (``StraighteningRuler/reading(_:)``). Clicked into, the frame is free, and the field holds
+    /// its ratio selected, for typing to replace: empty, the last ratio kept (16:9 at first).
+    /// Return keeps the frame to the ratio in it, or frees it for none, and leaves the field. Esc
+    /// and Tab leave the field without that, what was typed dropped, and so does choosing another
+    /// shape.
+    ///
+    /// A field throughout, not a button that turns into one: SwiftUI didn't give the keyboard to
+    /// a field as it appeared, from the button's action or the field's `onAppear`.
+    private var customShape: some View {
+        // Empty, over its tab's "Custom" until it's chosen. No prompt: macOS shows the field's
+        // title for none.
+        TextField("Ratio", text: $typedRatio, selection: $typedRatioSelection, prompt: Text(verbatim: ""))
+            .textFieldStyle(.plain)
+            // Its own colour: left, as by Return, the field drew its ratio greyed out, unlike the
+            // shapes beside it.
+            .foregroundStyle(Color.primary)
+            .multilineTextAlignment(.center)
+            // Under the field's text and caret, the hint once chosen, dimmer than macOS draws a
+            // prompt on glass, where it looked typed. A prompt styled dimmer lost its centring.
+            .background {
+                if model.cropShape == .custom && typedRatio.isEmpty {
+                    Text(verbatim: suggestedRatio)
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
+            }
+            .focused(focus, equals: .cropRatio)
+            .onSubmit {
+                // Emptied, the frame is free again. Not a ratio yet, as 16:, it's left as it was.
+                let ratio = Self.ratio(from: typedRatio)
+                if ratio != model.typedCropRatio, ratio != nil || typedRatio.isEmpty {
+                    model.typeCropRatio(ratio)
+                    if let ratio { suggestedRatio = Self.text(of: ratio) }
+                }
+                focus.wrappedValue = .canvas
+            }
+            .onExitCommand { focus.wrappedValue = .canvas }
+            // Tab leaves the field as Esc does. Left to macOS, it went on to the next field typed
+            // in: from the angle beside a tape to this one, which chose Custom.
+            .onKeyPress(keys: [.tab, backTab]) { _ in
+                focus.wrappedValue = .canvas
+                return .handled
+            }
+            .padding(.horizontal, 4)
+            .onChange(of: typedRatio) { typed, text in
+                let formatted = Self.formatted(text, typedAfter: typed)
+                // Changed again, it's kept to the ratio as formatted, with the caret at its end:
+                // left before a colon put after 16, the 9 typed next went before it and was dropped.
+                if formatted != text {
+                    typedRatio = formatted
+                    typedRatioSelection = TextSelection(insertionPoint: typedRatio.endIndex)
+                }
+            }
+            // As turned, and as crop mode starts at a ratio typed before.
+            .onChange(of: model.typedCropRatio, initial: true) { _, ratio in
+                if Self.ratio(from: typedRatio) != ratio { typedRatio = Self.text(of: ratio) }
+            }
+            .onChange(of: focus.wrappedValue) { _, focus in
+                if focus == .cropRatio {
+                    if model.cropShape != .custom { model.chooseCropShape(.custom) }
+                    if typedRatio.isEmpty { typedRatio = suggestedRatio }
+                    selectAllOnceClicked()
+                } else {
+                    // Left without Return, it shows the ratio the frame keeps to, not what was typed.
+                    typedRatio = Self.text(of: model.typedCropRatio)
+                }
+            }
+    }
+
+    /// `text` as Custom's field takes it, changed from `typed`: two digits at most each side of one
+    /// colon, and nothing else. The colon follows two digits as they're typed, and a third digit
+    /// goes after it; one digit, as for 4:5, needs the colon typed.
+    ///
+    /// Formatted here as it's typed: a SwiftUI field's format (`TextField(value:format:)`) applies
+    /// once the field is left or Return is pressed.
+    private static func formatted(_ text: String, typedAfter typed: String) -> String {
+        let isDigit = { (character: Character) in character.isASCII && character.isWholeNumber }
+        let sides = text.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        var width = sides[0].filter(isDigit)
+        var height = sides.count > 1 ? sides[1].filter(isDigit) : ""
+        var hasColon = sides.count > 1
+        if !hasColon, width.count > 2 {
+            height = String(width.dropFirst(2))
+            width = String(width.prefix(2))
+            hasColon = true
+        }
+        // Not as the colon after two digits is deleted, which would put it back.
+        if !hasColon, width.count == 2, text.count > typed.count {
+            hasColon = true
+        }
+        return hasColon ? "\(width.prefix(2)):\(height.prefix(2))" : width
+    }
+
+    /// Two whole numbers either side of a colon, greater than 0: as width and height.
+    private static func ratio(from text: String) -> CGSize? {
+        let sides = text.split(separator: ":", omittingEmptySubsequences: false).map { Int($0) }
+        guard sides.count == 2, let width = sides[0], let height = sides[1], width > 0, height > 0 else { return nil }
+        return CGSize(width: width, height: height)
+    }
+
+    /// `ratio` as Custom's field shows it, as 16:9: empty for none.
+    private static func text(of ratio: CGSize?) -> String {
+        guard let ratio else { return "" }
+        return "\(Int(ratio.width)):\(Int(ratio.height))"
     }
 
     private var canvas: some View {
@@ -452,18 +681,24 @@ private struct ImageCanvas: View {
                 // photo would make that the window's minimum.
                 GeometryReader { _ in
                     let shown = photoRect
+                    // In crop mode, all of the original turned and straightened as marked: laid out
+                    // unturned about the middle of where it lies turned.
+                    let framing = model.isCropping ? model.markedFraming : .whole
+                    let unturned = framing.quarterTurns.isMultiple(of: 2) ? shown.size : CGSize(width: shown.height, height: shown.width)
                     Image(image, scale: 1, label: Text(photoDescription))
                         .resizable()
                         .interpolation(.high)
                         .overlay { meteringOverlay }
                         .overlay { burnOverlay }
-                        .frame(width: shown.width, height: shown.height)
+                        .frame(width: unturned.width, height: unturned.height)
+                        .rotationEffect(.degrees(framing.angle - 90 * Double(framing.quarterTurns)))
                         .position(x: shown.midX, y: shown.midY)
                     // On the canvas, not the photo, which moves under it as it's dragged.
-                    if model.isCropping, let photo = model.photo {
+                    if model.isCropping {
                         CropOverlay(selection: Binding { model.cropSelection } set: { model.cropSelection = $0 },
-                                    whole: photo.wholeBounds.size, photoFrame: shown, ratio: cropRatio,
-                                    movesPhoto: cropMovesPhoto, held: $heldCrop)
+                                    whole: model.cropBounds.size, angle: model.markedFraming.angle, photoFrame: shown,
+                                    ratio: model.cropRatio, movesPhoto: cropMovesPhoto,
+                                    showsFineGrid: model.isStraightening, held: $heldCrop)
                             .allowsHitTesting(!model.isLeavingCropMode)
                     }
                 }
@@ -513,6 +748,10 @@ private struct ImageCanvas: View {
                     // photo, scrolling zooms instead of scrolling. A trackpad's momentum after
                     // the fingers lift is left out, so the zoom stops with them.
                     scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+                        if let tapeUnderPointer, model.isCropping {
+                            straighten(byScrolling: event, on: tapeUnderPointer)
+                            return nil
+                        }
                         guard let pointer else { return event }
                         if event.momentumPhase.isEmpty {
                             let step = event.hasPreciseScrollingDeltas ? 0.01 : 0.15  // points, or wheel lines
@@ -540,7 +779,6 @@ private struct ImageCanvas: View {
         .onChange(of: model.isCropping) {
             zoom = 1
             offset = .zero
-            cropRatio = nil
             heldCrop = nil
         }
         .focusedSceneValue(\.canvasZoom, model.photo == nil || model.isCropping ? nil : CanvasZoom(
@@ -568,11 +806,12 @@ private struct ImageCanvas: View {
     /// Where all of the photo is on the canvas: fitted, zoomed and moved, or in crop mode, placed
     /// so the part it's laid out around fills a frame fitted in the middle.
     private var photoRect: CGRect {
-        if let marked = cropLaidOutAround, let photo = model.photo, marked.width > 0 {
+        if let marked = cropLaidOutAround, marked.width > 0 {
             let frame = Self.fitted(marked.size, in: visibleSize)
             let scale = frame.width / marked.width
+            let bounds = model.cropBounds
             return CGRect(x: visibleCentre.x - marked.midX * scale, y: visibleCentre.y - marked.midY * scale,
-                          width: photo.wholeBounds.width * scale, height: photo.wholeBounds.height * scale)
+                          width: bounds.width * scale, height: bounds.height * scale)
         }
         let fitted = fittedSize(in: visibleSize)
         return CGRect(x: visibleCentre.x + offset.width - fitted.width * zoom / 2,
@@ -580,28 +819,94 @@ private struct ImageCanvas: View {
                       width: fitted.width * zoom, height: fitted.height * zoom)
     }
 
-    /// In crop mode, what the canvas is laid out around: all of the photo, or with the photo moving,
-    /// the part marked, held while a corner or edge is dragged.
+    /// How bright the canvas is under the straightening tape on `side`, `height` high, from 0 to 1:
+    /// the photo as crop mode shows it, darker outside the frame where it's dimmed, and the canvas
+    /// beside it. Read at a few points over the tape.
+    private func brightness(underTapeOn side: HorizontalEdge, height: CGFloat) -> Double {
+        // Mid grey until the photo's brightness is there: the tape stays white.
+        guard let originalBrightness else { return 0.5 }
+        let shown = photoRect
+        let framing = model.markedFraming
+        let unturned = framing.quarterTurns.isMultiple(of: 2) ? shown.size : CGSize(width: shown.height, height: shown.width)
+        // Back from where the canvas turns the photo to (`rotationEffect`) to where it lies unturned.
+        let radians = -(framing.angle - 90 * Double(framing.quarterTurns)) * .pi / 180
+        let (cos, sin) = (Foundation.cos(radians), Foundation.sin(radians))
+        let scale = shown.width / model.cropBounds.width
+        let selection = model.cropSelection
+        let frame = CGRect(x: shown.minX + selection.minX * scale, y: shown.minY + selection.minY * scale,
+                           width: selection.width * scale, height: selection.height * scale)
+        // The canvas's grey: the window's background, a little darker.
+        let canvas = colorScheme == .dark ? 0.2 : 0.85
+        let width = StraighteningRuler.width
+        let tape = CGRect(x: side == .leading ? visibleArea.minX + StraighteningRuler.inset
+                                              : visibleArea.maxX - StraighteningRuler.inset - width,
+                          y: visibleArea.midY - height / 2, width: width, height: height)
+        let (columns, rows) = (4, 12)
+        var total = 0.0
+        for column in 0..<columns {
+            for row in 0..<rows {
+                let point = CGPoint(x: tape.minX + tape.width * (Double(column) + 0.5) / Double(columns),
+                                    y: tape.minY + tape.height * (Double(row) + 0.5) / Double(rows))
+                let (x, y) = (point.x - shown.midX, point.y - shown.midY)
+                let onPhoto = CGPoint(x: (x * cos - y * sin) / unturned.width + 0.5, y: (x * sin + y * cos) / unturned.height + 0.5)
+                if let value = originalBrightness.at(onPhoto) {
+                    // The dimming's black at 60 %.
+                    total += frame.contains(point) ? value : value * 0.4
+                } else {
+                    total += canvas
+                }
+            }
+        }
+        return total / Double(columns * rows)
+    }
+
+    /// In crop mode, what the canvas is laid out around: all of the photo turned as marked, or with
+    /// the photo moving, the part marked, held while a corner or edge is dragged.
     private var cropLaidOutAround: CGRect? {
-        guard model.isCropping, let photo = model.photo else { return nil }
-        return cropMovesPhoto ? heldCrop ?? model.cropSelection : photo.wholeBounds
+        guard model.isCropping else { return nil }
+        return cropMovesPhoto ? heldCrop ?? model.cropSelection : model.cropBounds
+    }
+
+    /// Turns the photo by a scroll over the straightening tape on `side`, as dragging the tape does:
+    /// a trackpad's scroll as one drag, from the angle as it began, with the fine grid; a mouse's
+    /// wheel, which has no such start and end, from where the photo is, a tenth of a degree a line. A
+    /// trackpad's momentum after the fingers lift is left out, so the photo stops turning with them.
+    private func straighten(byScrolling event: NSEvent, on side: HorizontalEdge) {
+        guard !model.isLeavingCropMode, event.momentumPhase.isEmpty else { return }
+        // Degrees down the tape.
+        let down = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY / StraighteningRuler.scrollSpacing
+                                                   : event.scrollingDeltaY / 10
+        let degrees = down * StraighteningRuler.turn(on: side)
+        guard !event.phase.isEmpty else {
+            model.straighten(to: model.markedFraming.angle + degrees)
+            return
+        }
+        if event.phase.contains(.began) || scrollStraightening == nil {
+            scrollStraightening = (model.markedFraming.angle, 0)
+            model.beginStraightening()
+        }
+        if var scroll = scrollStraightening {
+            scroll.degrees += degrees
+            scrollStraightening = scroll
+            model.straighten(to: scroll.start + scroll.degrees)
+        }
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+            scrollStraightening = nil
+            model.endStraightening()
+        }
     }
 
     /// Zooms the photo under the crop's frame by `factor`, about the frame's middle: the part marked
     /// shrinks as the photo grows, staying in the photo, down to 4 points a pixel.
     private func zoomUnderFrame(by factor: CGFloat) {
-        guard heldCrop == nil, let photo = model.photo else { return }
+        guard heldCrop == nil else { return }
         let marked = model.cropSelection
-        let whole = photo.wholeBounds.size
         let frame = Self.fitted(marked.size, in: visibleSize)
         guard marked.width > 0, frame.width > 0 else { return }
-        let least = min(1, frame.width / 4 / marked.width)
-        let most = min(whole.width / marked.width, whole.height / marked.height)
-        let scale = min(max(1 / factor, least), most)
+        let scale = max(1 / factor, min(1, frame.width / 4 / marked.width))
         let size = CGSize(width: marked.width * scale, height: marked.height * scale)
-        model.cropSelection = CGRect(x: min(max(0, marked.midX - size.width / 2), whole.width - size.width),
-                                     y: min(max(0, marked.midY - size.height / 2), whole.height - size.height),
-                                     width: size.width, height: size.height)
+        model.cropSelection = model.straightenedPhoto.fitted(CGRect(x: marked.midX - size.width / 2, y: marked.midY - size.height / 2,
+                                                                    width: size.width, height: size.height))
     }
 
     /// The canvas below the toolbar and beside the panel.
@@ -702,6 +1007,397 @@ private struct ImageCanvas: View {
                            height: max(0, (fitted.height * zoom - visibleSize.height) / 2))
         return CGSize(width: min(max(offset.width, -slack.width), slack.width),
                       height: min(max(offset.height, -slack.height), slack.height))
+    }
+}
+
+/// Shift-Tab, which reaches a field's `onKeyPress` as this character, not as Tab with Shift held:
+/// with Tab alone handled, Shift-Tab still went from the angle beside a tape to Custom's ratio.
+private let backTab = KeyEquivalent("\u{19}")
+
+/// Selects all of the field the keyboard has just come to, the ratio's or the angle's, for typing
+/// to replace: once the click that brought it is over, when the main run loop is back in its
+/// default mode. Selected through a field's `selection`, at once or a turn later, the caret was
+/// still where the click fell.
+private func selectAllOnceClicked() {
+    RunLoop.main.perform(inModes: [.default]) {
+        MainActor.assumeIsolated {
+            _ = NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+        }
+    }
+}
+
+/// Straightening in crop mode, as a fighter's head-up display shows its speed and height: an
+/// upright tape of degrees in fine lines on the photo, one at each side of the canvas, its ticks
+/// reaching out from a spine, which isn't drawn, toward the photo's middle. It turns, as the edge
+/// of a wheel, past a needle with the angle beside it as it's dragged or scrolled over: down the
+/// right tape, the degrees above come to the needle, turning the photo to the right, and down the
+/// left one, to the left. A double-click straightens it to 0°. The angle beside the needle is a
+/// field, to type an angle into (``reading(_:)``). Beside the spine, as the
+/// exposure's strip has the metering marks' dots, is a
+/// dot at the angle that levels the horizon Vision finds: a click on it straightens the photo
+/// there, and with the pointer on it, the same bubble as theirs says what it is, opening towards
+/// the photo. With Full Keyboard Access the arrow keys step the primary tape a tenth of a degree,
+/// and accessibility finds an upright slider in its place (``SliderElement``), stepping it a degree,
+/// with an action for the horizon; the other is the same again, so they leave it out.
+///
+/// Drawn here: SwiftUI and AppKit have no ruler, tape or dial, and AppKit's slider stood upright has
+/// a knob that moves along a track, with no numbers on its scale.
+private struct StraighteningRuler: View {
+    @Environment(PhotoModel.self) private var model
+    /// The side of the canvas it's on.
+    let side: HorizontalEdge
+    /// How tall the tape is.
+    let height: CGFloat
+    /// The one the keyboard and assistive apps reach.
+    let isPrimary: Bool
+    /// How bright the canvas is under it, from 0 to 1.
+    let brightness: Double
+    /// The tape the pointer is over, this one or the other: the canvas turns scrolling there into
+    /// turns of the photo.
+    @Binding var tapeUnderPointer: HorizontalEdge?
+    /// The window's keyboard focus: this tape's angle, while it's typed.
+    var focus: FocusState<ContentView.Focus?>.Binding
+    /// Drawn in black with a white shadow, over a bright photo, rather than white with a black one.
+    @State private var isOnBright = false
+    /// The angle as the drag began.
+    @State private var dragStart: Double?
+    /// The pointer is on the horizon's dot.
+    @State private var isOnDot = false
+    /// What's in the angle's field while it's typed in.
+    @State private var typedAngle = ""
+
+    /// Points to a degree at the tape's middle, and of a drag, which the tape follows there.
+    static let spacing: CGFloat = 8
+    /// Points of a trackpad's scroll to a degree: five times a drag's, so a short scroll reaches
+    /// tenths of a degree, the tape sliding slower than the fingers.
+    static let scrollSpacing: CGFloat = 40
+    static let width: CGFloat = 96
+    /// How wide the angle's field beside the needle is: room for −45.0°.
+    private static let readingWidth: CGFloat = 56
+    /// How far in from the canvas's sides the tapes are.
+    static let inset: CGFloat = 32
+    /// How far in from the tape's inner edge its spine is: room for the ticks centred on it, and
+    /// the dot.
+    private static let spineInset: CGFloat = 8
+    /// How far from the dot's middle, in points, the pointer is on it: the dot is 6 across.
+    private static let dotReach: CGFloat = 8
+    /// How far up or down from the needle, in points, the horizon's dot is hidden: 1°, where it
+    /// clears the needle with a gap. It fades in over the next 4, to 1.5°. Beside the needle, it's
+    /// clear of the angle's text.
+    private static let needleClearance: CGFloat = 8
+
+    /// Which way a degree down the tape on `side` turns the photo: 1 to the right, −1 to the left.
+    /// The tapes move as the photo's edges beside them do, as if they were the two sides of one
+    /// wheel: turned to the right, its right edge goes down and its left edge up.
+    static func turn(on side: HorizontalEdge) -> Double {
+        side == .leading ? -1 : 1
+    }
+
+    /// Which way a degree down this tape turns the photo (``turn(on:)``).
+    private var turn: Double { Self.turn(on: side) }
+
+    var body: some View {
+        let angle = model.markedFraming.angle
+        let degrees = "\(angle.formatted(.number.precision(.fractionLength(1))))°"
+        // The reading starts 20 points out from the spine, past the needle.
+        let readingStart = Self.spineInset + 20 + Self.readingWidth / 2
+        ZStack(alignment: .topLeading) {
+            // Both, one faded in over the other as the photo under it turns bright or dark.
+            tape(at: angle, ink: .white, shadow: .black.opacity(0.6))
+                .opacity(isOnBright ? 0 : 1)
+            tape(at: angle, ink: .black, shadow: .white.opacity(0.7))
+                .opacity(isOnBright ? 1 : 0)
+            needle
+                .shadow(color: isOnBright ? .white.opacity(0.7) : .black.opacity(0.6), radius: 1)
+            reading(degrees)
+                .shadow(color: isOnBright ? .white.opacity(0.7) : .black.opacity(0.6), radius: 1)
+                .position(x: side == .leading ? Self.width - readingStart : readingStart, y: height / 2)
+            if let dot = dotCentre(at: angle) {
+                // Fading in as it leaves the needle.
+                horizonDot
+                    .opacity(min(1, (abs(dot.y - height / 2) - Self.needleClearance) / 4))
+                    .position(dot)
+            }
+        }
+            // Gone at the horizon's angle, the pointer is no longer on it.
+            .onChange(of: dotCentre(at: angle) == nil) { _, isGone in
+                if isGone {
+                    isOnDot = false
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: isOnBright)
+            // A little either side of the middle, so it doesn't flicker as the photo turns under
+            // it with its brightness there.
+            .onChange(of: brightness, initial: true) { _, brightness in
+                if brightness > 0.65 {
+                    isOnBright = true
+                } else if brightness < 0.55 {
+                    isOnBright = false
+                }
+            }
+            .frame(width: Self.width, height: height)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 1)
+                .onChanged { drag in
+                    let start = dragStart ?? angle
+                    if dragStart == nil {
+                        dragStart = start
+                        model.beginStraightening()
+                    }
+                    model.straighten(to: start + turn * drag.translation.height / Self.spacing)
+                }
+                .onEnded { _ in
+                    dragStart = nil
+                    model.endStraightening()
+                })
+            // Each click of a double-click is a click too: the first may be on the dot. Where the
+            // click is, rather than the hover: a scroll can slide the dot under a still pointer.
+            .onTapGesture { location in
+                if NSApp.currentEvent?.clickCount == 2 {
+                    model.straighten(to: 0)
+                } else if isOnDot(location, at: angle) {
+                    model.straightenByHorizon()
+                }
+            }
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    if tapeUnderPointer != side {
+                        tapeUnderPointer = side
+                    }
+                    let isOn = isOnDot(location, at: angle)
+                    if isOn != isOnDot {
+                        isOnDot = isOn
+                    }
+                case .ended:
+                    if tapeUnderPointer == side {
+                        tapeUnderPointer = nil
+                    }
+                    isOnDot = false
+                }
+            }
+            .pointerStyle(isOnDot ? .link : dragStart == nil ? .grabIdle : .grabActive)
+            .focusable(isPrimary, interactions: .activate)
+            // As a drag up or down the tape would.
+            .onMoveCommand { direction in
+                switch direction {
+                case .up: model.straighten(to: angle - turn * 0.1)
+                case .down: model.straighten(to: angle + turn * 0.1)
+                default: break
+                }
+            }
+            .accessibilityHidden(true)
+            .background {
+                if isPrimary {
+                    SliderElement(title: "Straighten", value: angle, range: -45...45, valueText: "\(degrees) to the right",
+                                  set: { model.straighten(to: $0) }, move: { model.straighten(to: angle + ($0 ? 1 : -1)) },
+                                  orientation: .vertical)
+                        .accessibilityActions {
+                            if model.horizonAngle != nil {
+                                Button(Self.horizon.name) { model.straightenByHorizon() }
+                            }
+                        }
+                }
+            }
+            .help("Drag or scroll to straighten the photo; double-click for 0°")
+    }
+
+    /// What the horizon's dot stands for, in its bubble.
+    private static let horizon = (systemImage: "level", name: "Horizon",
+                                  about: "levels the horizon Vision finds in the photo")
+
+    /// Where the horizon's dot is beside the spine, with the tape at `angle`: none until Vision has
+    /// found it, near the needle and the angle beside it (``needleClearance``), or where it's faded
+    /// out at the tape's ends.
+    private func dotCentre(at angle: Double) -> CGPoint? {
+        guard let horizon = model.horizonAngle, let y = place(of: horizon, at: angle)?.y else { return nil }
+        guard abs(y - height / 2) > Self.needleClearance, y > height * 0.15, y < height * 0.85 else { return nil }
+        // Beside the spine, on the numbers' side, clear of the ticks.
+        let beside = Self.spineInset + 14
+        return CGPoint(x: side == .leading ? Self.width - beside : beside, y: y)
+    }
+
+    /// `location`, in the tape, is on the horizon's dot, with the tape at `angle`.
+    private func isOnDot(_ location: CGPoint, at angle: Double) -> Bool {
+        dotCentre(at: angle).map { hypot($0.x - location.x, $0.y - location.y) <= Self.dotReach } ?? false
+    }
+
+    /// The horizon's dot, and its bubble with the pointer on it, opening towards the photo.
+    private var horizonDot: some View {
+        let size: CGFloat = isOnDot ? 8 : 6
+        let towardsPhoto: Edge = side == .leading ? .trailing : .leading
+        return Circle()
+            .fill(isOnBright ? .black : .white)
+            .shadow(color: isOnBright ? .white.opacity(0.7) : .black.opacity(0.6), radius: 1)
+            .frame(width: size, height: size)
+            .popover(isPresented: Binding { isOnDot && dragStart == nil } set: { isPresented in
+                if !isPresented {
+                    isOnDot = false
+                }
+            }, attachmentAnchor: .point(towardsPhoto == .trailing ? .trailing : .leading), arrowEdge: towardsPhoto) {
+                DotBubble(items: [Self.horizon])
+                    // It follows the pointer: a click outside it is for the tape.
+                    .interactiveDismissDisabled()
+            }
+    }
+
+    /// A tick every degree, centred on the spine, longer every 5 and numbered every 10, on the edge
+    /// of a wheel (``place(of:at:)``): they close up and fade toward the tape's ends, the numbers
+    /// squashed. Fine lines in `ink`, with a `shadow` to show where the photo is as light or dark as
+    /// they are. The degrees to the right run up the right tape and down the left one.
+    private func tape(at angle: Double, ink: Color, shadow: Color) -> some View {
+        Canvas { context, size in
+            // Outwards from the spine, which faces the photo's middle.
+            let outwards: CGFloat = side == .leading ? -1 : 1
+            let spine = side == .leading ? size.width - Self.spineInset : Self.spineInset
+            let x = { (offset: CGFloat) in spine + outwards * offset }
+            let anchor: UnitPoint = side == .leading ? .trailing : .leading
+            let middle = size.height / 2
+            context.addFilter(.shadow(color: shadow, radius: 1))
+            for degree in -45...45 {
+                guard let spot = place(of: Double(degree), at: angle) else { continue }
+                let length: CGFloat = degree.isMultiple(of: 10) ? 12 : degree.isMultiple(of: 5) ? 8 : 4
+                var tick = Path()
+                tick.move(to: CGPoint(x: x(-length / 2), y: spot.y))
+                tick.addLine(to: CGPoint(x: x(length / 2), y: spot.y))
+                context.stroke(tick, with: .color(ink.opacity(spot.facing)), lineWidth: 0.75)
+                // Not beside the needle's reading, nor turned almost out of sight.
+                if degree.isMultiple(of: 10), abs(spot.y - middle) > 20, spot.facing > 0.1 {
+                    var label = context
+                    label.opacity = spot.facing
+                    label.translateBy(x: x(12), y: spot.y)
+                    label.scaleBy(x: 1, y: spot.facing)
+                    label.draw(Text(degree.formatted()).font(.system(size: 11, design: .monospaced)).foregroundStyle(ink),
+                               at: .zero, anchor: anchor)
+                }
+            }
+        }
+    }
+
+    /// A needle across the tape's middle in yellow, as the Camera app on iPhone marks its setting.
+    /// Drawn once over both of the tape's inks, with the shadow of the one showing (``body``).
+    private var needle: some View {
+        Canvas { context, size in
+            // Outwards from the spine.
+            let outwards: CGFloat = side == .leading ? -1 : 1
+            let spine = side == .leading ? size.width - Self.spineInset : Self.spineInset
+            let x = { (offset: CGFloat) in spine + outwards * offset }
+            let middle = size.height / 2
+            var needle = Path()
+            needle.move(to: CGPoint(x: x(-8), y: middle))
+            needle.addLine(to: CGPoint(x: x(14), y: middle))
+            context.stroke(needle, with: .color(.yellow), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// The angle beside the needle, in the needle's yellow: a field, so an angle can be typed in
+    /// place of `degrees`, the one it shows. Clicked into, it holds that selected, for typing to
+    /// replace. Return turns the photo to the angle typed. Esc, or leaving the field any other way,
+    /// leaves the photo as it was.
+    ///
+    /// A field of text read here (``angle(from:)``), not a field of a number with a format
+    /// (`TextField(value:formatter:)` and a `NumberFormatter` whose suffix is the degree sign).
+    /// That was tried: a click put the caret in the angle rather than selecting it, the photo
+    /// turned at each digit so Esc kept what was typed, and a point was refused where the region
+    /// writes a comma. Foundation's angle format (`Measurement<UnitAngle>.FormatStyle`) writes the
+    /// degree sign but reads nothing back.
+    private func reading(_ degrees: String) -> some View {
+        let isTyped = focus.wrappedValue == .cropAngle(side)
+        // No prompt: macOS shows the field's title for none.
+        return TextField("Angle", text: Binding { isTyped ? typedAngle : degrees } set: { typedAngle = $0 },
+                         prompt: Text(verbatim: ""))
+            .textFieldStyle(.plain)
+            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            // Its own colour: left, a field draws its text greyed out.
+            .foregroundStyle(.yellow)
+            .multilineTextAlignment(side == .leading ? .trailing : .leading)
+            .focused(focus, equals: .cropAngle(side))
+            .onSubmit {
+                if let angle = Self.angle(from: typedAngle), angle != model.markedFraming.angle {
+                    model.straighten(to: angle)
+                }
+                focus.wrappedValue = .canvas
+            }
+            .onExitCommand { focus.wrappedValue = .canvas }
+            // Tab leaves the field too, rather than go on to Custom's ratio, which chose Custom.
+            .onKeyPress(keys: [.tab, backTab]) { _ in
+                focus.wrappedValue = .canvas
+                return .handled
+            }
+            // Turned another way while it's typed in, as by a scroll over the tape, the field is
+            // left: it would show what was typed, not the photo's angle, and Return would turn the
+            // photo back to that.
+            .onChange(of: model.markedFraming.angle) {
+                if isTyped {
+                    focus.wrappedValue = .canvas
+                }
+            }
+            .onChange(of: isTyped) { _, isTyped in
+                typedAngle = isTyped ? degrees : ""
+                if isTyped {
+                    selectAllOnceClicked()
+                }
+            }
+            .frame(width: Self.readingWidth)
+            .pointerStyle(.horizontalText)
+    }
+
+    /// The angle typed as `text`, if it's a number: with a point or a comma for its decimals,
+    /// whichever the region writes, and with the degree sign or without. Foundation's number format
+    /// reads 2.4 as 2 where the region writes a comma.
+    private static func angle(from text: String) -> Double? {
+        let number = text.replacingOccurrences(of: ",", with: ".").replacingOccurrences(of: "−", with: "-")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "° "))
+        return Double(number).flatMap { $0.isFinite ? $0 : nil }
+    }
+
+    /// Where `degree` is down the tape, with the tape at `angle`, and how far it faces out of the
+    /// screen, from 1 at the middle toward 0. The tape is the edge of a wheel as tall as it is: the
+    /// degrees close up and turn away toward its ends, and past them are out of sight (nil). A drag
+    /// or scroll keeps up with them only at the middle.
+    private func place(of degree: Double, at angle: Double) -> (y: CGFloat, facing: CGFloat)? {
+        let radius = height / 2
+        let turned = turn * (degree - angle) * Self.spacing / radius
+        guard abs(turned) < .pi / 2 else { return nil }
+        return (radius - radius * sin(turned), cos(turned))
+    }
+}
+
+/// How bright a photo is, where: drawn into a grey image at most 128 pixels on its long side, read
+/// at a point for the straightening tapes, many times a second while the photo turns under them.
+/// Core Image's area average (`CIAreaAverage`) reads a part of the photo itself, a render each
+/// time; and SwiftUI can't say how bright what's behind a view is. Read away from the main actor.
+nonisolated private struct Brightness {
+    private let width: Int
+    private let height: Int
+    /// Rows from the top, as a bitmap context keeps them.
+    private let values: [UInt8]
+
+    init?(of image: CGImage) {
+        let scale = min(1, 128 / Double(max(image.width, image.height)))
+        let width = max(1, Int((Double(image.width) * scale).rounded()))
+        let height = max(1, Int((Double(image.height) * scale).rounded()))
+        var values = [UInt8](repeating: 0, count: width * height)
+        let drawn = values.withUnsafeMutableBytes { pixels in
+            guard let space = CGColorSpace(name: CGColorSpace.genericGrayGamma2_2),
+                  let context = CGContext(data: pixels.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width, space: space, bitmapInfo: CGImageAlphaInfo.none.rawValue) else {
+                return false
+            }
+            context.interpolationQuality = .medium
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return nil }
+        (self.width, self.height, self.values) = (width, height, values)
+    }
+
+    /// At `point`, measured from the top left as a fraction of the photo across and down: from 0
+    /// to 1, or nil off the photo.
+    func at(_ point: CGPoint) -> Double? {
+        guard (0..<1).contains(point.x), (0..<1).contains(point.y) else { return nil }
+        return Double(values[Int(point.y * Double(height)) * width + Int(point.x * Double(width))]) / 255
     }
 }
 
