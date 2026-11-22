@@ -216,20 +216,26 @@ struct CropOverlay: View, Animatable {
                     Color.clear
                         .contentShape(Rectangle())
                         .frame(width: area.width, height: area.height)
+                        // An edge is a slider to assistive apps, in the app's own element for one
+                        // (``SliderElement``): its value is how far it is from its own side of the
+                        // photo, and it steps a hundredth of the photo's side, inwards to increment.
+                        // An element with SwiftUI's adjustable action had no role, which the
+                        // accessibility audit failed.
+                        .background {
+                            if let edge = handle.edge {
+                                // Across the photo for the left and right edges, down it for the others.
+                                let side = Double(handle.unit.y == 0.5 ? whole.width : whole.height)
+                                let distance = Double(distance(of: handle))
+                                SliderElement(title: edge.name, value: distance, range: 0...side,
+                                              valueText: "\(distance.formatted()) pixels from the \(edge.side)",
+                                              set: { move(handle, inwards: $0 - distance, scale: scale) },
+                                              move: { move(handle, inwards: $0 ? side / 100 : -side / 100, scale: scale) },
+                                              orientation: handle.unit.y == 0.5 ? .horizontal : .vertical)
+                            }
+                        }
                         .position(x: area.midX, y: area.midY)
                         .gesture(drag(scale: scale, holdsCanvas: movesPhoto) { resized($0, by: $1, at: handle, scale: scale) })
                         .pointerStyle(.frameResize(position: handle.position))
-                        .accessibilityElement()
-                        .accessibilityHidden(handle.edge == nil)
-                        .accessibilityLabel(handle.edge?.name ?? "")
-                        .accessibilityValue(handle.edge.map { "\(distance(of: handle).formatted()) pixels from the \($0.side)" } ?? "")
-                        .accessibilityAdjustableAction { direction in
-                            // A hundredth of the photo's side at a time, inwards to increment.
-                            let step = (handle.unit.y == 0.5 ? whole.width : whole.height) / 100
-                            let inwards = (handle.unit.x == 0 || handle.unit.y == 0) ? step : -step
-                            let by = direction == .increment ? inwards : -inwards
-                            selection = resized(selection, by: CGSize(width: by, height: by), at: handle, scale: scale)
-                        }
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
@@ -237,6 +243,12 @@ struct CropOverlay: View, Animatable {
             // canvas, which doesn't.
             .coordinateSpace(.named("crop"))
         }
+    }
+
+    /// Moves `handle`'s edge `pixels` further in from its own side of the photo, as far as it goes.
+    private func move(_ handle: Handle, inwards pixels: CGFloat, scale: CGFloat) {
+        let by = (handle.unit.x == 0 || handle.unit.y == 0) ? pixels : -pixels
+        selection = resized(selection, by: CGSize(width: by, height: by), at: handle, scale: scale)
     }
 
     /// How far `handle`'s edge is from its own side of the photo, in pixels.

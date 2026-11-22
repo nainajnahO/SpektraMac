@@ -431,6 +431,62 @@ final class PhotoModelTests {
         model.cancelCropping()
     }
 
+    /// Until the frame is moved or resized, a shape takes the most of the photo it can, whatever
+    /// shape the frame had, and the frame is as it was before the photo was straightened once the
+    /// photo's back at that angle, however it gets there. A frame put somewhere stays as it is
+    /// (#354).
+    @Test func shapeFillsAnUnmovedFrameWhichComesBackUnstraightened() async throws {
+        let model = try await openedModel()
+        func isMarked(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> Bool {
+            let marked = model.cropSelection
+            return abs(marked.minX - x) < 0.001 && abs(marked.minY - y) < 0.001
+                && abs(marked.width - width) < 0.001 && abs(marked.height - height) < 0.001
+        }
+        model.beginCropping()
+        model.chooseCropShape(.square)
+        #expect(isMarked(200, 0, 800, 800))
+        model.chooseCropShape(.threeTwo)
+        #expect(isMarked(0, 0, 1200, 800))
+        // A drag the photo's edge holds isn't a move, though it makes the frame a hair another.
+        model.cropSelection = model.cropSelection.offsetBy(dx: 0, dy: 0.05)
+
+        // Straightened and back in two steps, as a typed angle or a double-click does it.
+        model.chooseCropShape(.square)
+        model.straighten(to: 5)
+        #expect(model.cropSelection.width < 800)
+        model.straighten(to: 0)
+        #expect(isMarked(200, 0, 800, 800))
+
+        // Turned a quarter meanwhile, the frame comes back turned.
+        model.straighten(to: 5)
+        model.turn(left: 1)
+        model.straighten(to: 0)
+        #expect(isMarked(0, 200, 800, 800))
+
+        // A shape chosen with the photo straightened is the most of the photo once it isn't.
+        model.straighten(to: 5)
+        model.chooseCropShape(.threeTwo)
+        #expect(model.cropSelection.width < 800)
+        model.straighten(to: 0)
+        #expect(isMarked(0, 1200 / 2 - 800 / 1.5 / 2, 800, 800 / 1.5))
+
+        // A frame put somewhere is no larger unstraightened, and a shape stays inside it.
+        model.straighten(to: 5)
+        model.cropSelection = CGRect(x: 300, y: 500, width: 200, height: 200)
+        model.straighten(to: 0)
+        #expect(isMarked(300, 500, 200, 200))
+        model.chooseCropShape(.fourFive)
+        #expect(abs(model.cropSelection.width - 200) < 0.001 && abs(model.cropSelection.height - 160) < 0.001)
+
+        // Crop mode again starts afresh.
+        model.cancelCropping()
+        model.beginCropping()
+        #expect(isMarked(0, 0, 1200, 800))
+        model.chooseCropShape(.square)
+        #expect(isMarked(200, 0, 800, 800))
+        model.cancelCropping()
+    }
+
     // MARK: Timing the engine's work
 
     /// Work queued behind other work on the engine is timed from when the engine starts on it, and

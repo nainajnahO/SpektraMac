@@ -165,6 +165,9 @@ struct ContentView: View {
                         .keyboardShortcut(focus?.isField == true ? nil : .cancelAction)
                         .disabled(model.isLeavingCropMode)
                 }
+                // A group to assistive apps, which then find each button by its own title: without
+                // it the toolbar named both after the first, and Cancel was a second Reset.
+                .accessibilityElement(children: .contain)
                 .buttonStyle(ToolbarGroupButtonStyle())
                 .padding(4)
                 .glassEffect(in: .capsule)
@@ -594,6 +597,9 @@ private struct ImageCanvas: View {
                 }
             }
             .focused(focus, equals: .cropRatio)
+            // Named for assistive apps: the field's title didn't reach them, and the accessibility
+            // audit failed a field with no description.
+            .accessibilityLabel("Ratio")
             .onSubmit {
                 // Emptied, the frame is free again. Not a ratio yet, as 16:, it's left as it was.
                 let ratio = Self.ratio(from: typedRatio)
@@ -1038,7 +1044,8 @@ private func selectAllOnceClicked() {
 /// there, and with the pointer on it, the same bubble as theirs says what it is, opening towards
 /// the photo. With Full Keyboard Access the arrow keys step the primary tape a tenth of a degree,
 /// and accessibility finds an upright slider in its place (``SliderElement``), stepping it a degree,
-/// with an action for the horizon; the other is the same again, so they leave it out.
+/// with an action for the horizon, and the angle's field; the other is the same again, so they
+/// leave it out.
 ///
 /// Drawn here: SwiftUI and AppKit have no ruler, tape or dial, and AppKit's slider stood upright has
 /// a knob that moves along a track, with no numbers on its scale.
@@ -1101,15 +1108,22 @@ private struct StraighteningRuler: View {
         let degrees = "\(angle.formatted(.number.precision(.fractionLength(1))))°"
         // The reading starts 20 points out from the spine, past the needle.
         let readingStart = Self.spineInset + 20 + Self.readingWidth / 2
+        // What's drawn is hidden from assistive apps, which find a slider in the tape's place
+        // (``SliderElement``): each part by itself, not the tape as a whole, so they reach the
+        // primary tape's angle, a field.
         ZStack(alignment: .topLeading) {
-            // Both, one faded in over the other as the photo under it turns bright or dark.
-            tape(at: angle, ink: .white, shadow: .black.opacity(0.6))
-                .opacity(isOnBright ? 0 : 1)
-            tape(at: angle, ink: .black, shadow: .white.opacity(0.7))
-                .opacity(isOnBright ? 1 : 0)
-            needle
-                .shadow(color: isOnBright ? .white.opacity(0.7) : .black.opacity(0.6), radius: 1)
+            Group {
+                // Both, one faded in over the other as the photo under it turns bright or dark.
+                tape(at: angle, ink: .white, shadow: .black.opacity(0.6))
+                    .opacity(isOnBright ? 0 : 1)
+                tape(at: angle, ink: .black, shadow: .white.opacity(0.7))
+                    .opacity(isOnBright ? 1 : 0)
+                needle
+                    .shadow(color: isOnBright ? .white.opacity(0.7) : .black.opacity(0.6), radius: 1)
+            }
+            .accessibilityHidden(true)
             reading(degrees)
+                .accessibilityHidden(!isPrimary)
                 .shadow(color: isOnBright ? .white.opacity(0.7) : .black.opacity(0.6), radius: 1)
                 .position(x: side == .leading ? Self.width - readingStart : readingStart, y: height / 2)
             if let dot = dotCentre(at: angle) {
@@ -1117,6 +1131,7 @@ private struct StraighteningRuler: View {
                 horizonDot
                     .opacity(min(1, (abs(dot.y - height / 2) - Self.needleClearance) / 4))
                     .position(dot)
+                    .accessibilityHidden(true)
             }
         }
             // Gone at the horizon's angle, the pointer is no longer on it.
@@ -1186,7 +1201,6 @@ private struct StraighteningRuler: View {
                 default: break
                 }
             }
-            .accessibilityHidden(true)
             .background {
                 if isPrimary {
                     SliderElement(title: "Straighten", value: angle, range: -45...45, valueText: "\(degrees) to the right",
@@ -1341,6 +1355,8 @@ private struct StraighteningRuler: View {
             }
             .frame(width: Self.readingWidth)
             .pointerStyle(.horizontalText)
+            // Named for assistive apps, as Custom's ratio is: there, the field's title didn't reach them.
+            .accessibilityLabel("Angle")
     }
 
     /// The angle typed as `text`, if it's a number: with a point or a comma for its decimals,

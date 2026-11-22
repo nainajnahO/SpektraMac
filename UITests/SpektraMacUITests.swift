@@ -257,18 +257,52 @@ final class SpektraMacUITests: XCTestCase {
         XCTAssert(findings.isEmpty, "\(findings.count) findings:\n" + findings.joined(separator: "\n"))
     }
 
-    /// The audit with the app in `appearance` (`-UITestAppearance`).
-    @MainActor private func auditApp(in appearance: String) throws {
-        try launch(appearance: appearance)
-        defer { quit() }
-        // Once the photo has rendered, as the subtitle says, and its strips have followed: while
-        // its first renders land, SwiftUI replaces views under the audit, which then reports
-        // elements that are gone, such as a parent/child mismatch or a missing action naming no
-        // element (#313, #325).
+    /// The audit of crop mode, in light and in dark mode: the frame's edges, what a drag moves, the
+    /// shapes with Custom's ratio, the tapes' slider and angle, and the toolbar's Rotate Left, Reset
+    /// and Cancel. The tabs' audit never enters it (#354).
+    @MainActor func testAccessibilityAuditInCropMode() throws {
+        var findings: [String] = []
+        for appearance in ["light", "dark"] {
+            try launch(appearance: appearance)
+            defer { quit() }
+            waitForRender()
+            app.typeKey("k", modifierFlags: .command)
+            let cropping = NSPredicate(format: "title CONTAINS 'Cropping'")
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: cropping, evaluatedWith: app.windows["main"])], timeout: 10),
+                           .completed, "crop mode")
+            // The pointer on the photo, off the tapes: a help tag one brings up is an element with
+            // no description to the audit. Then once Vision has looked for the horizon.
+            app.windows["main"].coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).hover()
+            Thread.sleep(forTimeInterval: 2)
+            // What the audit can't tell is missing or misnamed: the angle's field, which the tape
+            // once hid, an edge as a slider, and Cancel, which the toolbar once named Reset.
+            XCTAssert(app.windows["main"].textFields["Angle"].exists, "\(appearance): the angle's field")
+            XCTAssert(app.windows["main"].sliders["Top edge"].exists, "\(appearance): the top edge's slider")
+            XCTAssert(app.windows["main"].buttons["Cancel"].exists, "\(appearance): Cancel")
+            try app.performAccessibilityAudit { issue in
+                findings.append("\(appearance): \(Self.describe(issue))")
+                return true
+            }
+        }
+        XCTAssert(findings.isEmpty, "\(findings.count) findings:\n" + findings.joined(separator: "\n"))
+    }
+
+    /// Waits till the photo has rendered, as the subtitle says, and its strips have followed: while
+    /// its first renders land, SwiftUI replaces views under the audit, which then reports elements
+    /// that are gone, such as a parent/child mismatch or a missing action naming no element (#313,
+    /// #325).
+    @MainActor private func waitForRender() {
         let rendered = NSPredicate(format: "title CONTAINS 'Screen size' OR title CONTAINS 'Full resolution'")
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: rendered, evaluatedWith: app.windows["main"])], timeout: 30),
                        .completed, "the photo's render")
         Thread.sleep(forTimeInterval: 2)
+    }
+
+    /// The audit with the app in `appearance` (`-UITestAppearance`).
+    @MainActor private func auditApp(in appearance: String) throws {
+        try launch(appearance: appearance)
+        defer { quit() }
+        waitForRender()
         var findings: [String] = []
         /// The audit covers the whole app, so with a `window` given, it leaves out what's outside it.
         func audit(_ place: String, within window: XCUIElement? = nil) throws {

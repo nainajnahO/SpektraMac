@@ -8,6 +8,7 @@ glow come from how those materials behave rather than from a filter.
 
 - [Getting started](#getting-started)
 - [The window](#the-window)
+- [Cropping and straightening](#cropping-and-straightening)
 - [Camera](#camera)
 - [Film](#film)
 - [Print](#print)
@@ -97,6 +98,57 @@ as a share of all the cores, and **GPU**, the time its film simulation takes on 
 line leaves out the last step of drawing a render to the screen or a file, and macOS gives no figure for one app's
 whole GPU use.) When something you asked for fails (opening a
 photo, saving, exporting a LUT, a preset), an alert says what and why.
+
+## Cropping and straightening
+
+The toolbar's **Crop** button, or **Image › Crop** (⌘K, or C), starts crop mode. All of the original shows, fitted to
+the window, with a frame around the part to keep and the rest dimmed. The window's subtitle reads "Cropping", and the
+settings are greyed out meanwhile.
+
+![Crop mode: an upright 4:5 frame on the photo, the rest dimmed, with a straightening tape at each side](images/cropping.webp)
+
+**The frame.** Its size in pixels shows at its top left.
+
+- **Resize:** drag a corner or an edge.
+- **Move:** drag inside it.
+- **Move Frame | Move Photo** (under the photo): what a drag inside the frame moves. With **Move Photo** the photo
+  moves under the frame, which stays where it is, and scrolling or pinching zooms the photo under it.
+
+**Shape** (under the photo). The frame keeps the shape you choose as you resize it, upright if it's upright.
+
+- **As Shot** is the photo's own shape, and **3:2**, **4:5** and **1:1** are those.
+- **Custom** is any shape. To give it a ratio, type one over it, such as 16:10 (the colon types itself), and press
+  Return. Empty it and press Return to free the frame again.
+
+Until you move or resize the frame, a shape takes the most of the photo it can. After that, it takes the most of
+your frame, as it does from the start on a photo that's already cropped. Crop mode starts with the shape you last
+kept.
+
+**Turning.** The button beside Crop, or **Image › Rotate Left** (⌘L) and **Rotate Right** (⌘R), turns the photo a
+quarter. The Image menu turns it outside crop mode too.
+
+**Straightening.** The tapes at the photo's sides turn it up to 45° either way, in tenths of a degree. The frame
+keeps its shape, and shrinks where it would reach past the photo's edge. It grows back as the photo turns back,
+until you move or resize it. A fine grid shows while the photo turns.
+
+- **Drag** a tape up or down, or scroll over it.
+- **Double-click** a tape for 0°.
+- **Type** an angle: click the yellow angle, type, and press Return.
+- **The dot** beside a tape marks the angle that levels the horizon Apple's Vision finds in the photo. Click it to
+  straighten the photo there. As a drag passes it, the trackpad clicks. A photo with no horizon has no dot.
+
+**Finishing.**
+
+- **Done** (the Crop button, once something has changed) keeps the crop.
+- **Reset** shows all of the photo again, unturned.
+- **Cancel** (Esc) leaves the photo as it was.
+
+A crop you keep or reset is one step to undo. The photo is saved, shared and copied as cropped. The crop is the
+photo's own: the next photo opens whole, and a preset or a film's defaults holds none.
+
+**VoiceOver.** In crop mode VoiceOver finds each edge of the frame as a slider, in pixels from its side of the photo;
+the left tape as a **Straighten** slider, a degree a step, with an action for the horizon; and the angle and Custom's
+ratio as fields.
 
 ## Camera
 
@@ -368,6 +420,9 @@ The exposure is the Exposure slider's offset.
 | Show or hide the settings | ⌃⌘I |
 | Zoom in, out, to fit | ⌘+, ⌘−, ⌘0 |
 | Show the original | M |
+| Crop, and keep the crop | ⌘K, or C |
+| Leave crop mode with the photo as it was | Esc |
+| Rotate left, right | ⌘L, ⌘R |
 | Log | ⌥⌘L |
 | Open Preset | ⇧⌘O |
 | Save Preset | ⇧⌘S |

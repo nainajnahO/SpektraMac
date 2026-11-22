@@ -450,14 +450,27 @@ final class PhotoModel {
     private(set) var horizons: [Int: Double] = [:]
     /// The quarter turns of the open photo Vision has looked, or is looking, for the horizon in.
     @ObservationIgnored private var horizonsLookedFor: Set<Int> = []
-    /// What was marked as the slider's drag began: each angle is set from it, so the frame grows
-    /// back as the photo turns back.
+    /// What was marked before the photo was straightened: each angle is set from it, so the frame
+    /// grows back as the photo turns back, however it's turned there. None once the frame is moved
+    /// or resized, till the photo's straightened again.
     @ObservationIgnored private var markedBeforeStraightening: Framing?
+    /// The frame is where the user put it: moved or resized on the canvas, or the photo's crop as
+    /// crop mode began. Until then a shape takes the most of the photo it can.
+    @ObservationIgnored private var frameIsSet = false
     /// The part marked to keep while cropping, in the pixels of the photo turned as marked, from the
     /// top left of all of it turned (``cropBounds``): what the canvas's handles move.
     var cropSelection: CGRect {
         get { markedFraming.crop ?? .zero }
-        set { markedFraming.crop = newValue }
+        // By the canvas, as the frame is moved or resized: not one held where it is, as at the
+        // photo's edge, where a drag still makes it a fraction of a pixel another.
+        set {
+            let marked = cropSelection
+            guard [newValue.minX - marked.minX, newValue.minY - marked.minY, newValue.width - marked.width,
+                   newValue.height - marked.height].contains(where: { abs($0) >= 0.1 }) else { return }
+            markedFraming.crop = newValue
+            frameIsSet = true
+            markedBeforeStraightening = nil
+        }
     }
     /// All of the photo turned as marked: what the part marked is measured in.
     var cropBounds: CGRect {
@@ -504,9 +517,11 @@ final class PhotoModel {
         isCropping = true
         showsOriginal = false
         endStraightening()
+        markedBeforeStraightening = nil
         framingBeforeCropping = photo.framing
         markedFraming = photo.framing
-        cropSelection = photo.framing.crop ?? cropBounds
+        markedFraming.crop = photo.framing.crop ?? cropBounds
+        frameIsSet = photo.framing.crop != nil
         let kept = keptCropShape
         let keptRatio = kept.shape.ratio(upright: kept.isUpright, typed: kept.typed, in: cropBounds.size)
         let isKeptShape = keptRatio.map { abs(cropSelection.width - cropSelection.height * $0) <= 1 } ?? true
@@ -531,16 +546,26 @@ final class PhotoModel {
     }
 
     /// Keeps the part marked to `shape`: the largest part of that shape in what's marked, about the
-    /// same middle.
+    /// same middle. Until the frame is where the user put it (``frameIsSet``), the largest in all
+    /// of the photo instead, as far as it goes in with the photo straightened as it is.
     private func setCropShape(_ shape: CropShape, upright: Bool, typed: CGSize?) {
         cropShape = shape
         cropShapeIsUpright = upright
         typedCropRatio = typed
         guard let ratio = cropRatio else { return }
-        let marked = cropSelection
+        let marked = frameIsSet ? cropSelection : cropBounds
         let width = min(marked.width, marked.height * ratio)
-        cropSelection = CGRect(x: marked.midX - width / 2, y: marked.midY - width / ratio / 2,
-                               width: width, height: width / ratio)
+        let shaped = CGRect(x: marked.midX - width / 2, y: marked.midY - width / ratio / 2,
+                            width: width, height: width / ratio)
+        guard !frameIsSet else {
+            markedFraming.crop = shaped
+            markedBeforeStraightening = nil
+            return
+        }
+        // Angles are set from this frame now, on the photo unstraightened.
+        let unstraightened = Framing(quarterTurns: markedFraming.quarterTurns, crop: shaped)
+        markedBeforeStraightening = unstraightened
+        straighten(unstraightened, to: markedFraming.angle)
     }
 
     /// Turns the photo a quarter to the left, or for −1 to the right. In crop mode the part marked
@@ -549,6 +574,7 @@ final class PhotoModel {
         guard canTurn, let photo else { return }
         if isCropping {
             markedFraming = markedFraming.turned(left: quarters, in: photo.wholeBounds.size)
+            markedBeforeStraightening = markedBeforeStraightening?.turned(left: quarters, in: photo.wholeBounds.size)
             if !quarters.isMultiple(of: 2) {
                 cropShapeIsUpright.toggle()
                 // 16:9 typed is 9:16 turned.
@@ -562,35 +588,40 @@ final class PhotoModel {
         }
     }
 
-    /// A drag or scroll of a tape begins: angles are set from what's marked now. It takes over from
-    /// a turn to the horizon under way.
+    /// A drag or scroll of a tape begins: the frame shows a fine grid. It takes over from a turn to
+    /// the horizon under way.
     func beginStraightening() {
         guard isCropping else { return }
         horizonTurn?.cancel()
         horizonTurn = nil
-        markedBeforeStraightening = markedFraming
         isStraightening = true
     }
 
     func endStraightening() {
-        markedBeforeStraightening = nil
         isStraightening = false
     }
 
-    /// Straightens the photo `angle` degrees to the right, to a tenth, from what was marked as the
-    /// slider's drag began, or else from what's marked. The frame keeps the same part of the photo
-    /// in its middle and its shape, made smaller where it would reach past the photo's edge.
+    /// Straightens the photo `angle` degrees to the right, to a tenth, from what was marked before
+    /// it was straightened (``markedBeforeStraightening``), or else from what's marked: back at an
+    /// angle, the frame is as it was there.
     func straighten(to angle: Double) {
         guard isCropping, !isLeavingCropMode else { return }
         let start = markedBeforeStraightening ?? markedFraming
+        markedBeforeStraightening = start
+        straighten(start, to: min(max((angle * 10).rounded() / 10, -45), 45))
+    }
+
+    /// Marks `start`'s frame with the photo straightened to `angle`: the frame keeps the same part
+    /// of the photo in its middle and its shape, made smaller where it would reach past the photo's
+    /// edge.
+    private func straighten(_ start: Framing, to angle: Double) {
         guard let crop = start.crop else { return }
-        let angle = min(max((angle * 10).rounded() / 10, -45), 45)
         let size = cropBounds.size
         let middle = StraightenedPhoto(size: size, angle: angle)
             .straightened(StraightenedPhoto(size: size, angle: start.angle).unstraightened(CGPoint(x: crop.midX, y: crop.midY)))
         markedFraming.angle = angle
-        cropSelection = straightenedPhoto.fitted(CGRect(x: middle.x - crop.width / 2, y: middle.y - crop.height / 2,
-                                                        width: crop.width, height: crop.height))
+        markedFraming.crop = straightenedPhoto.fitted(CGRect(x: middle.x - crop.width / 2, y: middle.y - crop.height / 2,
+                                                             width: crop.width, height: crop.height))
     }
 
     /// The angle, to a tenth, that levels the horizon Vision found in the photo turned as marked: nil
