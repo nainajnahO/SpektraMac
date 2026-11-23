@@ -148,15 +148,12 @@ final class PhotoModel {
                 beginChange()
             } else {
                 endChange()
-                if let start = awaitsRelease {
+                if case .awaitingRelease(let start) = renderState {
                     render(from: start)
                 }
             }
         }
     }
-    /// The preview or a kept render is on screen, and the blurs and grain wait for the slider to be
-    /// let go: where the render carries on from then.
-    private var awaitsRelease: RenderStart?
     /// Display-sized rendering of the last simulation.
     private(set) var displayImage: CGImage?
     /// The Print tab's tone graph and the controls it was made for, with each preview.
@@ -168,9 +165,14 @@ final class PhotoModel {
     /// still rendering at the old size.
     var canvasLongSide = 0 {
         didSet {
-            let rendersReduced = isRendering && !isRenderingFullResolution
-            if canvasLongSide != oldValue && (awaitsFullResolution || rendersReduced) {
+            guard canvasLongSide != oldValue else { return }
+            switch renderState {
+            case .awaitingZoom, .rendering(wholePhoto: false):
                 render(from: .resized)
+            // Not during the wait after a resize either: it isn't started again, and the render
+            // takes the size the canvas has when it ends.
+            case .idle, .previewing, .awaitingRelease, .awaitingStillCanvas, .rendering(wholePhoto: true):
+                break
             }
         }
     }
@@ -180,18 +182,15 @@ final class PhotoModel {
     /// on an M1 Pro.
     var wantsFullResolution = false {
         didSet {
-            if wantsFullResolution && awaitsFullResolution {
+            if wantsFullResolution && renderState == .awaitingZoom {
                 render(from: .full)
             }
         }
     }
-    /// The reduced render is on screen and the controls haven't changed since.
-    private var awaitsFullResolution = false
-    /// A preview is rendering: a change meanwhile waits for it to show, then renders.
-    private var isPreviewing = false
     private(set) var isLoading = false
     /// A render with the blurs and grain is running. Not a preview: at each step of a slider,
-    /// "Rendering…" would flicker under the window's title, laying out the toolbar each time.
+    /// "Rendering…" would flicker under the window's title, laying out the toolbar each time. Both
+    /// are set from ``renderState``, and only when their own value changes.
     private(set) var isRendering = false
     private(set) var isRenderingFullResolution = false
     /// What saving is doing, while it runs.
@@ -874,6 +873,42 @@ final class PhotoModel {
     /// whole photo.
     private enum RenderStart { case preview, reduced, kept, resized, full }
 
+    /// What the render is doing: one situation at a time.
+    private enum RenderState: Equatable {
+        /// Nothing renders, and nothing waits to.
+        case idle
+        /// A preview is rendering: a change meanwhile waits for it to show, then renders.
+        case previewing
+        /// The preview or a kept render is on screen, and the blurs and grain wait for the slider to
+        /// be let go: where the render carries on from then.
+        case awaitingRelease(RenderStart)
+        /// A new canvas size renders once ``resizeDelay`` has passed.
+        case awaitingStillCanvas
+        /// A render with the blurs and grain is running: at screen size, or of the whole photo.
+        case rendering(wholePhoto: Bool)
+        /// The screen-size render is on screen and the controls haven't changed since: the whole
+        /// photo waits for a zoom.
+        case awaitingZoom
+    }
+
+    /// What the render is doing. Not observed, as a preview changes it at each step of a slider: the
+    /// views read ``isRendering`` and ``isRenderingFullResolution``, set here only when their own
+    /// value changes.
+    @ObservationIgnored private var renderState = RenderState.idle {
+        didSet {
+            var (rendering, wholePhoto) = (false, false)
+            if case .rendering(let whole) = renderState {
+                (rendering, wholePhoto) = (true, whole)
+            }
+            if isRendering != rendering {
+                isRendering = rendering
+            }
+            if isRenderingFullResolution != wholePhoto {
+                isRenderingFullResolution = wholePhoto
+            }
+        }
+    }
+
     /// Renders the preview, then with the blurs and grain the preview leaves out, once the slider
     /// is let go if one is held (``isAdjusting``): at the size the canvas shows the photo, and the
     /// whole photo once ``wantsFullResolution``, or at once where the canvas shows it no smaller.
@@ -882,7 +917,7 @@ final class PhotoModel {
     private func render(from start: RenderStart = .preview) {
         // A preview in flight shows, then renders the newest controls: cancelling it at each step
         // of a slider would leave none on screen until the slider pauses.
-        guard start != .preview || !isPreviewing else { return }
+        guard start != .preview || renderState != .previewing else { return }
         stopRendering()
         if start == .preview {
             stripTask?.cancel()
@@ -892,8 +927,14 @@ final class PhotoModel {
             displayImage = nil
             return
         }
-        isRendering = start == .reduced || start == .full
-        isPreviewing = start == .preview
+        renderState = switch start {
+        case .preview: .previewing
+        // "Rendering…" from here on; the whole photo's says so once it starts.
+        case .reduced, .full: .rendering(wholePhoto: false)
+        case .resized: .awaitingStillCanvas
+        // The kept render is on screen: what follows it is known once the render starts.
+        case .kept: .idle
+        }
         renderTask = Task {
             var controls = self.controls
             do {
@@ -910,11 +951,10 @@ final class PhotoModel {
                         // they move.
                         toneGraph = (try await engine.toneGraph(controls: controls), controls)
                     } while controls != self.controls
-                    isPreviewing = false
                     // A kept render too: what follows it (the whole photo zoomed in, 0.5–0.9 s at
                     // 24 MP, or the strips) would hold up the slider's next preview.
                     if isAdjusting {
-                        awaitsRelease = isFinished ? .kept : .reduced
+                        renderState = .awaitingRelease(isFinished ? .kept : .reduced)
                         return
                     }
                 }
@@ -925,36 +965,30 @@ final class PhotoModel {
                 let longSide = reducedLongSide(of: photo)
                 let reduces = start != .full && longSide < max(photo.width, photo.height)
                 if reduces && !isFinished {
-                    isRendering = true
+                    renderState = .rendering(wholePhoto: false)
                     try await show(controls: controls, mode: .reduced(longSide: longSide), engine: engine, photo: photo)
                 }
                 if reduces && !wantsFullResolution {
-                    awaitsFullResolution = true
+                    renderState = .awaitingZoom
                 } else {
-                    isRendering = true
-                    isRenderingFullResolution = true
+                    renderState = .rendering(wholePhoto: true)
                     try await show(controls: controls, mode: .full, engine: engine, photo: photo)
+                    renderState = .idle
                 }
                 renderStrips(engine: engine)
             } catch {
                 guard !Task.isCancelled else { return }
                 fail("Could not render", error)
+                renderState = .idle
             }
-            isPreviewing = false
-            isRendering = false
-            isRenderingFullResolution = false
         }
     }
 
-    /// Stops the render under way, and what waits on one: a slider's release, or zooming in for the
-    /// whole photo.
+    /// Stops the render under way, and what waits on one: a slider's release, a new canvas size's
+    /// wait, or zooming in for the whole photo.
     private func stopRendering() {
         renderTask?.cancel()
-        isPreviewing = false
-        isRendering = false
-        isRenderingFullResolution = false
-        awaitsFullResolution = false
-        awaitsRelease = nil
+        renderState = .idle
     }
 
     /// The long side renders are reduced to: the canvas's (the preview's before it has a size).
