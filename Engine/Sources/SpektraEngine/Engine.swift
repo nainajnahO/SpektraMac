@@ -167,6 +167,22 @@ extension Controls {
     /// The settings' groups, as Photos groups its adjustments: each resets on its own.
     public enum Adjustment: CaseIterable, Sendable {
         case exposure, cameraDiffusion, halation, couplers, grain, contrast, enlarger, burn, enlargerDiffusion, glare
+
+        /// The group as the panel titles it: the Undo name of a change to its controls.
+        public var name: String {
+            switch self {
+            case .exposure: "Exposure"
+            case .cameraDiffusion: "Lens Diffusion"
+            case .halation: "Halation"
+            case .couplers: "Couplers"
+            case .grain: "Grain"
+            case .contrast: "Contrast"
+            case .enlarger: "Enlarger"
+            case .burn: "Burn"
+            case .enlargerDiffusion: "Enlarger Diffusion"
+            case .glare: "Glare"
+            }
+        }
     }
 
     /// These controls with `adjustment`'s from `defaults`: the film's saved defaults, or the app's own.
@@ -216,28 +232,18 @@ extension Controls {
         return reset
     }
 
-    /// The settings group a change is in, as the panel names it, by the first control it changed:
-    /// the change's Undo name.
+    /// The settings group a change is in, as the panel names it: the change's Undo name. The stocks,
+    /// Print | Film and the development times, which no adjustment resets, come first. Then the
+    /// first adjustment with a control that changed: the first whose reset to `old` changes `new`,
+    /// so ``resetting(_:to:)`` is the one list of each group's controls.
     public static func groupName(changedFrom old: Controls, to new: Controls) -> String {
-        let changed = zip(Mirror(reflecting: old).children, Mirror(reflecting: new).children)
-            .first { "\($0.value)" != "\($1.value)" }?.0.label ?? ""
-        return switch changed {
-        case "film": "Film"
-        case "paper": "Paper"
-        case "scanFilm": "Print or Film"
-        case "filmDevelopmentTime", "paperDevelopmentTime": "Development"
-        case "exposureEV", "highlightBoost": "Exposure"
-        case "printExposure", "yFilterShift", "mFilterShift", "preflash": "Enlarger"
-        case "printContrast", "printHighlightContrast", "printShadowContrast": "Contrast"
-        case "cameraDiffusion": "Lens Diffusion"
-        case "enlargerDiffusion": "Enlarger Diffusion"
-        case let name where name.hasPrefix("burn"): "Burn"
-        case let name where name.hasPrefix("glare"): "Glare"
-        case let name where name.hasPrefix("halation") || name.hasPrefix("scatter"): "Halation"
-        case let name where name.hasPrefix("coupler"): "Couplers"
-        case let name where name.hasPrefix("grain"): "Grain"
-        default: "Settings"
+        if new.film != old.film { return "Film" }
+        if new.paper != old.paper { return "Paper" }
+        if new.scanFilm != old.scanFilm { return "Print or Film" }
+        if new.filmDevelopmentTime != old.filmDevelopmentTime || new.paperDevelopmentTime != old.paperDevelopmentTime {
+            return "Development"
         }
+        return Adjustment.allCases.first { new.resetting($0, to: old) != new }?.name ?? "Settings"
     }
 
     /// These controls with `film`, its target paper (if it has one) and slides viewed directly,
