@@ -6,6 +6,9 @@ struct SpektraMacApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     private var model: PhotoModel { delegate.model }
 
+    // Nothing in `body` reads the controls, as nothing in the window's does (``ContentView``): a
+    // change to them would evaluate the menus and both windows again at every step of a slider
+    // (#386).
     var body: some Scene {
         Window("SpektraMac", id: "main") {
             ContentView()
@@ -70,7 +73,7 @@ struct SpektraMacApp: App {
                     Button("Save Preset…") { model.savePreset() }
                         .keyboardShortcut("s", modifiers: [.command, .shift])
                     Divider()
-                    Button("Make Default for \(model.filmName)") { model.makeDefaultForFilm() }
+                    MakeDefaultButton(model: model)
                     Button("Restore Factory Defaults") { model.restoreFactoryDefaults() }
                 }
                 .disabled(!model.canUsePresets)
@@ -86,6 +89,17 @@ struct SpektraMacApp: App {
         .restorationBehavior(AppDelegate.isUITesting ? .disabled : .automatic)
         // Window › Log: the Log has no button in the main window.
         .keyboardShortcut("l", modifiers: [.command, .option])
+    }
+}
+
+/// Preset › Make Default for the film, in a view of its own: its title reads the film from the
+/// controls, and read in the scene's body, every step of a slider evaluated the menus and the
+/// windows again (#386), as Print | Film once did the toolbar (``ShowPicker``).
+private struct MakeDefaultButton: View {
+    let model: PhotoModel
+
+    var body: some View {
+        Button("Make Default for \(model.filmName)") { model.makeDefaultForFilm() }
     }
 }
 
