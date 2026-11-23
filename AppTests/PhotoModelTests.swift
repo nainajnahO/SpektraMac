@@ -160,9 +160,9 @@ final class PhotoModelTests {
 
     // MARK: Exposure
 
-    /// The exposure is the photo's: a film's saved defaults and a preset leave it as it is, and
-    /// every photo opens at its exposure as shot, with nothing to undo, so Undo can't bring the last
-    /// photo's exposure back (#360).
+    /// The exposure is the photo's: a film's saved defaults, a preset and Restore Factory Defaults
+    /// (#377) leave it as it is, and every photo opens at its exposure as shot, with nothing to
+    /// undo, so Undo can't bring the last photo's exposure back (#360).
     @Test func exposureIsThePhotos() async throws {
         let model = try await openedModel()
         let undoManager = UndoManager()
@@ -170,23 +170,57 @@ final class PhotoModelTests {
         model.undoManager = undoManager
         let film = model.controls.film
         event(undoManager) {
-            model.controls.exposureEV = 1.5
+            model.exposureEV = 1.5
             model.controls.grainSize = 0.5
         }
         model.makeDefaultForFilm()
         event(undoManager) { model.film = "kodak_gold_200" }
         event(undoManager) { model.film = film }
-        #expect(model.controls.exposureEV == 1.5 && model.controls.grainSize == 0.5)
+        #expect(model.exposureEV == 1.5 && model.controls.grainSize == 0.5)
         var preset = Controls()
         preset.grainSize = 0.8
         let url = try write(preset, named: "Grain.json")
         event(undoManager) { model.openPreset(url) }
-        #expect(model.controls.exposureEV == 1.5 && model.controls.grainSize == 0.8)
+        #expect(model.exposureEV == 1.5 && model.controls.grainSize == 0.8)
+        event(undoManager) { model.restoreFactoryDefaults() }
+        #expect(model.exposureEV == 1.5 && model.controls.grainSize == Controls().grainSize)
 
         model.open(try photo(named: "Second.jpg", width: 300, height: 200))
         try await until { model.photo?.name == "Second.jpg" }
-        #expect(model.controls.exposureEV == 0)
+        #expect(model.exposureEV == 0)
         #expect(!undoManager.canUndo && !undoManager.canRedo)
+    }
+
+    /// Settings saved while the exposure was a control have an `exposureEV` key (#377). The last
+    /// settings, a film's saved defaults and a preset written then still open, to the same look,
+    /// and leave the exposure the photo's.
+    @Test func settingsSavedWithAnExposureStillOpen() async throws {
+        /// `controls` as a preset was written then: with the exposure, here off 0 to show it's ignored.
+        func saved(_ controls: Controls) throws -> Data {
+            var preset = try #require(JSONSerialization.jsonObject(with: controls.preset()) as? [String: Any])
+            preset["exposureEV"] = 2.5
+            return try JSONSerialization.data(withJSONObject: preset)
+        }
+        var last = Controls()
+        last.printContrast = 1.4
+        defaults.set(try saved(last), forKey: "lastSettings")
+        let model = try await makeModel()
+        #expect(model.controls == last)
+
+        model.exposureEV = 1.5
+        var gold = model.controls.choosing(film: "kodak_gold_200", from: model.films)
+        gold.grainSize = 0.5
+        defaults.set(try saved(gold), forKey: "filmDefaults.kodak_gold_200")
+        model.film = "kodak_gold_200"
+        #expect(model.controls == gold && model.exposureEV == 1.5)
+
+        var preset = Controls()
+        preset.grainSize = 0.8
+        let url = folder.appending(path: "Saved with an exposure.json")
+        try saved(preset).write(to: url)
+        model.openPreset(url)
+        #expect(model.failure == nil)
+        #expect(model.controls == preset && model.exposureEV == 1.5)
     }
 
     // MARK: Undo
@@ -230,10 +264,12 @@ final class PhotoModelTests {
     // MARK: The edit record
 
     /// What a saved photo records of its edit: the film printed on the paper, or scanned, the
-    /// exposure and the adjustments switched on.
+    /// exposure and the adjustments switched on. The exposure is also recorded as it is, beside
+    /// the controls.
     @Test func editRecordSummary() async throws {
         let model = try await makeModel()
-        model.controls.exposureEV = 0.5
+        model.exposureEV = 0.5
+        #expect(model.editRecord.exposureEV == 0.5)
         model.controls.burn = true
         model.controls.cameraDiffusion.active = true
         // Numbers as the app writes them, in this Mac's format.

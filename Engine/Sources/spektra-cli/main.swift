@@ -117,10 +117,8 @@ func benchmarkRenders(of url: URL) async throws {
         for run in 0...runs {
             // A different exposure each time: the engine keeps the film's steps for renders that
             // only change the print, and this times every stage.
-            var controls = Controls()
-            controls.exposureEV = Double(run) * 0.01
             let start = ContinuousClock.now
-            _ = try await engine.render(controls: controls, mode: mode)
+            _ = try await engine.render(controls: Controls(), exposureEV: Double(run) * 0.01, mode: mode)
             best = min(best, ContinuousClock.now - start)
         }
         print("\(label): \(best.formatted(.units(allowed: [.milliseconds], fractionalPart: .show(length: 0))))")

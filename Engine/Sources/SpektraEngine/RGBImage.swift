@@ -160,7 +160,7 @@ extension CGImage {
         guard CGImageMetadataRegisterNamespaceForPrefix(settings, EditRecord.namespace as CFString,
                                                         EditRecord.prefix as CFString, nil)
         else { throw EncodeError(url: url) }
-        for (name, value) in Self.settings(of: record.controls) {
+        for (name, value) in Self.settings(of: record.controls) + [(name: "exposureEV", value: record.exposureEV)] {
             guard let tag = CGImageMetadataTagCreate(EditRecord.namespace as CFString, EditRecord.prefix as CFString,
                                                      name as CFString, .default, "\(value)" as CFString),
                   CGImageMetadataSetTagWithPath(settings, nil, "\(EditRecord.prefix):\(name)" as CFString, tag)
@@ -215,23 +215,26 @@ func rgba(fromRGB rgb: [Float], width: Int, height: Int, alpha: Float) -> [Float
 
 /// What a saved rendering records of how it was made, beside the photo's own metadata: the app
 /// (TIFF `Software`), the edit in a line (TIFF `ImageDescription` and IPTC `Caption-Abstract`),
-/// keywords after the photo's own (IPTC `Keywords`), and every control by its name, in XMP of the
-/// app's own. The camera's EXIF stays as shot: it has no field for a film.
+/// keywords after the photo's own (IPTC `Keywords`), and every control by its name and the exposure
+/// as `exposureEV`, in XMP of the app's own. The camera's EXIF stays as shot: it has no field for a
+/// film.
 public struct EditRecord: Sendable {
     public let software: String
     public let summary: String
     public let keywords: [String]
     public let controls: Controls
+    public let exposureEV: Double
 
     /// The controls' XMP namespace and its prefix.
     static let namespace = "https://github.com/nainajnahO/SpektraMac/settings/"
     static let prefix = "spektramac"
 
-    public init(software: String, summary: String, keywords: [String], controls: Controls) {
+    public init(software: String, summary: String, keywords: [String], controls: Controls, exposureEV: Double = 0) {
         self.software = software
         self.summary = summary
         self.keywords = keywords
         self.controls = controls
+        self.exposureEV = exposureEV
     }
 }
 

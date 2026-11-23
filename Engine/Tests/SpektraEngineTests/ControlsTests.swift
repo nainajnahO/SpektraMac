@@ -9,8 +9,7 @@ import Testing
 /// `Controls`' stored properties, by name, in order: found by reflection, so a new control is in.
 private let controlNames = Mirror(reflecting: Controls()).children.compactMap(\.label)
 
-/// Every stored property of the controls, as a JSON object: their preset's, but with the exposure,
-/// which a preset leaves out.
+/// Every stored property of the controls, as a JSON object: their preset's.
 private func json(_ controls: Controls) throws -> [String: Any] {
     try JSONSerialization.jsonObject(with: JSONEncoder().encode(controls)) as! [String: Any]
 }
@@ -159,15 +158,38 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
     #expect(unchanged.controls == Controls() && unchanged.changed.isEmpty)
 }
 
-/// A preset carries no exposure, as the exposure is the photo's: a film's saved defaults and the
-/// settings the app quits with are presets too, so neither moves it.
+/// A preset carries no exposure, as the exposure is the photo's, not the look's: a film's saved
+/// defaults and the settings the app quits with are presets too, so neither moves it. One written
+/// while the exposure was a control has an `exposureEV` key, and still opens, to the same look.
 @Test func presetsCarryNoExposure() throws {
     var controls = Controls()
-    controls.exposureEV = 1.5
     controls.grainSize = 0.5
-    let preset = try Controls(preset: controls.preset())
-    #expect(preset.exposureEV == 0)
-    #expect(preset.grainSize == 0.5)
+    let written = try #require(JSONSerialization.jsonObject(with: controls.preset()) as? [String: Any])
+    #expect(written["exposureEV"] == nil)
+    #expect(try Controls(preset: controls.preset()) == controls)
+    var old = written
+    old["exposureEV"] = 1.5
+    #expect(try Controls(preset: JSONSerialization.data(withJSONObject: old)) == controls)
+}
+
+/// The exposure is the edit's, beside the look, and in the Exposure group: that group's reset puts
+/// it back with the group's controls, no other group's does, and a change to it is named Exposure,
+/// after the stocks and before the other groups, as the group's own controls are.
+@Test func exposureIsInTheExposureGroup() throws {
+    let (edit, defaults) = (Edit(controls: try variedControls(), exposureEV: 1.5), Edit())
+    for adjustment in Controls.Adjustment.allCases {
+        let reset = edit.resetting(adjustment, to: defaults)
+        #expect(reset.controls == edit.controls.resetting(adjustment, to: defaults.controls), "\(adjustment)")
+        #expect(reset.exposureEV == (adjustment == .exposure ? 0 : 1.5), "\(adjustment)")
+    }
+    #expect(Edit.groupName(changedFrom: Edit(), to: Edit(exposureEV: 1.5)) == "Exposure")
+    #expect(Edit.groupName(changedFrom: Edit(), to: Edit()) == "Settings")
+    var look = Controls()
+    look.grainSize = 0.5
+    #expect(Edit.groupName(changedFrom: Edit(), to: Edit(controls: look)) == "Grain")
+    #expect(Edit.groupName(changedFrom: Edit(), to: Edit(controls: look, exposureEV: 1.5)) == "Exposure")
+    look.film = "kodak_gold_200"
+    #expect(Edit.groupName(changedFrom: Edit(), to: Edit(controls: look, exposureEV: 1.5)) == "Film")
 }
 
 /// The exposure's range is −4…+8 stops, widened to whole stops past a reading outside it.
@@ -190,7 +212,7 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
     controls.couplers = false
     controls.scanFilm = true
     #expect(Controls.Strip.allCases.filter { $0.applies(to: controls, films: films) } == [.exposure])
-    #expect(Controls().setting(.exposure, to: 3).exposureEV == 3)
-    #expect(Controls().setting(.couplerSaturation, to: 0.4).couplerSaturation == 0.4)
-    #expect(Controls().setting(.printExposure, to: 1.3).printExposure == 1.3)
+    #expect(Edit().setting(.exposure, to: 3) == Edit(exposureEV: 3))
+    #expect(Edit().setting(.couplerSaturation, to: 0.4).controls.couplerSaturation == 0.4)
+    #expect(Edit().setting(.printExposure, to: 1.3).controls.printExposure == 1.3)
 }

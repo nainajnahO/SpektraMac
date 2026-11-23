@@ -50,7 +50,7 @@ final class PhotoModel {
             stopRendering()
             finishedRenders.removeAllObjects()
             strips = [:]
-            stripControls = nil
+            stripEdit = nil
             if photo?.id != oldValue?.id {
                 wholeOriginal = nil
                 horizons = [:]
@@ -70,17 +70,28 @@ final class PhotoModel {
     var showsOriginal = false
     /// The photo's EXIF, GPS and IPTC records, for saved renderings.
     @ObservationIgnored private var metadata: PhotoMetadata?
-    /// What the sidebar and the Print | Film switch set; every change re-renders the preview, and
-    /// can be undone (``registerUndo(from:)``), a drag or a menu's choice in one step.
-    var controls = Controls() {
+    /// The photo's edit: the look and the photo's own exposure. Every change re-renders the preview,
+    /// and can be undone (``registerUndo(from:)``), a drag or a menu's choice in one step.
+    var edit = Edit() {
         didSet {
             showsFilm = controls.scanFilm
             isSlideFilm = films.first { $0.stock == controls.film }?.type == .positive
             scheduleRender()
-            if controlsBeforeChange == nil && controls != oldValue {
+            if editBeforeChange == nil && edit != oldValue {
                 registerUndo(from: oldValue)
             }
         }
+    }
+    /// The look, which the sidebar and the Print | Film switch set: what a preset, a film's saved
+    /// defaults and the last settings hold, and what carries over from one photo to the next.
+    var controls: Controls {
+        get { edit.controls }
+        set { edit.controls = newValue }
+    }
+    /// The exposure, in stops over the photo as shot: the photo's own, which no look sets.
+    var exposureEV: Double {
+        get { edit.exposureEV }
+        set { edit.exposureEV = newValue }
     }
     /// What the toolbar's Print | Film switch shows, as the controls have it: apart from them, so
     /// the switch isn't laid out again at every step of a slider (setting an observed property to
@@ -96,11 +107,9 @@ final class PhotoModel {
         get { controls.film }
         set { controls = controls(choosing: newValue) }
     }
-    /// What choosing `film` sets the controls to (``film``), at the same exposure: the photo's.
+    /// What choosing `film` sets the controls to (``film``).
     func controls(choosing film: String) -> Controls {
-        var chosen = savedDefaults(for: film) ?? controls.choosing(film: film, from: films)
-        chosen.exposureEV = controls.exposureEV
-        return chosen
+        savedDefaults(for: film) ?? controls.choosing(film: film, from: films)
     }
     var filmName: String { films.first { $0.stock == controls.film }?.name ?? controls.film }
     var paperName: String { papers.first { $0.stock == controls.paper }?.name ?? controls.paper }
@@ -331,7 +340,7 @@ final class PhotoModel {
                 // own, and Undo would bring its exposure back with them.
                 undoManager?.removeAllActions()
                 undoManager?.disableUndoRegistration()
-                controls.exposureEV = 0
+                exposureEV = 0
                 undoManager?.enableUndoRegistration()
                 askedFraming = .whole
                 photo = Photo(name: url.lastPathComponent, width: opened.width, height: opened.height,
@@ -936,21 +945,22 @@ final class PhotoModel {
         case .kept: .idle
         }
         renderTask = Task {
-            var controls = self.controls
+            var edit = self.edit
             do {
                 // Whether a kept finished render is on screen.
                 var isFinished = start == .kept
                 if start == .preview {
                     repeat {
-                        controls = self.controls
-                        isFinished = showKept(controls, photo: photo)
+                        edit = self.edit
+                        isFinished = showKept(edit, photo: photo)
                         if !isFinished {
-                            try await show(controls: controls, mode: .preview, engine: engine, photo: photo)
+                            try await show(edit, mode: .preview, engine: engine, photo: photo)
                         }
                         // With each preview, so the graph follows a slider or its own handles as
                         // they move.
-                        toneGraph = (try await engine.toneGraph(controls: controls), controls)
-                    } while controls != self.controls
+                        toneGraph = (try await engine.toneGraph(controls: edit.controls, exposureEV: edit.exposureEV),
+                                     edit.controls)
+                    } while edit != self.edit
                     // A kept render too: what follows it (the whole photo zoomed in, 0.5–0.9 s at
                     // 24 MP, or the strips) would hold up the slider's next preview.
                     if isAdjusting {
@@ -966,13 +976,13 @@ final class PhotoModel {
                 let reduces = start != .full && longSide < max(photo.width, photo.height)
                 if reduces && !isFinished {
                     renderState = .rendering(wholePhoto: false)
-                    try await show(controls: controls, mode: .reduced(longSide: longSide), engine: engine, photo: photo)
+                    try await show(edit, mode: .reduced(longSide: longSide), engine: engine, photo: photo)
                 }
                 if reduces && !wantsFullResolution {
                     renderState = .awaitingZoom
                 } else {
                     renderState = .rendering(wholePhoto: true)
-                    try await show(controls: controls, mode: .full, engine: engine, photo: photo)
+                    try await show(edit, mode: .full, engine: engine, photo: photo)
                     renderState = .idle
                 }
                 renderStrips(engine: engine)
@@ -996,10 +1006,10 @@ final class PhotoModel {
         canvasLongSide > 0 ? canvasLongSide : max(photo.previewWidth, photo.previewHeight)
     }
 
-    /// Puts the kept finished render of `controls` on screen, if there is one.
-    private func showKept(_ controls: Controls, photo: Photo) -> Bool {
+    /// Puts the kept finished render of `edit` on screen, if there is one.
+    private func showKept(_ edit: Edit, photo: Photo) -> Bool {
         let longSide = reducedLongSide(of: photo)
-        guard let image = finishedRenders.object(forKey: RenderKey(controls: controls, longSide: longSide)) else {
+        guard let image = finishedRenders.object(forKey: RenderKey(edit: edit, longSide: longSide)) else {
             return false
         }
         displayImage = image
@@ -1009,16 +1019,18 @@ final class PhotoModel {
     }
 
     /// Renders the photo and puts it on screen, unless a newer change has made it stale.
-    private func show(controls: Controls, mode: RenderMode, engine: Engine, photo: Photo) async throws {
-        let (display, time) = try await EngineTime.measure(on: engine) { try $0.display(controls: controls, mode: mode) }
+    private func show(_ edit: Edit, mode: RenderMode, engine: Engine, photo: Photo) async throws {
+        let (display, time) = try await EngineTime.measure(on: engine) {
+            try $0.display(controls: edit.controls, exposureEV: edit.exposureEV, mode: mode)
+        }
         try Task.checkCancellation()
         displayImage = display
         shownMode = mode
         if mode == .preview && isAdjustingBurn {
-            burnMask = try await engine.burnMask(controls: controls)
+            burnMask = try await engine.burnMask(controls: edit.controls, exposureEV: edit.exposureEV)
         }
         if case .reduced(let longSide) = mode {
-            finishedRenders.setObject(display, forKey: RenderKey(controls: controls, longSide: longSide),
+            finishedRenders.setObject(display, forKey: RenderKey(edit: edit, longSide: longSide),
                                       cost: display.bytesPerRow * display.height)
         }
         let size = mode == .full ? "\(photo.width) × \(photo.height)" : "\(display.width) × \(display.height)"
@@ -1032,13 +1044,13 @@ final class PhotoModel {
     }
 
     /// Shows what burns as a Burn slider is taken hold of, before it moves (the previews it renders
-    /// then show it from ``show(controls:mode:engine:photo:)``).
+    /// then show it from ``show(_:mode:engine:photo:)``).
     private func updateBurnMask() {
         guard let engine, photo != nil else { return }
-        let controls = controls
+        let edit = edit
         Task {
             do {
-                let mask = try await engine.burnMask(controls: controls)
+                let mask = try await engine.burnMask(controls: edit.controls, exposureEV: edit.exposureEV)
                 if isAdjustingBurn {
                     burnMask = mask
                 }
@@ -1050,21 +1062,21 @@ final class PhotoModel {
 
     /// What a kept render shows: `NSCache` wants an object key.
     private nonisolated final class RenderKey: NSObject {
-        let controls: Controls
+        let edit: Edit
         let longSide: Int
 
-        init(controls: Controls, longSide: Int) {
-            (self.controls, self.longSide) = (controls, longSide)
+        init(edit: Edit, longSide: Int) {
+            (self.edit, self.longSide) = (edit, longSide)
         }
 
         override func isEqual(_ object: Any?) -> Bool {
             guard let other = object as? RenderKey else { return false }
-            return controls == other.controls && longSide == other.longSide
+            return edit == other.edit && longSide == other.longSide
         }
 
         override var hash: Int {
             var hasher = Hasher()
-            hasher.combine(controls)
+            hasher.combine(edit)
             hasher.combine(longSide)
             return hasher.finalize()
         }
@@ -1079,8 +1091,8 @@ final class PhotoModel {
     /// Each strip's frames, left to right. A strip whose control changes nothing the controls show
     /// (a print setting while the film shows, say) has none.
     private(set) var strips: [Controls.Strip: [CGImage]] = [:]
-    /// The controls the strips were made for.
-    @ObservationIgnored private var stripControls: Controls?
+    /// The edit the strips were made for.
+    @ObservationIgnored private var stripEdit: Edit?
     /// Makes the strips for the controls; a change to them stops it (``render(from:)``).
     @ObservationIgnored private var stripTask: Task<Void, Never>?
 
@@ -1093,19 +1105,19 @@ final class PhotoModel {
         }
     }
 
-    /// Renders the strips for the controls, unless they show them or are being made for them. Each
-    /// frame is a render of its own, so a change's preview waits on one frame at most; each strip
-    /// shows once all its frames are done.
+    /// Renders the strips for the edit, unless they show it or are being made for it. Each frame is
+    /// a render of its own, so a change's preview waits on one frame at most; each strip shows once
+    /// all its frames are done.
     private func renderStrips(engine: Engine) {
-        let controls = controls
-        guard controls != stripControls, stripTask == nil else { return }
+        let edit = edit
+        guard edit != stripEdit, stripTask == nil else { return }
         stripTask = Task {
             // The frames' own times and waits, added up: between frames, a change's preview may go first.
             var time = EngineTime()
             var count = 0
             do {
                 for strip in Controls.Strip.allCases {
-                    guard strip.applies(to: controls, films: films) else {
+                    guard strip.applies(to: edit.controls, films: films) else {
                         strips[strip] = nil
                         continue
                     }
@@ -1115,9 +1127,9 @@ final class PhotoModel {
                         // The value at the middle of the frame.
                         let value = span.lowerBound
                             + (Double(frame) + 0.5) / Double(Self.framesPerStrip) * (span.upperBound - span.lowerBound)
-                        let frameControls = controls.setting(strip, to: value)
+                        let framed = edit.setting(strip, to: value)
                         let (image, frameTime) = try await EngineTime.measure(on: engine) {
-                            try $0.display(controls: frameControls, mode: .thumbnail)
+                            try $0.display(controls: framed.controls, exposureEV: framed.exposureEV, mode: .thumbnail)
                         }
                         frames.append(image)
                         time += frameTime
@@ -1126,7 +1138,7 @@ final class PhotoModel {
                     strips[strip] = frames
                     count += frames.count
                 }
-                stripControls = controls
+                stripEdit = edit
                 stripTask = nil
                 note("Rendered \(count) thumbnails \(time.formatted())")
             } catch {
@@ -1155,17 +1167,19 @@ final class PhotoModel {
         let scale = min(1, Double(longSide) / Double(max(photo.width, photo.height)))
         // At least 1 px a side, as renders are: a canvas narrowed to a sliver fits a panorama 0 px tall.
         let bytes = max(1, Int(Double(photo.width) * scale)) * max(1, Int(Double(photo.height) * scale)) * 4
+        // At the photo's exposure, as a choice shows.
+        let exposureEV = exposureEV
         let keys = choices.prefix(finishedRenders.totalCostLimit / 2 / bytes)
-            .map { RenderKey(controls: $0, longSide: longSide) }
+            .map { RenderKey(edit: Edit(controls: $0, exposureEV: exposureEV), longSide: longSide) }
         preloadTask = Task {
             // The choices' own times and waits, added up: between choices, a preview may go first.
             var time = EngineTime()
             var count = 0
             do {
                 for key in keys where finishedRenders.object(forKey: key) == nil {
-                    let controls = key.controls
+                    let edit = key.edit
                     let (display, choiceTime) = try await EngineTime.measure(on: engine) {
-                        try $0.display(controls: controls, mode: .reduced(longSide: longSide))
+                        try $0.display(controls: edit.controls, exposureEV: edit.exposureEV, mode: .reduced(longSide: longSide))
                     }
                     try Task.checkCancellation()
                     finishedRenders.setObject(display, forKey: key, cost: display.bytesPerRow * display.height)
@@ -1224,13 +1238,13 @@ final class PhotoModel {
         Task {
             guard let url = await destination(from: panel) else { return }
             let type = UTType(filenameExtension: url.pathExtension) ?? .jpeg
-            let (controls, metadata, record) = (controls, metadata, editRecord)
+            let (edit, metadata, record) = (edit, metadata, editRecord)
             savePhase = "Rendering \(url.lastPathComponent) at full resolution…"
             saveTask = Task {
                 defer { savePhase = nil; saveTask = nil }
                 do {
                     let (image, rendering) = try await EngineTime.measure(on: engine) {
-                        try $0.export(controls: controls, as: type)
+                        try $0.export(controls: edit.controls, exposureEV: edit.exposureEV, as: type)
                     }
                     try Task.checkCancellation()
                     savePhase = "Writing \(url.lastPathComponent)…"
@@ -1264,8 +1278,10 @@ final class PhotoModel {
     /// temporary folder: what Share and Copy send (``FinishedPhoto``).
     func finishedFile(named name: String) async throws -> URL {
         let engine = try await makingEngine.value
-        let (controls, metadata, record) = (controls, metadata, editRecord)
-        let (image, rendering) = try await EngineTime.measure(on: engine) { try $0.export(controls: controls, as: .jpeg) }
+        let (edit, metadata, record) = (edit, metadata, editRecord)
+        let (image, rendering) = try await EngineTime.measure(on: engine) {
+            try $0.export(controls: edit.controls, exposureEV: edit.exposureEV, as: .jpeg)
+        }
         let url = URL.temporaryDirectory.appending(path: UUID().uuidString).appending(path: "\(name).jpg")
         let writing = ContinuousClock.now
         try await Task.detached(priority: .userInitiated) {
@@ -1302,12 +1318,12 @@ final class PhotoModel {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         return EditRecord(software: "SpektraMac \(version)", summary: summary.joined(separator: " · "),
                           keywords: (controls.scanFilm ? [filmName] : [filmName, paperName]) + ["SpektraMac"],
-                          controls: controls)
+                          controls: controls, exposureEV: exposureEV)
     }
 
     /// The exposure as the slider shows it, signed, to a tenth of a stop.
     private var exposureText: String {
-        controls.exposureEV.formatted(.number.precision(.fractionLength(1)).sign(strategy: .always(includingZero: false)))
+        exposureEV.formatted(.number.precision(.fractionLength(1)).sign(strategy: .always(includingZero: false)))
     }
 
     // MARK: LUTs
@@ -1336,7 +1352,7 @@ final class PhotoModel {
     /// titled ``lutName``, then opens the Export LUT panel to write it.
     func exportLUT() {
         guard let engine else { return }
-        let (controls, stops, title) = (controls, exposureText, lutName)
+        let (edit, stops, title) = (edit, exposureText, lutName)
         let comments = [
             "Made with SpektraMac from Spektrafilm by Andrea Volpato (https://github.com/andreavolpato/spektrafilm).",
             "Film and paper data: CC BY-SA 4.0.",
@@ -1346,7 +1362,7 @@ final class PhotoModel {
         ]
         Task {
             do {
-                let lut = try await engine.lut(controls: controls, size: Self.lutSize)
+                let lut = try await engine.lut(controls: edit.controls, exposureEV: edit.exposureEV, size: Self.lutSize)
                 lutFile = LUTFile(lut: lut, title: title, comments: comments, stops: stops)
                 isExportingLUT = true
             } catch {
@@ -1411,10 +1427,7 @@ final class PhotoModel {
                 ])
             }
             actionName = "Open Preset"
-            var opened = checked(preset, from: url.lastPathComponent)
-            // A preset carries no exposure (``Controls/preset()``): it stays the photo's.
-            opened.exposureEV = controls.exposureEV
-            controls = opened
+            controls = checked(preset, from: url.lastPathComponent)
             actionName = nil
             note("Opened preset \(url.lastPathComponent)")
         } catch {
@@ -1462,8 +1475,9 @@ final class PhotoModel {
         }
     }
 
-    /// Forgets the film's saved defaults and returns every control to the app's own.
-    /// Undo brings the saved defaults back with the controls.
+    /// Forgets the film's saved defaults and returns the look, every control of it, to the app's
+    /// own. The exposure stays as it is, as when a film is chosen or a preset opened: it's the
+    /// photo's (#377). Undo brings the saved defaults back with the controls.
     func restoreFactoryDefaults() {
         setSavedDefaults(nil, for: controls.film)
         actionName = "Restore Factory Defaults"
@@ -1511,36 +1525,37 @@ final class PhotoModel {
     /// The window's undo manager, which Edit › Undo and Redo use (``ContentView`` sets it). Undo goes
     /// back through the settings whichever photo is open, as they carry over from one to the next.
     @ObservationIgnored weak var undoManager: UndoManager?
-    /// The controls as a drag or an open menu found them: what they change undoes in one step once
-    /// it ends (``endChange()``).
-    @ObservationIgnored private var controlsBeforeChange: Controls?
+    /// The edit as a drag or an open menu found it: what they change undoes in one step once it
+    /// ends (``endChange()``).
+    @ObservationIgnored private var editBeforeChange: Edit?
     /// The next undo step's name, for a change named by what made it rather than what it changed.
     @ObservationIgnored private var actionName: String?
 
-    /// Holds the changes to the controls a drag or an open menu makes, to undo in one step.
+    /// Holds the changes to the edit a drag or an open menu makes, to undo in one step.
     func beginChange() {
-        if controlsBeforeChange == nil {
-            controlsBeforeChange = controls
+        if editBeforeChange == nil {
+            editBeforeChange = edit
         }
     }
 
-    /// Ends what ``beginChange()`` began: if the controls changed, one undo step sets them back.
+    /// Ends what ``beginChange()`` began: if the edit changed, one undo step sets it back.
     func endChange() {
-        guard let before = controlsBeforeChange else { return }
-        controlsBeforeChange = nil
-        if controls != before {
+        guard let before = editBeforeChange else { return }
+        editBeforeChange = nil
+        if edit != before {
             registerUndo(from: before)
         }
     }
 
-    /// Lets Undo set the controls back to `previous`, named after the settings group the change was
-    /// in unless ``actionName`` names it. Undoing sets the controls, which registers Redo, as named.
-    private func registerUndo(from previous: Controls) {
+    /// Lets Undo set the edit back to `previous`, the look and the exposure whole, named after the
+    /// settings group the change was in unless ``actionName`` names it. Undoing sets the edit,
+    /// which registers Redo, as named.
+    private func registerUndo(from previous: Edit) {
         guard let undoManager else { return }
-        let name = actionName ?? Controls.groupName(changedFrom: previous, to: controls)
+        let name = actionName ?? Edit.groupName(changedFrom: previous, to: edit)
         undoManager.registerUndo(withTarget: self) { model in
             model.actionName = name
-            model.controls = previous
+            model.edit = previous
             model.actionName = nil
         }
         undoManager.setActionName(name)
@@ -1548,14 +1563,16 @@ final class PhotoModel {
 
     // MARK: Adjustments
 
-    /// Whether `adjustment`'s controls are what choosing the film applies.
+    /// Whether `adjustment`'s controls are what choosing the film applies, and for the Exposure
+    /// group the exposure as shot too.
     func isAtDefaults(_ adjustment: Controls.Adjustment) -> Bool {
-        controls == controls.resetting(adjustment, to: resetDefaults(for: controls.film))
+        edit == edit.resetting(adjustment, to: Edit(controls: resetDefaults(for: controls.film)))
     }
 
-    /// Returns `adjustment`'s controls to what choosing the film applies.
+    /// Returns `adjustment`'s controls to what choosing the film applies, and for the Exposure group
+    /// the exposure to as shot.
     func reset(_ adjustment: Controls.Adjustment) {
-        controls = controls.resetting(adjustment, to: resetDefaults(for: controls.film))
+        edit = edit.resetting(adjustment, to: Edit(controls: resetDefaults(for: controls.film)))
     }
 
     /// What a Reset button returns its controls to: the film's saved defaults, or the app's own.
