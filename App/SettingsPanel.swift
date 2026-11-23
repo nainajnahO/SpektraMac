@@ -143,14 +143,10 @@ struct SettingsPanel: View {
                         }
                         AdjustmentGroup("Burn", systemImage: "sun.horizon", adjustment: .burn, isOn: $model.controls.burn) {
                             ValueSlider("Strength", value: $model.controls.burnStops, in: Controls.range(\.burnStops), step: 0.1,
-                                        format: .number.precision(.fractionLength(1)), unit: "EV") {
-                                model.isAdjustingBurn = $0
-                            }
+                                        format: .number.precision(.fractionLength(1)), unit: "EV", hold: .burn)
                             .help("Extra enlarger exposure where the photo is bright, as a darkroom printer burns in a sky: a pale sky darkens and gets its \(model.isBlackAndWhiteFilm ? "tone" : "colour") back, and the rest of the print stays as it is.")
                             ValueSlider("Threshold", value: $model.controls.burnThreshold, in: Controls.range(\.burnThreshold),
-                                        step: 0.1, format: ExposureStrip.stops, unit: "EV") {
-                                model.isAdjustingBurn = $0
-                            }
+                                        step: 0.1, format: ExposureStrip.stops, unit: "EV", hold: .burn)
                             .help("How bright a part of the photo must be to burn, in stops over mid-grey. About +2.5 is where a screen's white sits; lower takes in more. Holding a Burn slider shows what burns, white on black.")
                         }
                         DiffusionGroup(title: "Enlarger diffusion", adjustment: .enlargerDiffusion,
@@ -656,9 +652,7 @@ struct ExposureStrip: View {
             model.hoveredMarks = dots.first { $0.value == value }?.marks ?? []
         }
         ThumbnailStrip("Exposure", value: $model.controls.exposureEV, in: range, step: 0.1, format: Self.stops,
-                       unit: "EV", frames: model.strips[.exposure], marks: marks, hoveredMark: hoveredDot) {
-            model.isAdjustingExposure = $0
-        }
+                       unit: "EV", frames: model.strips[.exposure], marks: marks, hoveredMark: hoveredDot, hold: .exposure)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         // A click as a drag passes a dot, one for a dot marks share: a fast drag jumps over the
         // step nearest it between two of the pointer's moves, so a click on landing there would miss it.
@@ -795,7 +789,7 @@ private struct ValueSlider: View {
     let neutral: Double?
     let format: FloatingPointFormatStyle<Double>
     let unit: String
-    let onEditingChanged: (Bool) -> Void
+    let hold: ControlHold
     @State private var width: CGFloat = 0
     /// The value when the drag began.
     @State private var dragStart: Double?
@@ -805,13 +799,12 @@ private struct ValueSlider: View {
     @State private var isTyping = false
     @State private var typedText = ""
     @FocusState private var isFieldFocused: Bool
-    @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.displayScale) private var displayScale
     @Environment(\.colorSchemeContrast) private var contrast
 
     init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double, neutral: Double? = nil,
-         format: FloatingPointFormatStyle<Double>, unit: String = "", onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+         format: FloatingPointFormatStyle<Double>, unit: String = "", hold: ControlHold = .plain) {
         self.title = title
         _value = value
         self.range = range
@@ -819,7 +812,7 @@ private struct ValueSlider: View {
         self.neutral = neutral
         self.format = format
         self.unit = unit
-        self.onEditingChanged = onEditingChanged
+        self.hold = hold
     }
 
     /// The bar's coordinate space, where the drag and ``valueFrame`` are measured.
@@ -875,25 +868,21 @@ private struct ValueSlider: View {
         .onHover { isHovered = $0 }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .contentShape(.rect)
-        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.bar))
-            .onChanged { drag in
-                if dragStart == nil {
-                    finishTyping()
-                    model.isAdjusting = true
-                    onEditingChanged(true)
-                }
-                let start = dragStart ?? value
-                dragStart = start
-                // A click's tremble leaves the value as it is, even between two lines.
-                guard width > 0, value != start || abs(drag.translation.width) >= Self.clickTolerance else { return }
-                value = ruler.nearestLine(to: start + drag.translation.width / width * (range.upperBound - range.lowerBound))
+        .heldDrag(DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.bar))) { _ in
+            finishTyping()
+            dragStart = value
+            return hold
+        } moved: { drag in
+            // A click's tremble leaves the value as it is, even between two lines.
+            guard let start = dragStart, width > 0,
+                  value != start || abs(drag.translation.width) >= Self.clickTolerance else { return }
+            value = ruler.nearestLine(to: start + drag.translation.width / width * (range.upperBound - range.lowerBound))
+        } ended: { drag in
+            dragStart = nil
+            if let drag, abs(drag.translation.width) < Self.clickTolerance, valueFrame.contains(drag.startLocation) {
+                startTyping()
             }
-            .onEnded { drag in
-                endDrag()
-                if abs(drag.translation.width) < Self.clickTolerance, valueFrame.contains(drag.startLocation) {
-                    startTyping()
-                }
-            })
+        }
         .coordinateSpace(.named(Self.bar))
         // A click at each line the drag reaches, the strongest of them when it passes several at once.
         // A Mac's trackpad plays only these two: SwiftUI's other feedback, `impact(weight:intensity:)`
@@ -904,12 +893,6 @@ private struct ValueSlider: View {
             case .short: .alignment
             case .long, .bright: .levelChange
             case nil: nil
-            }
-        }
-        // A drag cut off as the slider goes (its window closed, say) never ends otherwise.
-        .onDisappear {
-            if dragStart != nil {
-                endDrag()
             }
         }
         .focusable(interactions: .activate)
@@ -992,11 +975,81 @@ private struct ValueSlider: View {
             NSSound.beep()
         }
     }
+}
 
-    private func endDrag() {
-        dragStart = nil
-        model.isAdjusting = false
-        onEditingChanged(false)
+/// What holding a control shows besides the previews of its changes: which hold it is, is the
+/// control's to say.
+enum ControlHold {
+    /// Nothing more.
+    case plain
+    /// What burns, on the canvas (``PhotoModel/isAdjustingBurn``).
+    case burn
+    /// The Exposure strip's marks: the trackpad clicks as the exposure passes a dot
+    /// (``PhotoModel/isAdjustingExposure``).
+    case exposure
+}
+
+extension View {
+    /// A drag that holds this control (``HeldDrag``). `began` runs as the press begins and says which
+    /// hold it is, or nil for a press that takes hold of nothing; `moved` at each of the pointer's
+    /// moves, the first included; `ended` as the drag ends, or with nil as it's cut off.
+    func heldDrag(_ gesture: DragGesture, began: @escaping (DragGesture.Value) -> ControlHold?,
+                  moved: @escaping (DragGesture.Value) -> Void, ended: @escaping (DragGesture.Value?) -> Void) -> some View {
+        modifier(HeldDrag(gesture: gesture, began: began, moved: moved, ended: ended))
+    }
+}
+
+/// A drag on a control, which the model hears is held for as long as it lasts: it renders only
+/// previews until the control is let go, and the drag's changes undo in one step
+/// (``PhotoModel/isAdjusting``). The one place a hold begins, ends, and ends if the control goes
+/// away mid-drag (#378). The model hears of the hold before the drag first moves the control, so
+/// the first change is part of it.
+private struct HeldDrag: ViewModifier {
+    let gesture: DragGesture
+    let began: (DragGesture.Value) -> ControlHold?
+    let moved: (DragGesture.Value) -> Void
+    let ended: (DragGesture.Value?) -> Void
+    @Environment(PhotoModel.self) private var model
+    /// While the pointer is pressed on the control, and the hold that began, if any.
+    @State private var isPressed = false
+    @State private var hold: ControlHold?
+
+    func body(content: Content) -> some View {
+        content
+            .gesture(gesture
+                .onChanged { drag in
+                    if !isPressed {
+                        isPressed = true
+                        let begun = began(drag)
+                        hold = begun
+                        tellModel(begun, isHeld: true)
+                    }
+                    moved(drag)
+                }
+                .onEnded { end($0) })
+            // A drag cut off as the control goes (its window closed, say) never ends otherwise.
+            .onDisappear {
+                if isPressed {
+                    end(nil)
+                }
+            }
+    }
+
+    private func end(_ drag: DragGesture.Value?) {
+        tellModel(hold, isHeld: false)
+        isPressed = false
+        hold = nil
+        ended(drag)
+    }
+
+    private func tellModel(_ hold: ControlHold?, isHeld: Bool) {
+        guard let hold else { return }
+        model.isAdjusting = isHeld
+        switch hold {
+        case .plain: break
+        case .burn: model.isAdjustingBurn = isHeld
+        case .exposure: model.isAdjustingExposure = isHeld
+        }
     }
 }
 
@@ -1119,16 +1172,13 @@ private struct ThumbnailStrip: View {
     let marks: [Mark]
     /// The value of the mark whose dot the pointer is on.
     @Binding var hoveredMark: Double?
-    let onEditingChanged: (Bool) -> Void
+    let hold: ControlHold
     @State private var width: CGFloat = 0
-    @State private var isDragging = false
-    @Environment(PhotoModel.self) private var model
     @Environment(\.isEnabled) private var isEnabled
 
     init(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double,
          format: FloatingPointFormatStyle<Double>, unit: String = "", frames: [CGImage]?,
-         marks: [Mark] = [], hoveredMark: Binding<Double?> = .constant(nil),
-         onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+         marks: [Mark] = [], hoveredMark: Binding<Double?> = .constant(nil), hold: ControlHold = .plain) {
         self.title = title
         _value = value
         self.range = range
@@ -1138,7 +1188,7 @@ private struct ThumbnailStrip: View {
         self.frames = frames
         self.marks = marks
         _hoveredMark = hoveredMark
-        self.onEditingChanged = onEditingChanged
+        self.hold = hold
     }
 
     /// A dot's width, in points: 6 under the pointer.
@@ -1175,22 +1225,12 @@ private struct ThumbnailStrip: View {
             .clipShape(.rect(cornerRadius: 5))
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .contentShape(.rect)
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { drag in
-                    if !isDragging {
-                        isDragging = true
-                        model.isAdjusting = true
-                        onEditingChanged(true)
-                    }
-                    guard width > 0 else { return }
-                    value = range.stepped(range.lowerBound + drag.location.x / width * (range.upperBound - range.lowerBound), by: step)
-                }
-                .onEnded { _ in endDrag() })
-            // A drag cut off as the strip goes (its window closed, say) never ends otherwise.
-            .onDisappear {
-                if isDragging {
-                    endDrag()
-                }
+            .heldDrag(DragGesture(minimumDistance: 0)) { _ in
+                hold
+            } moved: { drag in
+                guard width > 0 else { return }
+                value = range.stepped(range.lowerBound + drag.location.x / width * (range.upperBound - range.lowerBound), by: step)
+            } ended: { _ in
             }
             if !marks.isEmpty {
                 ZStack {
@@ -1269,12 +1309,6 @@ private struct ThumbnailStrip: View {
     private func dot(at x: CGFloat) -> Mark? {
         func distance(_ mark: Mark) -> CGFloat { abs(range.fraction(of: mark.value) * width - x) }
         return marks.filter { distance($0) <= Self.dotReach }.min { distance($0) < distance($1) }
-    }
-
-    private func endDrag() {
-        isDragging = false
-        model.isAdjusting = false
-        onEditingChanged(false)
     }
 }
 
