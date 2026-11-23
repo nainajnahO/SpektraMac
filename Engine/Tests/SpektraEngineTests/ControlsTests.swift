@@ -9,13 +9,6 @@ import Testing
 /// `Controls`' stored properties, by name, in order: found by reflection, so a new control is in.
 private let controlNames = Mirror(reflecting: Controls()).children.compactMap(\.label)
 
-/// Each adjustment's group as the panel titles it, which is also its controls' Undo name.
-private let adjustmentTitles: [Controls.Adjustment: String] = [
-    .exposure: "Exposure", .cameraDiffusion: "Lens Diffusion", .halation: "Halation", .couplers: "Couplers",
-    .grain: "Grain", .contrast: "Contrast", .enlarger: "Enlarger", .burn: "Burn",
-    .enlargerDiffusion: "Enlarger Diffusion", .glare: "Glare",
-]
-
 /// Every stored property of the controls, as a JSON object: their preset's, but with the exposure,
 /// which a preset leaves out.
 private func json(_ controls: Controls) throws -> [String: Any] {
@@ -81,18 +74,28 @@ private func readings(centreWeighted ev: Double) -> MeteringReadings {
     }
 }
 
-/// Each adjustment resets its own controls, those whose Undo name is its group's, and no others.
-@Test func eachAdjustmentResetsItsOwnControls() throws {
-    let (defaults, varied) = (Controls(), try variedControls())
-    let variedValues = values(varied)
-    for adjustment in Controls.Adjustment.allCases {
-        let reset = values(varied.resetting(adjustment, to: defaults))
-        for name in controlNames {
-            let group = Controls.groupName(changedFrom: defaults, to: try controls(changing: name, as: varied))
-            let isReset = reset[name] != variedValues[name]
-            #expect(isReset == (group == adjustmentTitles[adjustment]), "\(adjustment) \(isReset ? "resets" : "keeps") \(name)")
-        }
+/// A change's Undo name is its group's title in the panel: an adjustment's for a change to the
+/// controls it resets, and their own for the stocks, Print | Film and the development times, which
+/// no adjustment resets. A step that changes several groups is named by the stocks first: choosing
+/// a film, even one whose saved defaults set every control, and choosing a paper.
+@Test func undoNamesAreTheGroupsTitles() throws {
+    #expect(Controls.Adjustment.allCases.map(\.name) == [
+        "Exposure", "Lens Diffusion", "Halation", "Couplers", "Grain", "Contrast", "Enlarger", "Burn",
+        "Enlarger Diffusion", "Glare",
+    ])
+    func name(_ change: (inout Controls) -> Void) -> String {
+        var changed = Controls()
+        change(&changed)
+        return Controls.groupName(changedFrom: Controls(), to: changed)
     }
+    #expect(name { $0.film = "kodak_gold_200" } == "Film")
+    #expect(name { $0.paper = "kodak_2383" } == "Paper")
+    #expect(name { $0.scanFilm = true } == "Print or Film")
+    #expect(name { $0.filmDevelopmentTime = 9 } == "Development")
+    #expect(name { $0.paperDevelopmentTime = 7 } == "Development")
+    #expect(name { $0.grainSize = 0.5 } == "Grain")
+    #expect(Controls.groupName(changedFrom: Controls(), to: try variedControls()) == "Film")
+    #expect(name { $0 = $0.choosing(paper: "kodak_2383"); $0.paperDevelopmentTime = 7 } == "Paper")
 }
 
 /// Every stored property has an Undo name of its own group, not the catch-all "Settings".
