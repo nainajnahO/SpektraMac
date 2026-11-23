@@ -126,15 +126,15 @@ extension PhotoOpeningTests {
             return RGBImage(width: width, height: height, pixels: (0..<(width * height)).flatMap { rgba[($0 * 4)..<($0 * 4 + 3)] })
         }
 
-        var controls = Controls()
+        let controls = Controls()
         let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
         let (gpu, tables, database) = (try GPU(), try Tables.load(), try Tables.loadNeutralPrintFilters())
         for (mode, image) in [(RenderMode.full, decoded), (.preview, scaled(to: 1600)), (.reduced(longSide: 1000), scaled(to: 1000)),
                               (.thumbnail, scaled(to: 256))] {
             let parameters = Engine.parameters(for: controls, film: film, print: paper, database: database, mode: mode)
-            controls.exposureEV = autoExposureEV(of: image, colourSpace: tables.colourSpaces[parameters.io.inputColorSpace]!,
-                                                 cctfDecoding: parameters.io.inputCctfDecoding)
-            let rendered = try await engine.render(controls: controls, mode: mode)
+            let exposureEV = autoExposureEV(of: image, colourSpace: tables.colourSpaces[parameters.io.inputColorSpace]!,
+                                            cctfDecoding: parameters.io.inputCctfDecoding)
+            let rendered = try await engine.render(controls: controls, exposureEV: exposureEV, mode: mode)
             let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: tables)
             let chain = gpu.download(try gpu.run { simulation.encode(image, on: $0) })
             #expect(rendered.width == image.width && rendered.height == image.height, "\(mode)")
@@ -351,21 +351,24 @@ extension PhotoOpeningTests {
         let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
         let (engine, fresh) = (try Engine(), try Engine())
         _ = try await engine.open(image.ciImage)
-        var controls = Controls()
-        let changes: [(String, (inout Controls) -> Void)] = [
-            ("defaults", { _ in }), ("Y filter", { $0.yFilterShift = 12 }), ("print exposure", { $0.printExposure = 1.3 }),
-            ("paper", { $0.paper = "fujifilm_crystal_archive_typeii" }), ("negative", { $0.scanFilm = true }),
-            ("print", { $0.scanFilm = false }), ("exposure", { $0.exposureEV = 1.25 }),
-            ("under", { $0.exposureEV = -0.6 }), ("grain off", { $0.grain = false }),
-            ("halation off", { $0.halation = false }), ("burn", { $0.burn = true }),
-            ("film", { $0.film = "kodak_gold_200" }),
+        var edit = Edit()
+        let changes: [(String, (inout Edit) -> Void)] = [
+            ("defaults", { _ in }), ("Y filter", { $0.controls.yFilterShift = 12 }),
+            ("print exposure", { $0.controls.printExposure = 1.3 }),
+            ("paper", { $0.controls.paper = "fujifilm_crystal_archive_typeii" }), ("negative", { $0.controls.scanFilm = true }),
+            ("print", { $0.controls.scanFilm = false }), ("exposure", { $0.exposureEV = 1.25 }),
+            ("under", { $0.exposureEV = -0.6 }), ("grain off", { $0.controls.grain = false }),
+            ("halation off", { $0.controls.halation = false }), ("burn", { $0.controls.burn = true }),
+            ("film", { $0.controls.film = "kodak_gold_200" }),
         ]
         for (name, change) in changes {
-            change(&controls)
+            change(&edit)
             for mode in [RenderMode.preview, .reduced(longSide: 300), .full, .export] {
                 _ = try await fresh.open(image.ciImage)
-                let expected = try await fresh.render(controls: controls, mode: mode).pixels.map(\.bitPattern)
-                let cached = try await engine.render(controls: controls, mode: mode).pixels.map(\.bitPattern)
+                let expected = try await fresh.render(controls: edit.controls, exposureEV: edit.exposureEV, mode: mode)
+                    .pixels.map(\.bitPattern)
+                let cached = try await engine.render(controls: edit.controls, exposureEV: edit.exposureEV, mode: mode)
+                    .pixels.map(\.bitPattern)
                 #expect(cached == expected, "\(name), \(mode)")
             }
         }
@@ -376,15 +379,15 @@ extension PhotoOpeningTests {
     /// the image at.
     @Test func engineRenderIsTheChain() async throws {
         let image = try SpektraEngineTests.golden("photo-kodak_portra_400-kodak_portra_endura", "rgb_in").image
-        var controls = Controls()
+        let controls = Controls()
         let (film, paper) = (try Profile.load(controls.film), try Profile.load(controls.paper))
         let parameters = Engine.parameters(for: controls, film: film, print: paper,
                                            database: try Tables.loadNeutralPrintFilters(), mode: .full)
-        controls.exposureEV = autoExposureEV(of: image, colourSpace: try Tables.load().colourSpaces[parameters.io.inputColorSpace]!,
-                                             cctfDecoding: parameters.io.inputCctfDecoding)
+        let exposureEV = autoExposureEV(of: image, colourSpace: try Tables.load().colourSpaces[parameters.io.inputColorSpace]!,
+                                        cctfDecoding: parameters.io.inputCctfDecoding)
         let engine = try Engine()
         _ = try await engine.open(image.ciImage)
-        let rendered = try await engine.render(controls: controls, mode: .full)
+        let rendered = try await engine.render(controls: controls, exposureEV: exposureEV, mode: .full)
 
         let gpu = try GPU()
         let simulation = try Simulation(parameters: parameters, film: film, print: paper, gpu: gpu, tables: try Tables.load())
@@ -429,10 +432,8 @@ func exportWritesProfileAndMetadata(type: UTType) throws {
     }
     pixels.replaceSubrange(0..<3, with: [.nan, .nan, .nan])
     let exported = directory.appending(component: "out").appendingPathExtension(for: type)
-    var controls = Controls()
-    controls.exposureEV = 0.3
     let record = EditRecord(software: "SpektraMac 1.2", summary: "Kodak Portra 400 printed on Kodak Portra Endura · +0.3 EV",
-                            keywords: ["Kodak Portra 400", "SpektraMac"], controls: controls)
+                            keywords: ["Kodak Portra 400", "SpektraMac"], controls: Controls(), exposureEV: 0.3)
     let gpu = try GPU()
     try gpu.image(of: gpu.upload(rgb: pixels, width: width, height: height), bits: type == .jpeg ? 8 : 16,
                   colorSpace: Engine.exportColorSpace)
@@ -584,13 +585,11 @@ extension PhotoOpeningTests {
     controls.cameraDiffusion.spatialScale = 1e20
     controls.enlargerDiffusion.spatialScale = 1e20
     controls.grainSize = 0
-    controls.exposureEV = -1000
     let clamped = controls.clampedToRanges()
     #expect(clamped.printContrast == Controls.range(\.printContrast).lowerBound)
     #expect(clamped.cameraDiffusion.spatialScale == Controls.range(\.cameraDiffusion.spatialScale).upperBound)
     #expect(clamped.enlargerDiffusion.spatialScale == Controls.range(\.enlargerDiffusion.spatialScale).upperBound)
     #expect(clamped.grainSize == Controls.range(\.grainSize).lowerBound)
-    #expect(clamped.exposureEV == Controls.range(\.exposureEV).lowerBound)
 }
 
 extension PhotoOpeningTests {
@@ -659,12 +658,12 @@ extension PhotoOpeningTests {
     /// intermediates. Its `.cube` is the comments, the title, the size and the entries, red fastest.
     @Test func lutEntriesAreUniformRenders() async throws {
         let size = 5
+        let exposureEV = 0.7
         var controls = Controls()
-        controls.exposureEV = 0.7
         controls.grain = false
         controls.glare = false
         let engine = try Engine()
-        let lut = try await engine.lut(controls: controls, size: size)
+        let lut = try await engine.lut(controls: controls, exposureEV: exposureEV, size: size)
         #expect(lut.values.count == size * size * size * 3)
 
         let colours: [SIMD3<Int>] = [[0, 0, 0], [4, 4, 4], [2, 2, 2], [4, 0, 0], [0, 4, 0], [0, 0, 4], [1, 3, 2], [3, 1, 4]]
@@ -693,7 +692,7 @@ extension PhotoOpeningTests {
         let input = gpu.upload(rgb: rgb(fromRGBA: working, width: width, height: patch), width: width, height: patch)
         let rendered = gpu.download(try gpu.run { encoder in
             let logExposure = simulation.encodeExpose(
-                simulation.encodePreprocess(input, autoExposureEV: controls.exposureEV, on: encoder), on: encoder)
+                simulation.encodePreprocess(input, autoExposureEV: exposureEV, on: encoder), on: encoder)
             return simulation.encodePrintAndScan(simulation.encodeDevelop(logExposure, on: encoder),
                                                  burnMask: simulation.encodeBurnMask(logExposure, on: encoder), on: encoder)
         })
@@ -730,9 +729,9 @@ extension PhotoOpeningTests {
                             size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: Engine.exportColorSpace)
         let engine = try Engine()
         // `e` stops over the grey metered to mid-grey.
-        controls.exposureEV = try await engine.open(photo).metering.ev[MeteringMark.centreWeighted.rawValue]! + Double(e)
-        let rendered = try await engine.render(controls: controls, mode: .export)
-        let graph = try await engine.toneGraph(controls: controls)
+        let exposureEV = try await engine.open(photo).metering.ev[MeteringMark.centreWeighted.rawValue]! + Double(e)
+        let rendered = try await engine.render(controls: controls, exposureEV: exposureEV, mode: .export)
+        let graph = try await engine.toneGraph(controls: controls, exposureEV: exposureEV)
         #expect(graph.curve.count == 256 && graph.histogram.count == 256)
 
         // `e` between two greys of the ramp.
@@ -758,9 +757,9 @@ extension PhotoOpeningTests {
         }
 
         controls.printExposure = 2
-        let brighter = try await engine.toneGraph(controls: controls)
+        let brighter = try await engine.toneGraph(controls: controls, exposureEV: exposureEV)
         controls.printContrast = 1.5
-        let steeper = try await engine.toneGraph(controls: controls)
+        let steeper = try await engine.toneGraph(controls: controls, exposureEV: exposureEV)
         for index in graph.curve.indices {
             let shift = brighter.curve[index].paper - graph.curve[index].paper
             #expect(abs(shift - log10(2)).max() < 1e-4)
@@ -813,10 +812,10 @@ extension PhotoOpeningTests {
                             size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: Engine.exportColorSpace)
         let engine = try Engine()
         // `e` stops over the grey metered to mid-grey.
-        controls.exposureEV = try await engine.open(photo).metering.ev[MeteringMark.centreWeighted.rawValue]! + Double(e)
-        let rendered = try await engine.render(controls: controls, mode: .export)
+        let exposureEV = try await engine.open(photo).metering.ev[MeteringMark.centreWeighted.rawValue]! + Double(e)
+        let rendered = try await engine.render(controls: controls, exposureEV: exposureEV, mode: .export)
         // The graph leaves the burn out (`applyPerPixelMode`), as a LUT does.
-        let graph = try await engine.toneGraph(controls: controls)
+        let graph = try await engine.toneGraph(controls: controls, exposureEV: exposureEV)
         let position = (e - ToneGraph.stops.lowerBound) / (ToneGraph.stops.upperBound - ToneGraph.stops.lowerBound)
             * Float(graph.curve.count - 1)
         let (below, fraction) = (Int(position), position - position.rounded(.down))
@@ -877,13 +876,12 @@ extension PhotoOpeningTests {
         let metered = try await engine.open(Self.ramp()).metering.ev[MeteringMark.centreWeighted.rawValue]!
         var negative = Controls().choosing(film: "kodak_doublex", from: engine.films)
         negative.scanFilm = true
-        for var controls in [Controls().choosing(film: "kodak_doublex", from: engine.films), negative,
-                             Controls().choosing(film: "kodak_trix", from: engine.films)] {
-            controls.exposureEV = metered
+        for controls in [Controls().choosing(film: "kodak_doublex", from: engine.films), negative,
+                         Controls().choosing(film: "kodak_trix", from: engine.films)] {
             var smooth = controls
             smooth.grain = false
-            let pixels = try await engine.render(controls: controls, mode: .export).pixels
-            let withoutGrain = try await engine.render(controls: smooth, mode: .export).pixels
+            let pixels = try await engine.render(controls: controls, exposureEV: metered, mode: .export).pixels
+            let withoutGrain = try await engine.render(controls: smooth, exposureEV: metered, mode: .export).pixels
             let grain = zip(pixels, withoutGrain).map { abs($0 - $1) }.max()!
             let apart = stride(from: 0, to: pixels.count, by: 3).map { pixel in
                 pixels[pixel..<pixel + 3].max()! - pixels[pixel..<pixel + 3].min()!
@@ -934,8 +932,9 @@ extension PhotoOpeningTests {
         #expect(developed == asItIs)
     }
 
-    /// Each control in ``Controls/ranges`` at each end, then every one at its lower end at once and
-    /// at its upper end, with both diffusion filters and the burn on: finite, and not black.
+    /// Each control in ``Controls/ranges`` at each end and the exposure 12 stops under and over, then
+    /// every one at its lower end at once and at its upper end, with both diffusion filters and the
+    /// burn on: finite, and not black.
     @Test func controlsAtTheirEndsRender() async throws {
         let engine = try Engine()
         _ = try await engine.open(Self.ramp())
@@ -943,25 +942,29 @@ extension PhotoOpeningTests {
         base.cameraDiffusion.active = true
         base.enlargerDiffusion.active = true
         base.burn = true
-        var settings: [(name: String, controls: Controls, black: Bool)] = []
+        // As far as the exposure went while it was a control with a range: well past the strip's.
+        let exposures = -12.0...12.0
+        var settings: [(name: String, controls: Controls, exposureEV: Double, black: Bool)] = []
         for (control, range) in Controls.ranges {
             for end in [range.lowerBound, range.upperBound] {
                 var controls = base
                 controls[keyPath: control] = end
-                // 12 stops under, the ramp's brightest pixel gives the film 4 × 2⁻¹² of white's
-                // exposure: the print of a negative that thin is rightly black.
-                settings.append(("\(control) at \(end)", controls, control == \Controls.exposureEV && end < 0))
+                settings.append(("\(control) at \(end)", controls, 0, false))
             }
         }
+        // 12 stops under, the ramp's brightest pixel gives the film 4 × 2⁻¹² of white's exposure: the
+        // print of a negative that thin is rightly black.
+        settings.append(("the exposure at \(exposures.lowerBound)", base, exposures.lowerBound, true))
+        settings.append(("the exposure at \(exposures.upperBound)", base, exposures.upperBound, false))
         for (name, end) in [("lower", \ClosedRange<Double>.lowerBound), ("upper", \ClosedRange<Double>.upperBound)] {
             var controls = base
             for (control, range) in Controls.ranges {
                 controls[keyPath: control] = range[keyPath: end]
             }
-            settings.append(("every control at its \(name) end", controls, false))
+            settings.append(("every control at its \(name) end", controls, exposures[keyPath: end], false))
         }
-        for (name, controls, black) in settings {
-            let pixels = try await engine.render(controls: controls, mode: .full).pixels
+        for (name, controls, exposureEV, black) in settings {
+            let pixels = try await engine.render(controls: controls, exposureEV: exposureEV, mode: .full).pixels
             #expect(pixels.allSatisfy { $0.isFinite }, "\(name)")
             #expect(black || pixels.contains { $0 > 0.01 }, "\(name) renders black")
         }

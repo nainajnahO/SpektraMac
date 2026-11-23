@@ -155,7 +155,7 @@ ratio as fields.
 ### Exposure
 
 How much light reaches the film, in stops (EV) over the exposure as shot. Every photo opens at 0, as shot, and
-choosing a film or opening a preset leaves the exposure as it is. The strip shows the photo from 4 stops under to 8
+choosing a film, opening a preset or Restore Factory Defaults leaves the exposure as it is. The strip shows the photo from 4 stops under to 8
 stops over.
 
 The dots under the strip are **metering marks**: the exposure each way of metering gives this photo. Point at a dot
@@ -387,7 +387,7 @@ The **Preset** menu keeps settings for later.
 - **Make Default for** *film* keeps the current settings for that film. Choosing the film again applies them, and
   the groups' ↩ buttons return to them. SpektraMac also starts with them if the film is the one it starts with
   (Kodak Portra 400).
-- **Restore Factory Defaults** forgets them and sets everything back to SpektraMac's defaults.
+- **Restore Factory Defaults** forgets them and sets everything but the exposure back to SpektraMac's defaults.
 
 ## Exporting a LUT
 

@@ -90,11 +90,9 @@ extension PhotoOpeningTests {
         #expect(opened.meteringOverlays[.asShot] == nil)
         #expect(opened.meteringOverlays.values.allSatisfy { $0.width == image.width && $0.height == image.height })
 
-        var controls = Controls()
-        controls.exposureEV = opened.metering.ev[MeteringMark.centreWeighted.rawValue]!
-        let centreWeighted = try await engine.render(controls: controls, mode: .preview)
-        controls.exposureEV = face
-        let faces = try await engine.render(controls: controls, mode: .preview)
+        let centreWeighted = try await engine.render(
+            controls: Controls(), exposureEV: opened.metering.ev[MeteringMark.centreWeighted.rawValue]!, mode: .preview)
+        let faces = try await engine.render(controls: Controls(), exposureEV: face, mode: .preview)
         #expect(centreWeighted.pixels != faces.pixels)
     }
 }

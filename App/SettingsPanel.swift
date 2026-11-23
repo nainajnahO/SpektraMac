@@ -29,7 +29,7 @@ struct SettingsPanel: View {
                     AdjustmentGroup("Exposure", systemImage: "plusminus.circle", adjustment: .exposure) {
                         ExposureStrip()
                     } options: {
-                        ValueSlider("Exposure", value: $model.controls.exposureEV, in: model.exposureRange, step: 0.1, neutral: 0,
+                        ValueSlider("Exposure", value: $model.exposureEV, in: model.exposureRange, step: 0.1, neutral: 0,
                                     format: ExposureStrip.stops, unit: "EV")
                             .disabled(model.photo == nil)
                         ValueSlider("Highlight boost", value: $model.controls.highlightBoost, in: Controls.range(\.highlightBoost), step: 0.5,
@@ -631,7 +631,7 @@ struct ExposureStrip: View {
         let readings = model.photo.map { photo in
             MeteringMark.allCases.compactMap { mark in photo.metering.ev[mark.rawValue].map { (mark: mark, ev: $0) } }
         } ?? []
-        let exposure = model.controls.exposureEV
+        let exposure = model.exposureEV
         let range = model.exposureRange
         // Two dots' width, in stops: readings nearer than that would draw dots less than a dot apart,
         // which read as one, and a click between them could be for either. Before the strip is
@@ -642,7 +642,7 @@ struct ExposureStrip: View {
             // On it within half of a drag's step: a drag stops nearest it there.
             ThumbnailStrip.Mark(items: dot.marks.map { (systemImage: $0.systemImage, name: $0.name, about: $0.about) },
                                 value: dot.value, isOn: abs(exposure - dot.value) < 0.05) {
-                model.controls.exposureEV = dot.value
+                model.exposureEV = dot.value
             }
         }
         // The dot under the pointer.
@@ -651,7 +651,7 @@ struct ExposureStrip: View {
         } set: { value in
             model.hoveredMarks = dots.first { $0.value == value }?.marks ?? []
         }
-        ThumbnailStrip("Exposure", value: $model.controls.exposureEV, in: range, step: 0.1, format: Self.stops,
+        ThumbnailStrip("Exposure", value: $model.exposureEV, in: range, step: 0.1, format: Self.stops,
                        unit: "EV", frames: model.strips[.exposure], marks: marks, hoveredMark: hoveredDot, hold: .exposure)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         // A click as a drag passes a dot, one for a dot marks share: a fast drag jumps over the

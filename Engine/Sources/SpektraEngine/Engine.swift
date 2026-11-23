@@ -6,8 +6,9 @@ import Metal
 import MetalPerformanceShaders
 import UniformTypeIdentifiers
 
-/// What the app's controls set. Everything else stays at Spektrafilm's defaults for the film and
-/// paper. A preset is these values as JSON.
+/// The look: what the app's controls set, but for the exposure, which is the photo's (``Edit``).
+/// Everything else stays at Spektrafilm's defaults for the film and paper. A preset is these values
+/// as JSON.
 public struct Controls: Codable, Sendable, Hashable {
     /// Stock names (`profiles/<stock>.json`).
     public var film = "kodak_portra_400"
@@ -19,9 +20,6 @@ public struct Controls: Codable, Sendable, Hashable {
     /// Longer gives more contrast. A colour stock is developed one way, whatever these say.
     public var filmDevelopmentTime: Double?
     public var paperDevelopmentTime: Double?
-    /// The exposure, in stops over the photo as shot. It's the photo's: the app opens each photo
-    /// at 0, and a preset carries none (``preset()``).
-    public var exposureEV = 0.0
     /// Stops the brightest highlights are raised by before they reach the film, rebuilding light
     /// the camera clipped (0 is off).
     public var highlightBoost = 0.0
@@ -75,20 +73,18 @@ public struct Controls: Codable, Sendable, Hashable {
 
     public init() {}
 
-    /// Reads a preset.
+    /// Reads a preset. One written while the exposure was a control has an `exposureEV` key, which
+    /// is ignored.
     public init(preset: Data) throws {
         self = try JSONDecoder().decode(Controls.self, from: preset)
     }
 
-    /// The controls as a preset: JSON, readable and with sorted keys so presets diff cleanly. At no
-    /// exposure, as the exposure is the photo's: a film's saved defaults and the settings the app
-    /// quits with are presets too, and resetting the exposure to them puts it back as shot.
+    /// The controls as a preset: JSON, readable and with sorted keys so presets diff cleanly. A
+    /// film's saved defaults and the settings the app quits with are presets too.
     public func preset() throws -> Data {
-        var preset = self
-        preset.exposureEV = 0
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(preset)
+        return try encoder.encode(self)
     }
 
     /// Each number's range: what its slider spans, and what a preset is brought within
@@ -103,8 +99,6 @@ public struct Controls: Codable, Sendable, Hashable {
         // makes too wide to size its convolution by, stopping the engine.
         let diffusionStrength = 0.125...2.0, diffusionSize = 0.0...3.0, diffusionWarmth = -1.5...1.5
         return [
-            // The Exposure strip's −4…+8 stops, widened past a reading outside them.
-            \.exposureEV: -12...12,
             \.highlightBoost: 0...10,
             \.printExposure: 0...2,
             \.yFilterShift: filterShift,
@@ -185,12 +179,13 @@ extension Controls {
         }
     }
 
-    /// These controls with `adjustment`'s from `defaults`: the film's saved defaults, or the app's own.
+    /// These controls with `adjustment`'s from `defaults`: the film's saved defaults, or the app's
+    /// own. The Exposure group's reset also puts back the photo's exposure, which is the edit's
+    /// (``Edit/resetting(_:to:)``).
     public func resetting(_ adjustment: Adjustment, to defaults: Controls) -> Controls {
         var reset = self
         switch adjustment {
         case .exposure:
-            reset.exposureEV = defaults.exposureEV
             reset.highlightBoost = defaults.highlightBoost
         case .cameraDiffusion:
             reset.cameraDiffusion = defaults.cameraDiffusion
@@ -232,18 +227,9 @@ extension Controls {
         return reset
     }
 
-    /// The settings group a change is in, as the panel names it: the change's Undo name. The stocks,
-    /// Print | Film and the development times, which no adjustment resets, come first. Then the
-    /// first adjustment with a control that changed: the first whose reset to `old` changes `new`,
-    /// so ``resetting(_:to:)`` is the one list of each group's controls.
+    /// The settings group a change to the look is in (``Edit/groupName(changedFrom:to:)``).
     public static func groupName(changedFrom old: Controls, to new: Controls) -> String {
-        if new.film != old.film { return "Film" }
-        if new.paper != old.paper { return "Paper" }
-        if new.scanFilm != old.scanFilm { return "Print or Film" }
-        if new.filmDevelopmentTime != old.filmDevelopmentTime || new.paperDevelopmentTime != old.paperDevelopmentTime {
-            return "Development"
-        }
-        return Adjustment.allCases.first { new.resetting($0, to: old) != new }?.name ?? "Settings"
+        Edit.groupName(changedFrom: Edit(controls: old), to: Edit(controls: new))
     }
 
     /// These controls with `film`, its target paper (if it has one) and slides viewed directly,
@@ -311,18 +297,62 @@ extension Controls {
         }
     }
 
-    /// These controls with `strip`'s control at `value`.
-    public func setting(_ strip: Strip, to value: Double) -> Controls {
-        var controls = self
+}
+
+/// A photo's edit: the look, and what's the photo's own. The look carries over from one photo to
+/// the next, and is what a preset, a film's saved defaults and the settings the app quits with
+/// hold. The exposure is the photo's: the app opens each photo at 0, and no look sets it. Undo
+/// goes back through edits.
+public struct Edit: Sendable, Hashable {
+    /// The look.
+    public var controls: Controls
+    /// The exposure, in stops over the photo as shot.
+    public var exposureEV: Double
+
+    public init(controls: Controls = Controls(), exposureEV: Double = 0) {
+        self.controls = controls
+        self.exposureEV = exposureEV
+    }
+
+    /// This edit with `adjustment`'s controls from `defaults`' (``Controls/resetting(_:to:)``), and
+    /// for the Exposure group its exposure too.
+    public func resetting(_ adjustment: Controls.Adjustment, to defaults: Edit) -> Edit {
+        var reset = self
+        reset.controls = controls.resetting(adjustment, to: defaults.controls)
+        if adjustment == .exposure {
+            reset.exposureEV = defaults.exposureEV
+        }
+        return reset
+    }
+
+    /// The settings group a change is in, as the panel names it: the change's Undo name. The stocks,
+    /// Print | Film and the development times, which no adjustment resets, come first. Then the
+    /// first adjustment with a control that changed: the first whose reset to `old` changes `new`,
+    /// so ``resetting(_:to:)`` is the one list of each group's controls.
+    public static func groupName(changedFrom old: Edit, to new: Edit) -> String {
+        let (before, after) = (old.controls, new.controls)
+        if after.film != before.film { return "Film" }
+        if after.paper != before.paper { return "Paper" }
+        if after.scanFilm != before.scanFilm { return "Print or Film" }
+        if after.filmDevelopmentTime != before.filmDevelopmentTime
+            || after.paperDevelopmentTime != before.paperDevelopmentTime {
+            return "Development"
+        }
+        return Controls.Adjustment.allCases.first { new.resetting($0, to: old) != new }?.name ?? "Settings"
+    }
+
+    /// This edit with `strip`'s control at `value`.
+    public func setting(_ strip: Controls.Strip, to value: Double) -> Edit {
+        var edit = self
         switch strip {
         case .exposure:
-            controls.exposureEV = value
+            edit.exposureEV = value
         case .couplerSaturation:
-            controls.couplerSaturation = value
+            edit.controls.couplerSaturation = value
         case .printExposure:
-            controls.printExposure = value
+            edit.controls.printExposure = value
         }
-        return controls
+        return edit
     }
 }
 
@@ -678,16 +708,18 @@ public actor Engine {
 
     /// The simulation of the open photo as `controls` set it: the scanned print, or the developed
     /// film itself. Throws `CancellationError` when the task is cancelled.
-    public func render(controls: Controls, mode: RenderMode) throws -> RGBImage {
-        let output = try renderTexture(controls: controls, mode: mode).output
+    /// At `exposureEV` stops over the photo as shot.
+    public func render(controls: Controls, exposureEV: Double = 0, mode: RenderMode) throws -> RGBImage {
+        let output = try renderTexture(controls: controls, exposureEV: exposureEV, mode: mode).output
         return RGBImage(width: output.width, height: output.height, pixels: gpu.download(output))
     }
 
     /// The photo rendered for a file of `type` (``RenderMode/export``) as the file stores it: 16
     /// bits per channel for TIFF and PNG, 8 for JPEG, in ``exportColorSpace``
     /// (``GPU/image(of:bits:colorSpace:)``). Throws `CancellationError` when the task is cancelled.
-    public func export(controls: Controls, as type: UTType) throws -> CGImage {
-        try gpu.image(of: renderTexture(controls: controls, mode: .export).output, bits: type.conforms(to: .jpeg) ? 8 : 16,
+    /// At `exposureEV` stops over the photo as shot.
+    public func export(controls: Controls, exposureEV: Double = 0, as type: UTType) throws -> CGImage {
+        try gpu.image(of: renderTexture(controls: controls, exposureEV: exposureEV, mode: .export).output, bits: type.conforms(to: .jpeg) ? 8 : 16,
                       colorSpace: Self.exportColorSpace)
     }
 
@@ -695,8 +727,9 @@ public actor Engine {
     /// long side. By default that's the most Core Animation can texture (``maxSide``), so the canvas
     /// zooms into the render's own pixels. Core Image scales larger ones down on the GPU, so only
     /// that comes back from it.
-    public func display(controls: Controls, mode: RenderMode, maxPixels: Int = maxSide) throws -> CGImage {
-        let output = try renderTexture(controls: controls, mode: mode).output
+    public func display(controls: Controls, exposureEV: Double = 0, mode: RenderMode, maxPixels: Int = maxSide) throws
+        -> CGImage {
+        let output = try renderTexture(controls: controls, exposureEV: exposureEV, mode: mode).output
         // Core Image puts a texture's first row at the bottom.
         guard let image = CIImage(mtlTexture: output, options: [.colorSpace: Self.outputColorSpace]) else {
             throw DisplayError()
@@ -722,7 +755,7 @@ public actor Engine {
     /// The work is in functions of its own, so each one's copies of the photo and the parameters
     /// leave the stack before the next: a debug build keeps every temporary of a function on its
     /// stack at once, and the engine's queue has 512 KB.
-    private func renderTexture(controls: Controls, mode: RenderMode) throws
+    private func renderTexture(controls: Controls, exposureEV: Double, mode: RenderMode) throws
         -> (output: any MTLTexture, burnMask: (any MTLTexture)?) {
         guard photo != nil else { preconditionFailure("Rendering before a photo is open") }
         let parameters = parameters(for: controls, mode: mode)
@@ -738,7 +771,8 @@ public actor Engine {
         let image = try image(for: mode)
         setAsideMemory(for: image)
         // In place, so the steps these controls don't match are released before the render.
-        return try render(&photo![keyPath: image], controls: controls, parameters: parameters, simulation: simulation)
+        return try render(&photo![keyPath: image], controls: controls, exposureEV: exposureEV, parameters: parameters,
+                          simulation: simulation)
     }
 
     /// The image of the photo `mode` renders, made first if it's a thumbnail or a reduced image not
@@ -786,9 +820,8 @@ public actor Engine {
 
     /// Renders `image` from the first step `controls` change since its last render, and keeps its
     /// film exposure and developed film for the next.
-    private func render(_ image: inout PhotoImage, controls: Controls, parameters: Parameters,
+    private func render(_ image: inout PhotoImage, controls: Controls, exposureEV: Double, parameters: Parameters,
                         simulation: Simulation) throws -> (output: any MTLTexture, burnMask: (any MTLTexture)?) {
-        let exposureEV = controls.exposureEV
         let keys = Step.keys(for: controls, parameters: parameters, exposureEV: exposureEV)
         // What's still valid of the last render; the rest is released before this one.
         if image.exposure?.key != keys.exposure {
@@ -814,8 +847,11 @@ public actor Engine {
     /// Where `controls`' burn falls on the photo's preview, for the canvas to show while a Burn
     /// slider is held: white, with how much of the burn each pixel gets as alpha. Nil with the
     /// burn off.
-    public func burnMask(controls: Controls) throws -> CGImage? {
-        guard let mask = try renderTexture(controls: controls, mode: .preview).burnMask else { return nil }
+    /// At `exposureEV` stops over the photo as shot.
+    public func burnMask(controls: Controls, exposureEV: Double = 0) throws -> CGImage? {
+        guard let mask = try renderTexture(controls: controls, exposureEV: exposureEV, mode: .preview).burnMask else {
+            return nil
+        }
         // Core Image puts a texture's first row at the bottom. The mask (in red) becomes the alpha.
         let overlay = CIImage(mtlTexture: mask, options: [.colorSpace: NSNull()])!
             .oriented(.downMirrored)
@@ -833,11 +869,11 @@ public actor Engine {
 
     /// A `size`³ 3D LUT of `controls`' look, for an app that applies one to display-encoded sRGB
     /// (LightCraft does, after its own edits): each sRGB colour of the lattice opened as a photo is
-    /// (Core Image decodes it into the working space), exposed as the controls set it, and
+    /// (Core Image decodes it into the working space), exposed `exposureEV` stops over, and
     /// rendered as an export. What depends on other pixels is left out
     /// (``Parameters/applyPerPixelMode()``). Doesn't touch the open photo. At most 128: the lattice
     /// renders as an image size² wide, and a texture is at most 16384.
-    public func lut(controls: Controls, size: Int) throws -> LUT {
+    public func lut(controls: Controls, exposureEV: Double = 0, size: Int) throws -> LUT {
         precondition((2...128).contains(size))
         var parameters = parameters(for: controls, mode: .export)
         parameters.applyPerPixelMode()
@@ -861,7 +897,7 @@ public actor Engine {
         let input = gpu.makeReadableTexture(width: size * size, height: size)
         try render(lattice, from: lattice.extent, into: input)
         let output = try gpu.run { encoder in
-            let exposed = simulation.encodePreprocess(input, autoExposureEV: controls.exposureEV, on: encoder)
+            let exposed = simulation.encodePreprocess(input, autoExposureEV: exposureEV, on: encoder)
             return simulation.encodePrintAndScan(simulation.encodeDevelop(simulation.encodeExpose(exposed, on: encoder),
                                                                           on: encoder), on: encoder)
         }
@@ -872,21 +908,22 @@ public actor Engine {
     /// The open photo's ``ToneGraph`` as `controls` set it. The curve is the print's whatever the
     /// toolbar shows, with what a LUT holds (``Parameters/applyPerPixelMode()``): a ramp of greys
     /// rendered as ``lut(controls:size:)`` renders its lattice. The histogram is of the
-    /// preview's film exposure, kept from its last render if that had these controls' exposure.
-    public func toneGraph(controls: Controls) throws -> ToneGraph {
+    /// preview's film exposure at `exposureEV`, kept from its last render if that was at it.
+    public func toneGraph(controls: Controls, exposureEV: Double = 0) throws -> ToneGraph {
         guard photo != nil else { preconditionFailure("A tone graph before a photo is open") }
-        if !previewHasExposure(of: controls) {
-            _ = try renderTexture(controls: controls, mode: .preview)
+        if !previewHasExposure(of: controls, exposureEV: exposureEV) {
+            _ = try renderTexture(controls: controls, exposureEV: exposureEV, mode: .preview)
         }
         return ToneGraph(curve: try toneCurve(controls: controls),
                          histogram: try histogram(of: photo!.preview.exposure!.texture))
     }
 
-    /// Whether the preview's last render made its film exposure as `controls` set it, as it keys it.
-    private func previewHasExposure(of controls: Controls) -> Bool {
+    /// Whether the preview's last render made its film exposure as `controls` set it at
+    /// `exposureEV`, as it keys it.
+    private func previewHasExposure(of controls: Controls, exposureEV: Double) -> Bool {
         let preview = photo!.preview
         let keys = Step.keys(for: controls, parameters: parameters(for: controls, mode: .preview),
-                             exposureEV: controls.exposureEV)
+                             exposureEV: exposureEV)
         return preview.exposure?.key == keys.exposure
     }
 
