@@ -1292,10 +1292,6 @@ final class PhotoModel {
     private(set) var lutFile: LUTFile?
     /// What the Export LUT panel suggests, and the LUT's title if the file keeps it.
     var lutName: String { controls.scanFilm ? filmName : "\(filmName) – \(paperName)" }
-    /// What the Export LUT panel says above its name field.
-    var lutMessage: String {
-        "The LUT carries this exposure (\(exposureText) EV) and every setting a LUT can hold. Grain, halation, glare, the burn, highlight boost and the sharper edges of the couplers' Edge contrast depend on neighbouring pixels or the whole photo, so they're left out."
-    }
 
     /// Renders the controls' look as a `.cube` LUT for LightCraft, which applies one to its
     /// display-encoded sRGB, exposed as the exposure slider shows (``Engine/lut(controls:size:)``),
@@ -1350,7 +1346,7 @@ final class PhotoModel {
 
     func savePreset() {
         do {
-            presetFile = PresetFile(json: try controls.preset())
+            presetFile = PresetFile(json: try controls.preset(), filename: "\(filmName).json")
             isSavingPreset = true
         } catch {
             fail("Couldn't save the preset", error, alert: true)
@@ -1564,6 +1560,11 @@ nonisolated struct LUTFile: Transferable {
     let comments: [String]
     /// The exposure it carries, as the slider shows it, for the Log.
     let stops: String
+    /// What the Export LUT panel says above its name field. Here, with the exposure the LUT was
+    /// made at, so the window's body, which shows the panel, reads no control for it (#386).
+    var message: String {
+        "The LUT carries this exposure (\(stops) EV) and every setting a LUT can hold. Grain, halation, glare, the burn, highlight boost and the sharper edges of the couplers' Edge contrast depend on neighbouring pixels or the whole photo, so they're left out."
+    }
 
     static var transferRepresentation: some TransferRepresentation {
         DataRepresentation(exportedContentType: PhotoModel.cubeType) { $0.lut.cube(title: $0.title, comments: $0.comments) }
@@ -1573,6 +1574,9 @@ nonisolated struct LUTFile: Transferable {
 /// The controls as Save Preset writes them (``Controls/preset()``).
 nonisolated struct PresetFile: Transferable {
     let json: Data
+    /// What the Save Preset panel suggests as the file's name: the film's as the preset was made,
+    /// kept here for the window's body, as ``LUTFile/message`` is (#386).
+    let filename: String
 
     static var transferRepresentation: some TransferRepresentation {
         DataRepresentation(exportedContentType: .json) { $0.json }

@@ -19,6 +19,11 @@ struct ContentView: View {
         var isField: Bool { self != .canvas }
     }
 
+    // Nothing in `body` reads the controls, directly or through a property of the model that does
+    // (``PhotoModel/filmName``, say): they change at every step of a slider, and read here, each
+    // step evaluated the toolbar, the inspector and the whole window's layout again, so the photo
+    // followed a drag at 8 pictures a second where it can at 30 (#386, and #148 before it). What
+    // shows a control reads it in a view of its own (``ShowPicker``, ``SettingsPanel``).
     var body: some View {
         @Bindable var model = model
         ImageCanvas(focus: $focus)
@@ -87,9 +92,9 @@ struct ContentView: View {
         .fileExporter(isPresented: $model.isExportingLUT, item: model.lutFile, contentTypes: [PhotoModel.cubeType],
                       defaultFilename: model.lutFile?.title) { model.lutExported($0) }
         // The LUT panel's note, for it alone: the panels below are outside it.
-        .fileDialogMessage(model.lutMessage)
+        .fileDialogMessage(model.lutFile?.message ?? "")
         .fileExporter(isPresented: $model.isSavingPreset, item: model.presetFile, contentTypes: [.json],
-                      defaultFilename: "\(model.filmName).json") { model.presetSaved($0) }
+                      defaultFilename: model.presetFile?.filename) { model.presetSaved($0) }
         .fileImporter(isPresented: $model.isImporting, allowedContentTypes: [.image]) { result in
             switch result {
             case .success(let url): model.open(url)

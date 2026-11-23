@@ -266,6 +266,23 @@ final class PhotoModelTests {
         #expect(model.log.last?.message == "Exported LUT Renamed.cube at \(lut.stops) EV")
     }
 
+    /// The export panels say what their file was made with, not what the controls are by then: the
+    /// Export LUT panel the exposure the LUT carries, the Save Preset panel the film's name. So the
+    /// window's body, which shows them, reads no control (#386).
+    @Test func exportPanelsSayWhatTheirFileWasMadeWith() async throws {
+        let model = try await makeModel()
+        model.exportLUT()
+        try await until { model.isExportingLUT }
+        let lut = try #require(model.lutFile)
+        #expect(lut.message.hasPrefix("The LUT carries this exposure (\(lut.stops) EV) "))
+
+        let film = model.filmName
+        model.savePreset()
+        model.film = "kodak_gold_200"
+        #expect(model.filmName != film)
+        #expect(model.presetFile?.filename == "\(film).json")
+    }
+
     // MARK: Opening
 
     /// A photo opened while another is still opening is the one that shows (#192), and neither goes
