@@ -157,8 +157,7 @@ private struct ToneCurveLayer: View {
     @Environment(\.isEnabled) private var isEnabled
     let proxy: ChartProxy
     let channel: ToneGraph.Channel
-    /// While the pointer is pressed in the graph, and what it's moving, if anything.
-    @State private var isPressed = false
+    /// What the pointer, pressed in the graph, is moving, if anything.
     @State private var drag: ToneDrag?
     @State private var hovered: ToneHandle?
 
@@ -226,28 +225,22 @@ private struct ToneCurveLayer: View {
                     }
                 }
                 .contentShape(.rect)
-                .gesture(DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        if !isPressed {
-                            isPressed = true
-                            drag = beginDrag(at: value.startLocation, handles: handles, curve: shown, burnLine: burnLine,
-                                             plot: plot)
-                            if let drag {
-                                model.isAdjusting = true
-                                // As with a Burn slider held, the canvas shows what burns.
-                                if drag.handle == .burn {
-                                    model.isAdjustingBurn = true
-                                }
-                            }
-                        }
-                        guard var drag, let moved = movement(from: value.startLocation, to: value.location, plot: plot) else {
-                            return
-                        }
-                        drag.moved = moved
-                        self.drag = drag
-                        move(drag)
+                .heldDrag(DragGesture(minimumDistance: 0)) { value in
+                    let begun = beginDrag(at: value.startLocation, handles: handles, curve: shown, burnLine: burnLine,
+                                          plot: plot)
+                    drag = begun
+                    // As with a Burn slider held, the canvas shows what burns.
+                    return begun.map { $0.handle == .burn ? .burn : .plain }
+                } moved: { value in
+                    guard var drag, let moved = movement(from: value.startLocation, to: value.location, plot: plot) else {
+                        return
                     }
-                    .onEnded { _ in endDrag() })
+                    drag.moved = moved
+                    self.drag = drag
+                    move(drag)
+                } ended: { _ in
+                    drag = nil
+                }
                 .onContinuousHover { phase in
                     switch phase {
                     case .active(let location) where isEnabled:
@@ -272,23 +265,6 @@ private struct ToneCurveLayer: View {
                 move(drag)
             }
         }
-        // A drag cut off as the graph goes (its window closed, say) never ends otherwise.
-        .onDisappear {
-            if isPressed {
-                endDrag()
-            }
-        }
-    }
-
-    private func endDrag() {
-        if let drag {
-            model.isAdjusting = false
-            if drag.handle == .burn {
-                model.isAdjustingBurn = false
-            }
-        }
-        isPressed = false
-        drag = nil
     }
 
     /// `position` (tone, brightness) in the view, if the chart has scales.
